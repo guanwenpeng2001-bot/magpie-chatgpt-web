@@ -171,8 +171,8 @@ try {
   const renewed = JSON.parse(await readFile(authPath, 'utf8'))[callback.account];
   assert.ok(renewed.expires > Date.now() + 86400000);
   assert.equal(renewed.profile, auth.profile);
-  assert.equal(renewed.refresh, auth.refresh);
-  console.log('browserless renewal merged changed fields through stock host');
+  assert.ok(renewed.refresh !== auth.refresh, 'HttpOnly session rotation must reach the stock host credential');
+  console.log('challenged Node renewal used browser fallback and persisted HttpOnly rotation through stock host');
   auths[callback.account] = { ...renewed, refresh: crypto.randomUUID(), expires: Date.now() - 1 };
   await writeFile(authPath, JSON.stringify(auths));
   await rpc('reload', { provider: 'chatgpt-web' });

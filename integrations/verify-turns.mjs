@@ -55,6 +55,14 @@ export async function verifyTurns(dependency) {
       else (await accountGuard.begin())();
       console.log(`fixture ${mode}: typed ${expected}, slot released`);
     }
+    for (const [mode, expected] of [['post-challenge', 'verification'], ['post-expired', 'expired'], ['post-forbidden', 'expired']]) {
+      fixture.setMode(mode);
+      const accountGuard = new AccountGuard({ sleep: async () => {} });
+      await assert.rejects(collect(command(mode), accountGuard), error => error.code === expected);
+      if (expected === 'expired') await assert.rejects(accountGuard.begin(), error => error.code === 'expired');
+      else (await accountGuard.begin())();
+      console.log(`fixture ${mode}: typed ${expected}, guard classification preserved`);
+    }
     for (const mode of ['clone-failure', 'disabled']) {
       fixture.setMode(mode);
       driver.network = mode !== 'disabled';

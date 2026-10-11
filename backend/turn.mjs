@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BackendError } from './guard.mjs';
+import { responseFailure } from './http.mjs';
 import { BrowserSupervisor, launchSignInBrowser } from './browser.mjs';
 import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
@@ -78,8 +79,7 @@ export class TurnDriver {
             if (turn.failure) throw turn.failure;
             for (const item of turn.queue.splice(0)) {
               if (item.kind === 'status' && item.status !== 200) {
-                const retryAfter = guard.observe(item.status, item.retryAfter);
-                throw new BackendError(item.status === 429 ? 'cooldown' : [401, 403].includes(item.status) ? 'expired' : 'upstream', { retryAfter });
+                throw responseFailure(item.status, item, guard, item.retryAfter);
               }
               if (item.kind === 'failure') throw new BackendError(item.code);
               if (item.kind === 'fallback') {

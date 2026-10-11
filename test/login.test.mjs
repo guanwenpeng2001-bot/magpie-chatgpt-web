@@ -41,6 +41,30 @@ test('cancellation during browser attachment closes it before navigating', async
   assert.equal(closed, true);
 });
 
+test('login mints in the signed-in page and reads HttpOnly rotation after the session response', async () => {
+  const accessToken = randomUUID();
+  const before = randomUUID();
+  const after = randomUUID();
+  let rotated = false;
+  let nodeReads = 0;
+  const context = new EventEmitter();
+  const page = {
+    url: () => 'https://chatgpt.com/', goto: async () => {}, isClosed: () => false,
+    getByRole: () => ({ count: async () => 1, first: () => ({ isVisible: async () => true }) }),
+    evaluate: async () => { rotated = true; return { status: 200, headers: {}, body: JSON.stringify({ accessToken, expires: new Date(Date.now() + 86400000).toISOString() }) }; },
+  };
+  context.pages = () => [page];
+  context.cookies = async () => [{ name: '__Secure-next-auth.session-token', value: rotated ? after : before, httpOnly: true }];
+  const flow = browserModule.createLoginFlow({
+    launch: async () => ({ context, close: async () => {} }),
+    readClient: () => { nodeReads++; throw new Error('login must use the signed-in page'); },
+  });
+  const result = await flow('fixture', new AbortController().signal, '.');
+  assert.equal(result.state, 'signed-in');
+  assert.ok(result.credential.refresh === '__Secure-next-auth.session-token=' + after, 'rotated HttpOnly cookie is persisted');
+  assert.equal(nodeReads, 0);
+});
+
 test('session conversion yields the exact synthetic credential record', () => {
   assert.equal(typeof browserModule.sessionCredential, 'function');
   const refresh = `fixture=${randomUUID()}`;

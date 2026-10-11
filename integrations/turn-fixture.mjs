@@ -12,6 +12,11 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       let body = '';
       for await (const chunk of request) body += chunk;
       requests.push(JSON.parse(body));
+      if (['post-challenge', 'post-expired', 'post-forbidden'].includes(mode)) {
+        response.writeHead(mode === 'post-expired' ? 401 : 403, { 'content-type': mode === 'post-challenge' ? 'text/html' : 'application/json' });
+        response.end(mode === 'post-challenge' ? '<title>Just a moment</title>Enable JavaScript and cookies to continue /cdn-cgi/challenge-platform/' : '{}');
+        return;
+      }
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       const frame = (event, data) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       await delay(stall);

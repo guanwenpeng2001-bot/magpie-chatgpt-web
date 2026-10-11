@@ -66,7 +66,24 @@ export function installHarvest() {
     try { response = await originalFetch.apply(this, args); }
     catch (error) { if (relevant && active === run) send({ kind: 'failure', code: 'upstream' }); throw error; }
     if (relevant && active === run) {
-      send({ kind: 'status', status: response.status, retryAfter: response.headers.get('retry-after') });
+      const evidence = { mitigated: response.headers.get('cf-mitigated') === 'challenge', interstitial: false };
+      if (response.status === 403 && !evidence.mitigated && /text\/html/i.test(response.headers.get('content-type') ?? '')) {
+        let reader;
+        try {
+          reader = response.clone().body.getReader();
+          const decoder = new TextDecoder();
+          let body = '';
+          let bytes = 0;
+          while (bytes < 65536) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            body += decoder.decode(value.subarray(0, 65536 - bytes), { stream: true });
+            bytes += value.byteLength;
+          }
+          evidence.interstitial = body.includes('/cdn-cgi/challenge-platform') && /Enable JavaScript and cookies to continue|Just a moment/i.test(body);
+        } catch {} finally { reader?.cancel().catch(() => {}); }
+      }
+      if (active === run) send({ kind: 'status', status: response.status, retryAfter: response.headers.get('retry-after'), ...evidence });
       if (response.ok) {
         if (run.network) void read(response, run);
         else send({ kind: 'fallback', reason: 'disabled' });
@@ -83,7 +100,7 @@ export function installHarvest() {
   XMLHttpRequest.prototype.send = function (...args) {
     if (active && this.__chatgptConversation) {
       send({ kind: 'fallback', reason: 'xhr' });
-      this.addEventListener('load', () => send({ kind: 'status', status: this.status }));
+      this.addEventListener('load', () => send({ kind: 'status', status: this.status, mitigated: false, interstitial: false }));
       this.addEventListener('error', () => send({ kind: 'failure', code: 'upstream' }));
     }
     return xhrSend.apply(this, args);

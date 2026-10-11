@@ -39,7 +39,7 @@ test('refresh returns only changed fields and advertises a 24 hour lead', async 
   const hooks = plugin._internal.createHooks({ bridge: { call: async value => { command = value; return changed; } }, profileRoot: '.' });
   const auth = { type: 'oauth', refresh: crypto.randomUUID(), access: crypto.randomUUID(), expires: Date.now() - 1, profile: 'fixture', accountId: 'fixture', persona: 'chatgpt-paid' };
   assert.deepEqual(await hooks.auth.refresh(auth), changed);
-  assert.deepEqual(command, { method: 'session', auth });
+  assert.ok(command.method === 'session' && command.auth === auth && command.profileRoot === '.', 'refresh forwards auth and the browser profile root');
   assert.equal(hooks.auth.refreshLead, 86400000);
 });
 
