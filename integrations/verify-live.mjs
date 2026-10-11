@@ -116,19 +116,43 @@ await serve(process.stdin,process.stdout,{loginFlow,turnDriver,readClient:option
     await writeFile(wrapper, `import { _internal } from ${imports('src/index.mjs')};
 import { Bridge } from ${imports('src/bridge.mjs')};
 import { appendFileSync } from 'node:fs';
+const errorLog = ${JSON.stringify(pluginErrorPath)};
+const record = entry => { try { appendFileSync(errorLog, JSON.stringify(entry)+'\\n'); } catch {} };
 const bridge = new Bridge({backend:${JSON.stringify(backend)}});
+const originalOpen = bridge.open.bind(bridge);
+bridge.open = async (command, signal) => {
+ const startedAt = Date.now();
+ try {
+  const upstream = await originalOpen(command, signal);
+  return (async function*(){
+   try { yield* upstream; }
+   catch (error) {
+    record({stage:'open-stream',method:command?.method,elapsedMilliseconds:Date.now()-startedAt,name:error?.name,message:String(error?.message??error),signalAborted:!!signal?.aborted,abortReason:String(signal?.reason??''),stack:String(error?.stack??'').slice(0,2000)});
+    throw error;
+   }
+  })();
+ } catch (error) {
+  record({stage:'open',method:command?.method,elapsedMilliseconds:Date.now()-startedAt,name:error?.name,message:String(error?.message??error),signalAborted:!!signal?.aborted,abortReason:String(signal?.reason??''),stack:String(error?.stack??'').slice(0,2000)});
+  throw error;
+ }
+};
 const hooks = _internal.createHooks({bridge,profileRoot:${JSON.stringify(root)},pollMilliseconds:1000});
 const originalLoader = hooks.auth.loader;
 hooks.auth.loader = getAuth => {
  const loaded = originalLoader(getAuth);
  if (loaded?.fetch) {
   const originalFetch = loaded.fetch.bind(loaded);
-  loaded.fetch = async (...args) => {
-   const response = await originalFetch(...args);
+  loaded.fetch = async (input, init = {}) => {
+   const startedAt = Date.now();
+   const signal = init.signal ?? (input instanceof Request ? input.signal : undefined);
+   const response = await originalFetch(input, init);
+   if (response.status !== 200 || signal?.aborted) {
+    record({stage:'fetch-response',status:response.status,elapsedMilliseconds:Date.now()-startedAt,signalAborted:!!signal?.aborted,abortReason:String(signal?.reason??'')});
+   }
    if (response.status !== 200) {
     try {
      const parsed = JSON.parse(await response.clone().text());
-     if (parsed?.error?.message) appendFileSync(${JSON.stringify(pluginErrorPath)}, JSON.stringify({status:response.status,error:parsed.error})+'\\n');
+     if (parsed?.error?.message) record({stage:'error-envelope',status:response.status,error:parsed.error});
     } catch {}
    }
    return response;
@@ -238,7 +262,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
         if (parsed && typeof parsed.error === 'object' && parsed.error !== null && typeof parsed.error.status === 'number' && typeof parsed.error.message === 'string') errorEnvelope = parsed.error;
         else upstreamBodyDigest = { bytes: Buffer.byteLength(raw), sha256: createHash('sha256').update(raw).digest('hex') };
       }
-      const typedCode = errorEnvelope ? BackendError.fromEnvelope(errorEnvelope) : null;
+      const typedCode = errorEnvelope ? BackendError.fromEnvelope(errorEnvelope).code : null;
       const temporaryState = success ? 'confirmed'
         : typedCode === 'temporary' ? 'unconfirmed'
         : typedCode ? `not-reached (${typedCode})`
