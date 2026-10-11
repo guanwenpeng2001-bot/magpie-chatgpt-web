@@ -13,6 +13,7 @@ export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, 
   const root = join(sandbox, 'isolated-live-profile');
   const ledgerPath = join(sandbox, 'live-ledger.json');
   const factsPath = join(sandbox, 'live-facts.json');
+  const notesPath = join(sandbox, 'live-backend-notes.log');
   const facts = { attempt: turnOnly ? '4-turn-only' : 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
   const stderrChunks = [];
   let host;
@@ -25,11 +26,11 @@ import { productionReadClient } from ${imports('backend/http.mjs')};
 import { BackendError } from ${imports('backend/guard.mjs')};
 import { TurnDriver } from ${imports('backend/turn.mjs')};
 import { readFile } from 'node:fs/promises';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, appendFileSync } from 'node:fs';
 import https from 'node:https';
 const ledger = { conversationSubmits:0, deliberate:[], posts:[], browserRequests:0, browserByKind:{}, blockedOffOrigin:0, statuses:[] };
 const save = () => writeFileSync(${JSON.stringify(ledgerPath)}, JSON.stringify(ledger));
-const note = line => process.stderr.write(JSON.stringify(line)+'\\n');
+const note = line => { try { appendFileSync(${JSON.stringify(notesPath)}, JSON.stringify(line)+'\\n'); } catch {} try { process.stderr.write(JSON.stringify(line)+'\\n'); } catch {} };
 save();
 const DELIBERATE_CAP = 6;
 class ShareExhausted extends Error {
@@ -191,7 +192,10 @@ export default {id:'chatgpt-web',server:async()=>hooks};
           if (frame.event === 'chunk') host.stdin.write(JSON.stringify({ method: 'credit', params: { id: frame.id, n: Buffer.from(frame.data, 'base64').length + 256 } }) + '\n');
         } else if ('result' in frame || frame.error) {
           pending.delete(frame.id);
-          frame.error ? entry.reject(new Error('Live host request failed')) : entry.resolve(frame.result);
+          if (frame.error) {
+            console.log(JSON.stringify({ hostErrorFrame: frame }));
+            entry.reject(new Error('Live host request failed: ' + JSON.stringify(frame.error)));
+          } else entry.resolve(frame.result);
         }
       }
     });

@@ -210,7 +210,7 @@ try {
     if (archive) {
       try {
         await mkdir(archive, { recursive: true });
-        for (const name of ['live-ledger.json', 'live-facts.json', 'live-plugin-error.log', 'live-backend-stderr.log']) {
+        for (const name of ['live-ledger.json', 'live-facts.json', 'live-plugin-error.log', 'live-backend-stderr.log', 'live-backend-notes.log', 'live-backend.mjs', 'live-plugin.mjs']) {
           try { await copyFile(join(sandbox, name), join(archive, name)); } catch {}
         }
         console.log(`live attempt artifacts archived before teardown to ${archive}`);
