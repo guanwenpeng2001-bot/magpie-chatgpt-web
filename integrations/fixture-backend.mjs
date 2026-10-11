@@ -6,6 +6,12 @@ import { ReadClient } from '../backend/http.mjs';
 import { createLoginFlow, launchSignInBrowser } from '../backend/browser.mjs';
 import { BackendError } from '../backend/guard.mjs';
 import assert from 'node:assert/strict';
+import { TurnDriver } from '../backend/turn.mjs';
+import { createTurnFixture } from './turn-fixture.mjs';
+import { tmpdir } from 'node:os';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { chromium } from 'playwright-core';
 
 const accessToken = randomUUID();
 const cookie = randomUUID();
@@ -48,9 +54,16 @@ const loginFlow = createLoginFlow({
     } catch { await owned.close(); throw new BackendError('browserProfile'); }
   },
 });
+const turnFixture = await createTurnFixture();
+const turnRoot = await mkdtemp(join(tmpdir(), 'chatgpt-web-host-turns-'));
+const turnDriver = new TurnDriver({ profileRoot: turnRoot, origin: turnFixture.origin, launch: async profile => {
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, serviceWorkers: 'block' });
+  await context.route('**/*', route => new URL(route.request().url()).origin === turnFixture.origin ? route.continue() : route.abort());
+  return context;
+} });
 await serve(process.stdin, process.stdout, {
-  loginFlow,
+  loginFlow, turnDriver,
   readClient: options => new ReadClient({ ...options, origin }),
-  handlers: { expire: () => { expired = true; return true; } },
-  close: async () => { fixture.closeAllConnections(); await new Promise(resolve => fixture.close(resolve)); },
+  handlers: { expire: () => { expired = true; return true; }, fixtureTurns: () => turnFixture.requests.map(value => ({ conversation: value.conversation })) },
+  close: async () => { await turnFixture.close(); fixture.closeAllConnections(); await new Promise(resolve => fixture.close(resolve)); await rm(turnRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); },
 });

@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import { BackendError, AccountGuard, publicError } from './guard.mjs';
 import { ReadClient, productionReadClient } from './http.mjs';
 import { LoginStates, createLoginFlow, sessionCredential } from './browser.mjs';
+import { TurnDriver } from './turn.mjs';
 
-export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options) } = {}) {
+export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
+  let turns = turnDriver;
   const pending = new Map();
   const clients = new Map();
   const guards = new Map();
@@ -76,7 +78,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     }
     const entry = clients.get(key);
     entry.refs++;
-    return { client: entry.client, release: () => { entry.refs--; entry.used = ++clientClock; } };
+    return { client: entry.client, identity, release: () => { entry.refs--; entry.used = ++clientClock; } };
   };
   const loginPromises = new Map();
   const startLogin = (account, profileRoot) => {
@@ -121,8 +123,19 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         return { state: 'pending' };
       }
       case 'logout': loginPromises.get(account)?.cancel(); loginPromises.delete(account); login.clear(account); return true;
-      case 'discard': return true;
-      case 'complete': throw new BackendError('backendDown');
+      case 'discard': {
+        const { identity, release } = clientFor(command);
+        try { await turns?.bindings.discard(command.conversationKey, identity); return true; } finally { release(); }
+      }
+      case 'complete': {
+        if (typeof command.prompt !== 'string' || !Array.isArray(command.history) || typeof command.model !== 'string' || typeof command.auth?.profile !== 'string') throw new BackendError('protocol');
+        const { client, identity, release } = clientFor(command);
+        try {
+          turns ??= new TurnDriver({ profileRoot: command.profileRoot });
+          await turns.complete(command, client.guard, identity, signal, emit);
+        } finally { release(); }
+        return;
+      }
       default: throw new BackendError('protocol');
     }
   };
@@ -193,6 +206,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     for (const entry of logins) entry.cancel();
     await Promise.allSettled(logins.map(entry => entry.work));
     loginPromises.clear();
+    await turns?.close();
     await close();
     await writes.catch(() => {});
     clients.clear(); guards.clear();

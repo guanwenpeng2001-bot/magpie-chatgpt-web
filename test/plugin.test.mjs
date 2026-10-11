@@ -16,7 +16,7 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
     assert.deepEqual(models[slug], {
       name, api: { id: slug, url: 'https://chatgpt-web.invalid/v1', npm: '@ai-sdk/anthropic' },
       limit: { context: 200000, output: 34834 },
-      capabilities: { reasoning: false, toolcall: true, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
+      capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
     });
   }
 });
@@ -48,9 +48,9 @@ test('HTTP caller delivers a sanitized expired sign-in header', async () => {
   const marker = crypto.randomUUID();
   const failure = new BackendError('expired');
   failure.retryAfter = marker;
-  const hooks = plugin._internal.createHooks({ bridge: { call: async () => { throw failure; } }, profileRoot: '.' });
+  const hooks = plugin._internal.createHooks({ bridge: { open: async () => { throw failure; } }, profileRoot: '.' });
   const loader = await hooks.auth.loader(async () => ({ type: 'oauth', refresh: crypto.randomUUID() }));
-  const response = await loader.fetch('https://chatgpt-web.invalid/v1/messages', {});
+  const response = await loader.fetch('https://chatgpt-web.invalid/v1/messages', { body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'fixture' }] }) });
   assert.equal(response.status, 401);
   assert.equal(response.headers.get('x-magpie-sign-in'), 'expired');
   assert.equal(JSON.stringify([...response.headers]).includes(marker), false);

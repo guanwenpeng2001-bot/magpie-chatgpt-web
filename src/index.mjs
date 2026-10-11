@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Bridge, BackendError } from './bridge.mjs';
+import { prepare, translate, errorEvent } from './protocol.mjs';
 
 const PROVIDER = 'chatgpt-web';
 const API = 'https://chatgpt-web.invalid/v1';
@@ -12,7 +13,7 @@ function modelEntry(slug, name) {
   return {
     name, api: { id: slug, url: API, npm: '@ai-sdk/anthropic' },
     limit: { context: 200_000, output: 34_834 },
-    capabilities: { reasoning: false, toolcall: true, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
+    capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
   };
 }
 
@@ -49,13 +50,41 @@ function createHooks({ bridge, profileRoot, pollMilliseconds = 2000 }) {
         requireAuth(auth);
         return {
           baseURL: API, apiKey: 'managed-locally',
-          async fetch(input, init) {
-            let error;
+          async fetch(input, init = {}) {
+            let upstream;
             try {
-              await bridge.call({ method: 'session', auth: requireAuth(await getAuth()) }, init?.signal);
-              error = new BackendError('backendDown');
-            } catch (failure) { error = failure instanceof BackendError ? failure : new BackendError('upstream'); }
-            return Response.json({ error: error.toJSON() }, { status: error.toJSON().status, headers: error.headers });
+              const current = requireAuth(await getAuth());
+              let request;
+              try { request = JSON.parse(init.body ?? (input instanceof Request ? await input.text() : '')); }
+              catch { throw new BackendError('invalidRequest'); }
+              const prepared = prepare(request, init.headers ?? (input instanceof Request ? input.headers : undefined));
+              const signal = init.signal ?? (input instanceof Request ? input.signal : undefined);
+              upstream = await bridge.open({ method: 'complete', auth: current, profileRoot, ...prepared }, signal);
+              const first = await upstream.next();
+              if (first.done) throw new BackendError('empty');
+              async function* frames() { yield first.value; yield* upstream; }
+              const translated = translate(frames(), prepared);
+              const encoder = new TextEncoder();
+              const body = new ReadableStream({
+                async pull(controller) {
+                  try {
+                    const next = await translated.next();
+                    if (next.done) { controller.close(); upstream.close(); }
+                    else controller.enqueue(encoder.encode(next.value));
+                  } catch (error) {
+                    if (signal?.aborted) controller.error(signal.reason);
+                    else { controller.enqueue(encoder.encode(errorEvent(error))); controller.close(); }
+                    upstream.close();
+                  }
+                },
+                async cancel() { upstream.close(); await translated.return(); },
+              });
+              return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
+            } catch (failure) {
+              upstream?.close();
+              const error = failure instanceof BackendError ? failure : new BackendError('upstream');
+              return Response.json({ error: error.toJSON() }, { status: error.status, headers: error.headers });
+            }
           },
         };
       },

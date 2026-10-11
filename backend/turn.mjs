@@ -1,0 +1,166 @@
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
+import { BackendError } from './guard.mjs';
+import { BrowserSupervisor, launchSignInBrowser } from './browser.mjs';
+import { Conversations } from './conversations.mjs';
+import { installHarvest } from './harvest.mjs';
+import { AnswerStream } from '../src/protocol.mjs';
+
+export class TurnDriver {
+  constructor({ profileRoot, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now } = {}) {
+    this.origin = origin;
+    this.network = network;
+    this.timeout = timeout;
+    this.bindings = new Conversations({ now });
+    this.browser = new BrowserSupervisor({ profileRoot, launch: launch ?? (async profile => {
+      const owned = await launchSignInBrowser(profile, new AbortController().signal);
+      const context = owned.context;
+      context.close = owned.close;
+      return context;
+    }) });
+    this.installed = new WeakSet();
+    this.turns = new Map();
+  }
+  async install(context) {
+    if (this.installed.has(context)) return;
+    await context.exposeBinding('__chatgptHarvestEvent', ({ page }, payload) => {
+      const turn = this.turns.get(page);
+      if (turn?.id === payload.turn) {
+        if (turn.queue.length >= 1024) { turn.failure = new BackendError('harvest'); return; }
+        turn.queue.push(payload);
+      }
+    });
+    await context.addInitScript(installHarvest);
+    this.installed.add(context);
+  }
+  async complete(command, guard, identity, signal, emit) {
+    const release = await guard.begin(signal);
+    let binding;
+    try {
+      binding = await this.bindings.take(command, identity);
+      binding.busy = true;
+      await this.browser.run(command.auth.profile, async context => {
+        await this.install(context);
+        signal.throwIfAborted();
+        let page = binding.page;
+        const fresh = !page || page.isClosed();
+        if (fresh) { page = await context.newPage(); binding.page = page; }
+        const abort = () => { page.close().catch(() => {}); };
+        signal.addEventListener('abort', abort, { once: true });
+        try {
+          signal.throwIfAborted();
+          if (fresh) {
+            await page.goto(`${this.origin}/?temporary-chat=true`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            if (new URL(page.url()).searchParams.get('temporary-chat') !== 'true') throw new BackendError('temporary');
+          }
+          await this.pageError(page, guard);
+          const composer = page.getByRole('textbox').filter({ visible: true });
+          await composer.first().waitFor({ state: 'visible', timeout: 30000 });
+          if (await composer.count() !== 1) throw new BackendError('pageShape');
+          await this.selectModel(page, command.model);
+          const id = randomUUID();
+          const turn = { id, queue: [] };
+          this.turns.set(page, turn);
+          await page.evaluate(({ id, network }) => window.__chatgptHarvest.start(id, network), { id, network: this.network });
+          signal.throwIfAborted();
+          await composer.fill(command.prompt);
+          signal.throwIfAborted();
+          await composer.press('Enter');
+          const answer = new AnswerStream();
+          let fallback = false;
+          let sawStop = false;
+          let eof = false;
+          const started = Date.now();
+          while (Date.now() - started < this.timeout) {
+            signal.throwIfAborted();
+            if (page.isClosed()) throw new BackendError('browserClosed');
+            await this.pageError(page, guard);
+            if (turn.failure) throw turn.failure;
+            for (const item of turn.queue.splice(0)) {
+              if (item.kind === 'status' && item.status !== 200) {
+                const retryAfter = guard.observe(item.status, item.retryAfter);
+                throw new BackendError(item.status === 429 ? 'cooldown' : [401, 403].includes(item.status) ? 'expired' : 'upstream', { retryAfter });
+              }
+              if (item.kind === 'failure') throw new BackendError(item.code);
+              if (item.kind === 'fallback') {
+                if (answer.text) throw new BackendError('harvest');
+                fallback = true;
+              }
+              if (item.kind === 'frame') {
+                let data;
+                try { data = item.frame.data === '[DONE]' ? '[DONE]' : JSON.parse(item.frame.data); }
+                catch { throw new BackendError('protocol'); }
+                const frame = { event: item.frame.event, data };
+                const delta = answer.accept(frame);
+                if (delta) await emit({ event: 'answer', data: { text: delta } });
+              }
+              if (item.kind === 'eof') { eof = true; if (item.partial) throw new BackendError('truncated'); }
+            }
+            if (fallback) {
+              const snapshot = await page.evaluate(() => window.__chatgptHarvest.snapshot());
+              if (snapshot.failed) throw new BackendError('harvest');
+              sawStop ||= snapshot.stop;
+              const frame = { event: 'dom', data: { text: snapshot.text, complete: snapshot.finished && !snapshot.stop && sawStop } };
+              const delta = answer.accept(frame);
+              if (delta) await emit({ event: 'dom', data: { text: answer.text } });
+            }
+            if (answer.complete) {
+              answer.finish();
+              await emit({ event: '', data: { type: 'message_stream_complete' } });
+              binding.conversationUrl = /^\/c\/[^/]+$/.test(new URL(page.url()).pathname) ? page.url() : undefined;
+              this.bindings.finish(binding, command, answer.text);
+              return;
+            }
+            if (eof && !fallback) throw new BackendError('truncated');
+            await delay(50, undefined, { signal });
+          }
+          throw new BackendError('truncated');
+        } finally {
+          signal.removeEventListener('abort', abort);
+          this.turns.delete(page);
+          await page.evaluate(() => window.__chatgptHarvest?.stop()).catch(() => {});
+        }
+      }, signal);
+    } catch (error) {
+      if (binding) {
+        if (error instanceof BackendError && error.code === 'verification') binding.page = undefined;
+        await this.bindings.failed(binding);
+      }
+      throw error instanceof BackendError ? error : new BackendError(signal.aborted ? 'upstream' : 'pageShape');
+    } finally {
+      if (binding && !binding.key) await this.bindings.failed(binding);
+      release();
+    }
+  }
+  async pageError(page, guard) {
+    const state = await page.evaluate(() => {
+      const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alert"]')].map(node => node.innerText).join('\n');
+      return {
+        rate: /usage limit|rate limit|reached.*limit|too many requests|使用上限|达到.*上限|请求过多|limite.*atteinte|límite.*alcanzado|Limit.*erreicht|limite.*atingido|上限に達|한도.*도달/i.test(dialogs),
+        challenge: [...document.querySelectorAll('iframe')].some(node => /challenge|captcha/i.test(node.title ?? '')) || /verify you are human|验证您是真人|请完成验证/i.test(dialogs) || /just a moment|请稍候/i.test(document.title),
+        expired: [...document.querySelectorAll('button')].some(node => /^(log in|sign in|登录)$/i.test(node.innerText.trim())) && !document.querySelector('[contenteditable="true"], textarea'),
+      };
+    });
+    if (state.rate) throw new BackendError('cooldown', { retryAfter: guard.observe(429) });
+    if (state.challenge) throw new BackendError('verification');
+    if (state.expired) { guard.observe(401); throw new BackendError('expired'); }
+  }
+  async selectModel(page, slug) {
+    if (slug === 'auto') return;
+    const machine = page.locator('[data-model-id]').filter({ visible: true });
+    for (const item of await machine.all()) {
+      if (await item.getAttribute('data-model-id') === slug) { await item.click(); return; }
+    }
+    const picker = page.getByRole('button', { name: /model selector|model picker|模型选择|选择模型/i });
+    if (await picker.count() !== 1) throw new BackendError('pageShape');
+    await picker.click();
+    try {
+      const entries = page.getByRole('menuitemradio');
+      for (const entry of await entries.all()) {
+        if (await entry.getAttribute('data-model-id') === slug || (slug === 'gpt-6' && (await entry.innerText()).trim() === 'GPT-6')) { await entry.click(); return; }
+      }
+      throw new BackendError('pageShape');
+    } finally { await page.keyboard.press('Escape'); }
+  }
+  async close() { await this.bindings.close(); await this.browser.close(); }
+}

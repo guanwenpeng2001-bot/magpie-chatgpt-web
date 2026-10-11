@@ -5,13 +5,18 @@ import { tmpdir, homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
+import { verifyTurns } from './verify-turns.mjs';
 
 const source = fileURLToPath(new URL('..', import.meta.url));
 const liveHome = homedir();
-const liveFiles = ['plugins.json', 'plugin-providers.json', 'plugin-auth.json', 'settings.json', 'last-version'].map(name => join(liveHome, '.config/magpie', name));
-liveFiles.push(join(liveHome, '.cache/magpie/last-version'));
+const liveFiles = ['plugins.json', 'plugin-providers.json', 'plugin-auth.json', 'plugins/package.json'].map(name => join(liveHome, '.config/magpie', name));
 const snapshot = async () => Promise.all(liveFiles.map(async path => {
-  try { const value = await stat(path); return [path, value.size, value.mtimeMs]; }
+  try {
+    const value = await readFile(path);
+    const content = path.endsWith('plugin-providers.json') ? JSON.stringify(Object.keys(JSON.parse(value)).sort()) : value;
+    return [path, createHash('sha256').update(content).digest('hex')];
+  }
   catch (error) { if (error.code === 'ENOENT') return [path, null]; throw error; }
 }));
 const before = await snapshot();
@@ -54,6 +59,14 @@ try {
   const installed = join(config, 'plugins/node_modules/magpie-chatgpt-web');
   await stat(join(installed, 'src/index.mjs'));
   await cp(join(repository, 'integrations'), join(installed, 'integrations'), { recursive: true });
+  if (process.argv.includes('--live-once')) {
+    const { verifyLiveOnce } = await import('./verify-live.mjs');
+    await verifyLiveOnce({ installed, home, sandbox, bun, liveHome, env });
+    assert.deepEqual(await snapshot(), before, 'live installation metadata changed');
+    console.log('live installation metadata unchanged');
+    process.exitCode ??= 0;
+  } else {
+  await verifyTurns(join(config, 'plugins/node_modules/playwright-core/index.mjs'));
   const launchProbe = join(sandbox, 'launch-probe.mjs');
   await writeFile(launchProbe, 'import { launchSignInBrowser } from ' + JSON.stringify(pathToFileURL(join(installed, 'backend/browser.mjs')).href) + ';\nconst owned = await launchSignInBrowser(' + JSON.stringify(join(home, 'launch-probe')) + ', new AbortController().signal); console.log("ordinary browser probe connected"); await owned.close();');
   console.log(command('node', [launchProbe]).trim());
@@ -77,6 +90,11 @@ try {
       const frame = JSON.parse(buffer.slice(0, newline));
       buffer = buffer.slice(newline + 1);
       if (!frame.id) { events.push(frame); continue; }
+      if (frame.event === 'chunk' || frame.event === 'head') {
+        pending.get(frame.id)?.frame?.(frame);
+        if (frame.event === 'chunk') host.stdin.write(JSON.stringify({ method: 'credit', params: { id: frame.id, n: Buffer.from(frame.data, 'base64').length + 256 } }) + '\n');
+        continue;
+      }
       if ('result' in frame || frame.error) {
         const waiting = pending.get(frame.id);
         pending.delete(frame.id);
@@ -113,6 +131,39 @@ try {
   assert.equal(provider.models.length, 8);
   assert.equal(provider.models[0].id, 'auto');
   console.log('models listed: 8, auto first, duplicate mini names disambiguated');
+  const fetchTurn = (messages, { cancel = false, conversation = 'host-session' } = {}) => new Promise((resolveReply, reject) => {
+    const id = String(++sequence);
+    const chunks = [];
+    const arrivals = [];
+    const started = Date.now();
+    let aborted = false;
+    const timer = setTimeout(() => reject(new Error('Stock host turn timeout')), 30000);
+    pending.set(id, {
+      frame(frame) {
+        if (frame.event === 'head') assert.equal(frame.status, 200);
+        if (frame.event !== 'chunk') return;
+        const text = Buffer.from(frame.data, 'base64').toString();
+        chunks.push(text);
+        if (text.includes('content_block_delta')) {
+          arrivals.push(Date.now() - started);
+          if (cancel && !aborted) { aborted = true; host.stdin.write(JSON.stringify({ method: 'abort', params: { id } }) + '\n'); clearTimeout(timer); resolveReply({ chunks, arrivals, aborted }); }
+        }
+      },
+      resolve() { clearTimeout(timer); resolveReply({ chunks, arrivals, aborted }); },
+      reject(error) { clearTimeout(timer); reject(error); },
+    });
+    host.stdin.write(JSON.stringify({ id, method: 'fetch', params: { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: conversation, body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages })).toString('base64') } }) + '\n');
+  });
+  const messages = [{ role: 'user', content: 'Describe a fictional garden.' }];
+  const firstTurn = await fetchTurn(messages);
+  assert.equal(firstTurn.arrivals.length, 3);
+  assert.ok(firstTurn.arrivals[1] - firstTurn.arrivals[0] > 250);
+  const answer = firstTurn.chunks.join('').split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6))).filter(frame => frame.type === 'content_block_delta').map(frame => frame.delta.text).join('');
+  await fetchTurn([...messages, { role: 'assistant', content: answer }, { role: 'user', content: 'Continue.' }]);
+  const cancelled = await fetchTurn(messages, { cancel: true, conversation: 'abort-session' });
+  assert.equal(cancelled.aborted, true);
+  assert.match((await fetchTurn(messages, { conversation: 'abort-session' })).chunks.join(''), /event: message_stop/);
+  console.log(JSON.stringify({ hostTurn: 'stream, continuation, abort, session reuse', deltas: firstTurn.arrivals.length, arrivalMilliseconds: firstTurn.arrivals }));
   auths[callback.account].expires = Date.now() - 1;
   await writeFile(authPath, JSON.stringify(auths));
   await rpc('reload', { provider: 'chatgpt-web' });
@@ -140,12 +191,14 @@ try {
   await directBridge.call({ method: 'expire' });
   await assert.rejects(hooks.provider.models({}, { auth }), error => error.signIn === 'expired');
   const loader = await hooks.auth.loader(async () => auth);
-  const rejected = await loader.fetch('https://chatgpt-web.invalid/v1/messages', {});
+  await assert.rejects(directBridge.call({ method: 'session', auth }), error => error.signIn === 'expired');
+  const rejected = await loader.fetch('https://chatgpt-web.invalid/v1/messages', { body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'fixture' }] }) });
   assert.equal(rejected.status, 401);
   assert.equal(rejected.headers.get('x-magpie-sign-in'), 'expired');
   console.log('expiry throws signIn expired and HTTP 401 x-magpie-sign-in: expired');
   assert.deepEqual(await snapshot(), before, 'live installation metadata changed');
   console.log('live installation metadata unchanged; no real account requests');
+  }
 } catch (error) {
   console.error(error instanceof assert.AssertionError ? `Assertion failed: ${error.message}` : `Sandbox failed: ${error.code ?? error.message}`);
   process.exitCode = 1;
