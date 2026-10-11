@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, cp, copyFile, readFile, writeFile, stat, rm } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { resolve, join, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { verifyTurns } from './verify-turns.mjs';
+import { redactLiveArtifact } from './verify-live.mjs';
 
 const source = fileURLToPath(new URL('..', import.meta.url));
 const liveHome = homedir();
@@ -20,7 +21,7 @@ const snapshot = async () => Promise.all(liveFiles.map(async path => {
   catch (error) { if (error.code === 'ENOENT') return [path, null]; throw error; }
 }));
 const before = await snapshot();
-const sandbox = await mkdtemp(join(process.argv.includes('--live-once') ? source : tmpdir(), 'chatgpt-web-sandbox-'));
+const sandbox = await mkdtemp(join(tmpdir(), 'chatgpt-web-sandbox-'));
 console.log(`sandbox ${sandbox}`);
 const home = join(sandbox, 'home');
 const config = join(home, '.config/magpie');
@@ -203,23 +204,28 @@ try {
   console.error(error instanceof assert.AssertionError ? `Assertion failed: ${error.message}` : `Sandbox failed: ${error.code ?? error.message}`);
   process.exitCode = 1;
 } finally {
+  try {
   if (host) { const exit = once(host, 'exit'); host.stdin.end(); await exit.catch(() => {}); }
   await directBridge?.dispose();
   if (process.argv.includes('--live-once')) {
     const archive = process.env.CHATGPT_WEB_LIVE_ARCHIVE;
     if (archive) {
       try {
+        const archiveRelative = relative(source, resolve(archive));
+        if (!archiveRelative || (archiveRelative !== '..' && !archiveRelative.startsWith('..' + sep) && !isAbsolute(archiveRelative))) throw new Error('Archive must be outside the worktree');
         await mkdir(archive, { recursive: true });
         for (const name of ['live-ledger.json', 'live-facts.json', 'live-plugin-error.log', 'live-backend-stderr.log', 'live-backend-notes.log', 'live-backend.mjs', 'live-plugin.mjs']) {
-          try { await copyFile(join(sandbox, name), join(archive, name)); }
+          try { await writeFile(join(archive, name), redactLiveArtifact(await readFile(join(sandbox, name), 'utf8'))); }
           catch (error) { if (error.code !== 'ENOENT' || ['live-ledger.json', 'live-facts.json'].includes(name)) throw error; }
         }
         console.log(`live attempt artifacts archived before teardown to ${archive}`);
-      } catch { throw new Error('Live archive failed; sandbox retained with its evidence'); }
+      } catch { throw new Error('Live archive failed; sandbox cleanup will still run'); }
     } else {
       console.log('CHATGPT_WEB_LIVE_ARCHIVE not set; live artifacts not archived');
     }
   }
-  await rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  console.log('sandbox discarded');
+  } finally {
+    await rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    console.log('sandbox discarded');
+  }
 }

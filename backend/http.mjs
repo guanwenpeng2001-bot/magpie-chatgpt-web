@@ -44,7 +44,8 @@ export class ReadClient {
   }
   async #read(path, signal, receiveCookies = () => {}) {
     const transport = this.origin.protocol === 'https:' ? https : http;
-    const bounded = AbortSignal.any([AbortSignal.timeout(this.timeout), ...(signal ? [signal] : [])]);
+    const budget = AbortSignal.timeout(this.timeout);
+    const bounded = AbortSignal.any([budget, ...(signal ? [signal] : [])]);
     try {
       return await new Promise((resolve, reject) => {
         const request = transport.get(new URL(path, this.origin), {
@@ -86,8 +87,17 @@ export class ReadClient {
       });
     } catch (error) {
       if (error instanceof BackendError && error.code === 'verification' && this.browserRoute && !bounded.aborted) {
+        const fallbackBudget = AbortSignal.timeout(this.timeout);
+        const fallbackSignal = AbortSignal.any([fallbackBudget, ...(signal ? [signal] : [])]);
+        let abort;
         try {
-          const result = await this.browserRoute(path, bounded, this.origin);
+          const interrupted = new Promise((resolve, reject) => {
+            abort = () => reject(new BackendError(fallbackBudget.aborted && !signal?.aborted ? 'requestBudget' : 'upstream'));
+            fallbackSignal.addEventListener('abort', abort, { once: true });
+            if (fallbackSignal.aborted) abort();
+          });
+          const result = await Promise.race([this.browserRoute(path, fallbackSignal, this.origin), interrupted]);
+          fallbackSignal.throwIfAborted();
           if (path === '/api/auth/session') {
             const cookies = this.#cookie.split(';').map(pair => pair.trim()).filter(pair => !/^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?=/.test(pair));
             const sessionCookies = result.cookies.split(';').map(pair => pair.trim()).filter(pair => /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?=/.test(pair));
@@ -97,11 +107,13 @@ export class ReadClient {
           }
           return result.value;
         } catch (failure) {
+          if (fallbackBudget.aborted && !signal?.aborted) throw new BackendError('requestBudget');
           if (failure instanceof BackendError && failure.code === 'expired') this.guard.observe(401);
           if (failure instanceof BackendError && failure.code === 'cooldown') this.guard.observe(429, failure.retryAfter);
           throw failure instanceof BackendError ? failure : new BackendError('upstream');
-        }
+        } finally { fallbackSignal.removeEventListener('abort', abort); }
       }
+      if (budget.aborted && !signal?.aborted) throw new BackendError('requestBudget');
       throw error instanceof BackendError ? error : new BackendError('upstream');
     }
   }

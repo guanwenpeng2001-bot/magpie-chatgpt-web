@@ -6,6 +6,18 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { BackendError } from '../backend/guard.mjs';
 
+export function retainedHeaderNames(headers) {
+  return Object.keys(headers).filter(name => !/authorization|cookie|token|api[-_]?key|secret|credential/i.test(name));
+}
+
+export function redactLiveArtifact(text) {
+  return text.replace(/const source = await readFile\([^\r\n]*\);/g, "const source = await readFile('[redacted-session-source]', 'utf8');")
+    .replace(/"headerNames"\s*:\s*\[[^\]]*\]/g, field => {
+      const names = JSON.parse('{' + field + '}').headerNames;
+      return JSON.stringify({ headerNames: retainedHeaderNames(Object.fromEntries(names.map(name => [name, true]))) }).slice(1, -1);
+    });
+}
+
 export const CONVERSATION_SUBMIT_PATTERN = /^\/backend-api\/(?:f\/)?conversation$/;
 
 export class LiveLedger {
@@ -62,7 +74,7 @@ import { browserRead, launchSignInBrowser, sessionCredential } from ${imports('b
 import { productionReadClient } from ${imports('backend/http.mjs')};
 import { BackendError } from ${imports('backend/guard.mjs')};
 import { TurnDriver } from ${imports('backend/turn.mjs')};
-import { LiveLedger } from ${imports('integrations/verify-live.mjs')};
+import { LiveLedger, retainedHeaderNames } from ${imports('integrations/verify-live.mjs')};
 import { readFile } from 'node:fs/promises';
 import { writeFileSync, appendFileSync } from 'node:fs';
 import https from 'node:https';
@@ -129,7 +141,7 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},...${JSON
    const post={path:url.pathname,status:null,headerNames:[]};
    ledger.posts.push(post);save();
    request.response().then(response => {
-    if(response){post.status=response.status();post.headerNames=Object.keys(response.headers());}
+    if(response){post.status=response.status();post.headerNames=retainedHeaderNames(response.headers());}
     note({event:'post',path:url.pathname,status:post.status});
     save();
    }).catch(()=>{save();});
