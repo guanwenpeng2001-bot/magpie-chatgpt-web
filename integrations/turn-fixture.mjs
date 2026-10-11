@@ -11,7 +11,10 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
     if (url.pathname === '/backend-api/f/conversation') {
       let body = '';
       for await (const chunk of request) body += chunk;
-      requests.push(JSON.parse(body));
+      const submitted = JSON.parse(body);
+      requests.push(submitted);
+      const marker = submitted.prompt.match(/\[MAGPIE_TOOL_([a-f0-9]{32})\]/);
+      const scripted = marker ? ['Before the call. ', `[MAGPIE_TOOL_${marker[1]}]${JSON.stringify({ name: 'lookup', input: { query: 'garden' } })}[/MAGPIE_TOOL_${marker[1]}]`, 'After the call.'] : batches;
       if (['post-challenge', 'post-expired', 'post-forbidden'].includes(mode)) {
         response.writeHead(mode === 'post-expired' ? 401 : 403, { 'content-type': mode === 'post-challenge' ? 'text/html' : 'application/json' });
         response.end(mode === 'post-challenge' ? '<title>Just a moment</title>Enable JavaScript and cookies to continue /cdn-cgi/challenge-platform/' : '{}');
@@ -23,7 +26,7 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       if (mode === 'changed') { frame('changed_encoding', {}); response.end(); return; }
       frame('delta_encoding', 'v1');
       frame('delta', { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, recipient: 'all', channel: 'final', content: { content_type: 'text', parts: [''] }, metadata: { is_visually_hidden_from_conversation: mode === 'hidden' }, status: 'in_progress' } } });
-      if (!['empty', 'hidden'].includes(mode)) for (const [index, batch] of batches.entries()) {
+      if (!['empty', 'hidden'].includes(mode)) for (const [index, batch] of scripted.entries()) {
         await delay(interval);
         if (response.destroyed) return;
         if (mode === 'user-add' && index === 1) frame('delta', { p: '', o: 'add', v: { message: { author: { role: 'user' }, recipient: 'all', content: { content_type: 'text', parts: ['a mid-answer user note'] }, status: 'finished_successfully' } } });

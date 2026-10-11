@@ -46,9 +46,9 @@ try {
   console.log('private HOME and USERPROFILE isolation checked before install');
   const repository = join(sandbox, 'package');
   await mkdir(repository);
-  for (const name of ['src', 'backend', 'integrations', 'package.json', 'README.md']) await cp(join(source, name), join(repository, name), { recursive: true });
+  for (const name of ['src', 'backend', 'integrations', 'package.json', 'README.md', 'THIRD_PARTY_NOTICES']) await cp(join(source, name), join(repository, name), { recursive: true });
   command('git', ['init', '-q', repository]);
-  command('git', ['add', 'src', 'backend', 'integrations', 'package.json', 'README.md'], repository);
+  command('git', ['add', 'src', 'backend', 'integrations', 'package.json', 'README.md', 'THIRD_PARTY_NOTICES'], repository);
   command('git', ['-c', 'user.name=Sandbox', '-c', 'user.email=sandbox@example.invalid', 'commit', '-qm', 'Create disposable integration snapshot'], repository);
   const spec = `git+${pathToFileURL(repository).href}`;
   command(magpie, ['plugin', 'add', spec]);
@@ -132,7 +132,7 @@ try {
   assert.equal(provider.models.length, 8);
   assert.equal(provider.models[0].id, 'auto');
   console.log('models listed: 8, auto first, duplicate mini names disambiguated');
-  const fetchTurn = (messages, { cancel = false, conversation = 'host-session' } = {}) => new Promise((resolveReply, reject) => {
+  const fetchTurn = (messages, { cancel = false, conversation = 'host-session', tools, tool_choice } = {}) => new Promise((resolveReply, reject) => {
     const id = String(++sequence);
     const chunks = [];
     const arrivals = [];
@@ -153,7 +153,7 @@ try {
       resolve() { clearTimeout(timer); resolveReply({ chunks, arrivals, aborted }); },
       reject(error) { clearTimeout(timer); reject(error); },
     });
-    host.stdin.write(JSON.stringify({ id, method: 'fetch', params: { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: conversation, body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages })).toString('base64') } }) + '\n');
+    host.stdin.write(JSON.stringify({ id, method: 'fetch', params: { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: conversation, body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages, tools, tool_choice })).toString('base64') } }) + '\n');
   });
   const messages = [{ role: 'user', content: 'Describe a fictional garden.' }];
   const firstTurn = await fetchTurn(messages);
@@ -165,6 +165,16 @@ try {
   assert.equal(cancelled.aborted, true);
   assert.match((await fetchTurn(messages, { conversation: 'abort-session' })).chunks.join(''), /event: message_stop/);
   console.log(JSON.stringify({ hostTurn: 'stream, continuation, abort, session reuse', deltas: firstTurn.arrivals.length, arrivalMilliseconds: firstTurn.arrivals }));
+  const tools = [{ name: 'lookup', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false } }];
+  const toolTurn = await fetchTurn([{ role: 'user', content: 'Look up the fictional garden.' }], { tools, tool_choice: { type: 'any' }, conversation: 'tool-session' });
+  const toolEvents = toolTurn.chunks.join('').split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+  assert.deepEqual(toolEvents.filter(event => event.type === 'content_block_start').map(event => event.content_block.type), ['text', 'tool_use', 'text']);
+  assert.deepEqual(toolEvents.filter(event => event.delta?.type === 'input_json_delta').map(event => JSON.parse(event.delta.partial_json)), [{ query: 'garden' }]);
+  assert.equal(toolEvents.at(-2).delta.stop_reason, 'tool_use');
+  assert.equal(toolTurn.arrivals.length, 3);
+  assert.ok(toolTurn.arrivals[1] - toolTurn.arrivals[0] > 250);
+  assert.ok(toolTurn.arrivals[2] - toolTurn.arrivals[1] > 250);
+  console.log(JSON.stringify({ hostToolTurn: 'fixture-backed prompt-level emulation', arrivalMilliseconds: toolTurn.arrivals, events: toolEvents }));
   auths[callback.account].expires = Date.now() - 1;
   await writeFile(authPath, JSON.stringify(auths));
   await rpc('reload', { provider: 'chatgpt-web' });

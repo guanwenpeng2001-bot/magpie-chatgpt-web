@@ -90,5 +90,5 @@ test('prepare preserves text history and prefers caller conversation identity', 
   delete request.conversation_id;
   assert.match(protocol.prepare(request, { 'x-chatgptweb-conversation': 'host-session' }).conversationKey, /^[a-f0-9]{64}$/);
   assert.equal(protocol.prepare(request).conversationKey, undefined);
-  assert.throws(() => protocol.prepare({ ...request, tools: [{}] }), error => error.code === 'unsupported');
+  assert.throws(() => protocol.prepare({ ...request, tools: [{}] }), error => error.code === 'toolDefinition');
 });

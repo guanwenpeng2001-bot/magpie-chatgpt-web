@@ -13,6 +13,7 @@ function modelEntry(slug, name) {
   return {
     name, api: { id: slug, url: API, npm: '@ai-sdk/anthropic' },
     limit: { context: 200_000, output: 34_834 },
+    // Prompt-level tool emulation compliance matrix is pending for every model.
     capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
   };
 }
@@ -64,6 +65,24 @@ function createHooks({ bridge, profileRoot, pollMilliseconds = 2000 }) {
               if (first.done) throw new BackendError('empty');
               async function* frames() { yield first.value; yield* upstream; }
               const translated = translate(frames(), prepared);
+              if (request.stream === false) {
+                let message;
+                const blocks = [];
+                for await (const chunk of translated) {
+                  signal?.throwIfAborted();
+                  const event = JSON.parse(chunk.split('\ndata: ')[1]);
+                  if (event.type === 'message_start') message = event.message;
+                  if (event.type === 'content_block_start') blocks[event.index] = event.content_block;
+                  if (event.type === 'content_block_delta') {
+                    if (event.delta.type === 'text_delta') blocks[event.index].text += event.delta.text;
+                    else blocks[event.index].input = JSON.parse(event.delta.partial_json);
+                  }
+                  if (event.type === 'message_delta') { Object.assign(message, event.delta); message.usage.output_tokens = event.usage.output_tokens; }
+                }
+                message.content = blocks;
+                upstream.close();
+                return Response.json(message, { headers: { 'cache-control': 'no-store' } });
+              }
               const encoder = new TextEncoder();
               const body = new ReadableStream({
                 async pull(controller) {
