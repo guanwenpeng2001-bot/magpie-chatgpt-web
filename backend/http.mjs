@@ -107,9 +107,9 @@ export class ReadClient {
           }
           return result.value;
         } catch (failure) {
-          if (fallbackBudget.aborted && !signal?.aborted) throw new BackendError('requestBudget');
           if (failure instanceof BackendError && failure.code === 'expired') this.guard.observe(401);
           if (failure instanceof BackendError && failure.code === 'cooldown') this.guard.observe(429, failure.retryAfter);
+          if (fallbackBudget.aborted && !signal?.aborted) throw new BackendError('requestBudget');
           throw failure instanceof BackendError ? failure : new BackendError('upstream');
         } finally { fallbackSignal.removeEventListener('abort', abort); }
       }

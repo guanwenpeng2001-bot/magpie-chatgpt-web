@@ -64,7 +64,12 @@ export async function serve(input, output, { handlers = {}, close = async () => 
               signal.throwIfAborted();
               await page.goto(origin.href, { waitUntil: 'domcontentloaded', timeout: 20000 });
               return await browserRead(context, page, path, origin, signal);
-            } catch (error) { verification = error instanceof BackendError && error.code === 'verification'; throw error; }
+            } catch (error) {
+              if (error instanceof BackendError && error.code === 'expired') guard.observe(401);
+              if (error instanceof BackendError && error.code === 'cooldown') guard.observe(429, error.retryAfter);
+              verification = error instanceof BackendError && error.code === 'verification';
+              throw error;
+            }
             finally { signal.removeEventListener('abort', abort); if (!verification) await page.close().catch(() => {}); }
           }, signal);
         },
