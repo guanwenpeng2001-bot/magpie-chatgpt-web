@@ -205,6 +205,20 @@ try {
 } finally {
   if (host) { const exit = once(host, 'exit'); host.stdin.end(); await exit.catch(() => {}); }
   await directBridge?.dispose();
+  if (process.argv.includes('--live-once')) {
+    const archive = process.env.CHATGPT_WEB_LIVE_ARCHIVE;
+    if (archive) {
+      try {
+        await mkdir(archive, { recursive: true });
+        for (const name of ['live-ledger.json', 'live-facts.json', 'live-plugin-error.log', 'live-backend-stderr.log']) {
+          try { await copyFile(join(sandbox, name), join(archive, name)); } catch {}
+        }
+        console.log(`live attempt artifacts archived before teardown to ${archive}`);
+      } catch { console.log('live attempt archiving failed; artifacts may remain only in the sandbox'); }
+    } else {
+      console.log('CHATGPT_WEB_LIVE_ARCHIVE not set; live artifacts not archived');
+    }
+  }
   await rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   console.log('sandbox discarded');
 }

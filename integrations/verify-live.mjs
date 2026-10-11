@@ -1,14 +1,19 @@
 import { spawn } from 'node:child_process';
 import { writeFile, copyFile, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
+import { BackendError } from '../backend/guard.mjs';
 
 export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, env }) {
   const cookieFile = process.env.CHATGPT_WEB_LIVE_COOKIE_FILE;
   if (!cookieFile) throw new Error('CHATGPT_WEB_LIVE_COOKIE_FILE must name the explicitly authorized session source');
   const root = join(sandbox, 'isolated-live-profile');
   const ledgerPath = join(sandbox, 'live-ledger.json');
+  const factsPath = join(sandbox, 'live-facts.json');
+  const facts = { attempt: 2, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
+  const stderrChunks = [];
   let host;
   try {
     const backend = join(sandbox, 'live-backend.mjs');
@@ -23,10 +28,13 @@ import { writeFileSync } from 'node:fs';
 import https from 'node:https';
 const ledger = { conversationSubmits:0, deliberate:[], browserRequests:0, browserByKind:{}, blockedOffOrigin:0, statuses:[] };
 const save = () => writeFileSync(${JSON.stringify(ledgerPath)}, JSON.stringify(ledger));
+const note = line => process.stderr.write(JSON.stringify(line)+'\\n');
 save();
+const DELIBERATE_CAP = 3;
 const reserve = (route,path) => {
- if (ledger.deliberate.length >= 8) throw new BackendError('cooldown');
+ if (ledger.deliberate.length >= DELIBERATE_CAP) throw new BackendError('cooldown');
  ledger.deliberate.push({route,path});
+ note({event:'reserve',route,path,deliberate:ledger.deliberate.length});
  save();
 };
 const originalGet = https.get;
@@ -35,6 +43,7 @@ https.get = function(url, options, callback) {
  reserve('node',new URL(url).pathname);
  return originalGet.call(this,url,options,response => {
   ledger.statuses.push({route:'node',path:new URL(url).pathname,status:response.statusCode,mitigated:response.headers['cf-mitigated']==='challenge'});
+  note({event:'status',route:'node',path:new URL(url).pathname,status:response.statusCode,mitigated:response.headers['cf-mitigated']==='challenge'});
   save();
   callback(response);
  });
@@ -54,8 +63,9 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
   const request=route.request(); const url=new URL(request.url());
   if(url.origin!=='https://chatgpt.com'){ledger.blockedOffOrigin++;save();return route.abort();}
   if(request.method()==='POST' && /^\\/backend-api\\/(?:f\\/)?conversation$/.test(url.pathname)) {
-   if(ledger.conversationSubmits>=1 || ledger.deliberate.length>=8) return route.abort();
+   if(ledger.conversationSubmits>=1 || ledger.deliberate.length>=DELIBERATE_CAP) return route.abort();
    reserve('browser',url.pathname);ledger.conversationSubmits++;
+   note({event:'conversationSubmit',count:ledger.conversationSubmits});
   }
   ledger.browserRequests++;
   const kind=request.resourceType();ledger.browserByKind[kind]=(ledger.browserByKind[kind]??0)+1;
@@ -64,7 +74,10 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
  });
  context.on('response',response => {
   const url=new URL(response.url());
-  if(url.origin==='https://chatgpt.com' && ['/api/auth/session','/backend-api/models','/backend-api/f/conversation','/backend-api/conversation'].includes(url.pathname)) ledger.statuses.push({route:'browser',path:url.pathname,status:response.status()});
+  if(url.origin==='https://chatgpt.com' && ['/api/auth/session','/backend-api/models','/backend-api/f/conversation','/backend-api/conversation'].includes(url.pathname)) {
+   ledger.statuses.push({route:'browser',path:url.pathname,status:response.status()});
+   note({event:'status',route:'browser',path:url.pathname,status:response.status()});
+  }
   save();
  });
  await context.addCookies(cookies.map(cookie => ({...cookie,url:'https://chatgpt.com',secure:true,httpOnly:true,expires:Math.floor(Date.now()/1000)+3600})));
@@ -88,15 +101,36 @@ await serve(process.stdin,process.stdout,{loginFlow,turnDriver,readClient:option
 }}),close:save,timeout:180000});
 `);
     const wrapper = join(sandbox, 'live-plugin.mjs');
+    const pluginErrorPath = join(sandbox, 'live-plugin-error.log');
     await writeFile(wrapper, `import { _internal } from ${imports('src/index.mjs')};
 import { Bridge } from ${imports('src/bridge.mjs')};
+import { appendFileSync } from 'node:fs';
 const bridge = new Bridge({backend:${JSON.stringify(backend)}});
-export default {id:'chatgpt-web',server:async()=>_internal.createHooks({bridge,profileRoot:${JSON.stringify(root)},pollMilliseconds:1000})};
+const hooks = _internal.createHooks({bridge,profileRoot:${JSON.stringify(root)},pollMilliseconds:1000});
+const originalLoader = hooks.auth.loader;
+hooks.auth.loader = getAuth => {
+ const loaded = originalLoader(getAuth);
+ if (loaded?.fetch) {
+  const originalFetch = loaded.fetch.bind(loaded);
+  loaded.fetch = async (...args) => {
+   const response = await originalFetch(...args);
+   if (response.status !== 200) {
+    try {
+     const parsed = JSON.parse(await response.clone().text());
+     if (parsed?.error?.message) appendFileSync(${JSON.stringify(pluginErrorPath)}, JSON.stringify({status:response.status,error:parsed.error})+'\\n');
+    } catch {}
+   }
+   return response;
+  };
+ }
+ return loaded;
+};
+export default {id:'chatgpt-web',server:async()=>hooks};
 `);
     const hostCopy = join(sandbox, 'live-host.mjs');
     await copyFile(join(liveHome, '.cache/magpie/plugin-host/host-4bc476f3c4cb.js'), hostCopy);
     host = spawn(bun, ['run', hostCopy], { cwd: sandbox, env, stdio: ['pipe', 'pipe', 'pipe'] });
-    host.stderr.resume();
+    host.stderr.on('data', chunk => stderrChunks.push(chunk));
     const pending = new Map();
     let buffer = '';
     let serial = 0;
@@ -124,26 +158,47 @@ export default {id:'chatgpt-web',server:async()=>_internal.createHooks({bridge,p
       host.stdin.write(JSON.stringify({ id, method, params }) + '\n');
     });
     await rpc('init', { directory: join(home, '.config/magpie/plugins'), authPath: join(home, '.config/magpie/plugin-auth.json'), plugins: [{ spec: 'live-consented', target: wrapper }] });
+    const readLedger = async () => JSON.parse(await readFile(ledgerPath, 'utf8'));
+    const saveFacts = () => writeFile(factsPath, JSON.stringify(facts, null, 2));
+    const routeOf = (led, path) => {
+      const attempts = led.deliberate.filter(item => item.path === path).map(item => item.route);
+      const statuses = led.statuses.filter(item => item.path === path);
+      if (statuses.some(item => item.route === 'node' && item.status === 200) && !attempts.includes('browser-read-attempt')) return 'node';
+      if (attempts.includes('browser-read-attempt') || statuses.some(item => item.route === 'browser')) return 'browser';
+      return 'unknown';
+    };
     const authorization = await rpc('authorize', { provider: 'chatgpt-web', method: 0 });
     console.log('existing session exchange started; no interactive sign-in or retained profile');
     const login = await rpc('callback', { session: authorization.session });
     if (!login.ok) throw new Error('Seeded session exchange failed; no live turn submitted');
+    facts.sessionRoute = routeOf(await readLedger(), '/api/auth/session');
+    await saveFacts();
     const providers = await rpc('providers', {});
     const provider = providers.find(value => value.id === 'chatgpt-web');
-    console.log(JSON.stringify({ liveCatalogue: !provider?.fellBack, models: provider?.models?.length ?? 0 }));
+    facts.catalogueRoute = routeOf(await readLedger(), '/backend-api/models');
+    facts.models = provider?.models?.length ?? 0;
+    facts.fellBack = provider?.fellBack ?? null;
+    await saveFacts();
+    console.log(JSON.stringify({ liveCatalogue: !provider?.fellBack, models: provider?.models?.length ?? 0, catalogueRoute: facts.catalogueRoute, sessionRoute: facts.sessionRoute }));
     if (!provider || provider.fellBack || !provider.models.length) throw new Error('Live catalogue failed; no turn submitted');
     const arrivals = [];
     const sizes = [];
+    const rawChunks = [];
     let status;
+    let headFrame = null;
     let success = false;
     let sse = '';
     const started = Date.now();
     const prompt = 'Write six short numbered paragraphs about an imaginary garden in the clouds. Use only invented scenery, no tools, links or personal information.';
     console.log('submitting one temporary conversation turn without retries');
-    await rpc('fetch', { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: 'live-consented', body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: prompt }] })).toString('base64') }, frame => {
-      if (frame.event === 'head') status = frame.status;
+    let fetchError = null;
+    try {
+      await rpc('fetch', { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: 'live-consented', body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: prompt }] })).toString('base64') }, frame => {
+      if (frame.event === 'head') { status = frame.status; headFrame = frame; }
       if (frame.event !== 'chunk') return;
-      sse += Buffer.from(frame.data, 'base64').toString();
+      const text = Buffer.from(frame.data, 'base64').toString();
+      rawChunks.push(text);
+      sse += text;
       let end;
       while ((end = sse.indexOf('\n\n')) >= 0) {
         const block = sse.slice(0, end); sse = sse.slice(end + 2);
@@ -158,11 +213,33 @@ export default {id:'chatgpt-web',server:async()=>_internal.createHooks({bridge,p
           if (value.type === 'error') console.log('live stream returned a typed error');
         }
       }
-    });
-    console.log(JSON.stringify({ status, completed: success, deltas: sizes.length, sizes, arrivalMilliseconds: arrivals }));
+      });
+    } catch (error) { fetchError = String(error?.message ?? error); }
+    let errorEnvelope = null;
+    let upstreamBodyDigest = null;
+    if (status !== 200) {
+      const raw = rawChunks.join('');
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { parsed = null; }
+      if (parsed && typeof parsed.error === 'object' && parsed.error !== null && typeof parsed.error.status === 'number' && typeof parsed.error.message === 'string') errorEnvelope = parsed.error;
+      else upstreamBodyDigest = { bytes: Buffer.byteLength(raw), sha256: createHash('sha256').update(raw).digest('hex') };
+    }
+    const typedCode = errorEnvelope ? BackendError.fromEnvelope(errorEnvelope) : null;
+    let pluginErrors = null;
+    try { pluginErrors = (await readFile(pluginErrorPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch {}
+    const temporaryState = success ? 'confirmed'
+      : typedCode === 'temporary' ? 'unconfirmed'
+      : typedCode ? `not-reached (${typedCode})`
+      : 'unknown';
+    const ledNow = await readLedger();
+    facts.turn = { status, completed: success, deltas: sizes.length, arrivalMilliseconds: arrivals, sizes, errorEnvelope, typedCode, pluginErrors, upstreamBodyDigest, fetchError, temporaryState, conversationSubmits: ledNow.conversationSubmits, deliberate: ledNow.deliberate.length, headFrame };
+    await saveFacts();
+    console.log(JSON.stringify({ status, completed: success, deltas: sizes.length, sizes, arrivalMilliseconds: arrivals, typedCode, typedMessage: errorEnvelope?.message ?? null, pluginErrors, temporaryState, fetchError }));
     if (!success) throw new Error('One live turn failed; no retry made');
   } finally {
     if (host) { const exit = once(host, 'exit'); host.stdin.end(); await exit; }
+    await writeFile(factsPath, JSON.stringify(facts, null, 2)).catch(() => {});
+    await writeFile(join(sandbox, 'live-backend-stderr.log'), Buffer.concat(stderrChunks)).catch(() => {});
     try {
       const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'));
       const browserReads = ledger.deliberate.filter(item => item.route === 'browser-read-attempt').length;
