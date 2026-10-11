@@ -151,14 +151,23 @@ export class TurnDriver {
     for (const item of await machine.all()) {
       if (await item.getAttribute('data-model-id') === slug) { await item.click(); return; }
     }
-    const picker = page.getByRole('button', { name: /model selector|model picker|模型选择|选择模型/i });
+    const picker = page.locator('button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"][data-composer-navigation-target="reasoning"]').filter({ visible: true });
     if (await picker.count() !== 1) throw new BackendError('pageShape');
     await picker.click();
     try {
-      const entries = page.getByRole('menuitemradio');
+      const modelView = page.locator('[role="menu"] [role="menuitem"][data-model-picker-view-toggle="true"]').filter({ visible: true });
+      if (await modelView.count() === 1) await modelView.click();
+      // GPT-6 is stream-confirmed; GPT-5.5 is a unique-title mapping.
+      // Mini variants and the catalogue's Luna versus the picker's Sol are unmapped.
+      const labels = { 'gpt-6': 'GPT-6', 'gpt-5-5': 'GPT-5.5' };
+      const entries = page.getByRole('menuitemradio').filter({ visible: true });
+      const matches = [];
       for (const entry of await entries.all()) {
-        if (await entry.getAttribute('data-model-id') === slug || (slug === 'gpt-6' && (await entry.innerText()).trim() === 'GPT-6')) { await entry.click(); return; }
+        const id = await entry.getAttribute('data-model-id');
+        const title = (await entry.innerText()).split('\n')[0].trim();
+        if (id === slug || (!id && labels[slug] === title)) matches.push(entry);
       }
+      if (matches.length === 1) { await matches[0].click(); return; }
       throw new BackendError('pageShape');
     } finally { await page.keyboard.press('Escape'); }
   }

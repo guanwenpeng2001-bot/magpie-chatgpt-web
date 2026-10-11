@@ -23,7 +23,11 @@ function mapModels(catalogue) {
   if (!Array.isArray(models) || !models.length || models.some(model => typeof model?.slug !== 'string' || !model.slug || typeof model.title !== 'string' || !model.title)) throw new BackendError('protocol');
   const titles = new Map();
   for (const model of models) titles.set(model.title, (titles.get(model.title) ?? 0) + 1);
-  const ordered = [...models.filter(model => model.slug === 'auto'), ...models.filter(model => model.slug !== 'auto')];
+  // Dated compatibility filter from 2026-10-11: Auto and GPT-6 passed generation.
+  // GPT-5.5 failed its submitted turn; other slugs have no supported picker mapping.
+  // Keep account discovery authoritative: never synthesize an absent catalogue entry.
+  const supported = new Set(['auto', 'gpt-6']);
+  const ordered = models.filter(model => supported.has(model.slug)).sort((left, right) => Number(right.slug === 'auto') - Number(left.slug === 'auto'));
   return Object.fromEntries(ordered.map(model => [model.slug, modelEntry(model.slug,
     titles.get(model.title) > 1 && model.slug.endsWith('-mini') ? `${model.title} (${model.slug})` : model.title)]));
 }

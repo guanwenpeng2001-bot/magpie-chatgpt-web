@@ -10,8 +10,9 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
   const catalogue = { models: slugs.map((slug, index) => ({ slug, title: titles[index], max_tokens: 34834 })) };
   const hooks = plugin._internal.createHooks({ bridge: { call: async () => catalogue }, profileRoot: '.' });
   const models = await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } });
-  assert.deepEqual(Object.keys(models), ['auto', ...slugs.slice(0, -1)]);
+  assert.deepEqual(Object.keys(models), ['auto', 'gpt-6']);
   for (const [index, slug] of slugs.entries()) {
+    if (!['auto', 'gpt-6'].includes(slug)) { assert.equal(models[slug], undefined); continue; }
     const name = ['gpt-5-6-mini', 'gpt-6-mini'].includes(slug) ? `${titles[index]} (${slug})` : titles[index];
     assert.deepEqual(models[slug], {
       name, api: { id: slug, url: 'https://chatgpt-web.invalid/v1', npm: '@ai-sdk/anthropic' },

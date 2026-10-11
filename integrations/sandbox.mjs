@@ -14,6 +14,10 @@ const liveHome = homedir();
 const liveFiles = ['plugins.json', 'plugin-providers.json', 'plugin-auth.json', 'plugins/package.json'].map(name => join(liveHome, '.config/magpie', name));
 const snapshot = async () => Promise.all(liveFiles.map(async path => {
   try {
+    if (path.endsWith('plugin-auth.json')) {
+      const metadata = await stat(path);
+      return [path, metadata.size + ':' + metadata.mtimeMs];
+    }
     const value = await readFile(path);
     const content = path.endsWith('plugin-providers.json') ? JSON.stringify(Object.keys(JSON.parse(value)).sort()) : value;
     return [path, createHash('sha256').update(content).digest('hex')];
@@ -46,9 +50,9 @@ try {
   console.log('private HOME and USERPROFILE isolation checked before install');
   const repository = join(sandbox, 'package');
   await mkdir(repository);
-  for (const name of ['src', 'backend', 'integrations', 'package.json', 'README.md', 'THIRD_PARTY_NOTICES']) await cp(join(source, name), join(repository, name), { recursive: true });
+  for (const name of ['src', 'backend', 'integrations', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES']) await cp(join(source, name), join(repository, name), { recursive: true });
   command('git', ['init', '-q', repository]);
-  command('git', ['add', 'src', 'backend', 'integrations', 'package.json', 'README.md', 'THIRD_PARTY_NOTICES'], repository);
+  command('git', ['add', 'src', 'backend', 'integrations', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES'], repository);
   command('git', ['-c', 'user.name=Sandbox', '-c', 'user.email=sandbox@example.invalid', 'commit', '-qm', 'Create disposable integration snapshot'], repository);
   const spec = `git+${pathToFileURL(repository).href}`;
   command(magpie, ['plugin', 'add', spec]);
@@ -59,7 +63,8 @@ try {
   console.log('provider listed chatgpt-web');
   const installed = join(config, 'plugins/node_modules/magpie-chatgpt-web');
   await stat(join(installed, 'src/index.mjs'));
-  await cp(join(repository, 'integrations'), join(installed, 'integrations'), { recursive: true });
+  await stat(join(installed, 'integrations/fixture-backend.mjs'));
+  await stat(join(installed, 'LICENSE'));
   if (process.argv.includes('--live-once')) {
     const { verifyLiveOnce } = await import('./verify-live.mjs');
     await verifyLiveOnce({ installed, home, sandbox, bun, liveHome, env });
@@ -73,8 +78,11 @@ try {
   console.log(command('node', [launchProbe]).trim());
   const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-6e85b6c721c8.js');
   const hostCopy = join(sandbox, 'host.mjs');
+  const hostBytes = await readFile(hostSource);
+  assert.equal(createHash('sha256').update(hostBytes).digest('hex'), '6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd', 'pinned host changed');
   await copyFile(hostSource, hostCopy);
-  assert.deepEqual(await readFile(hostCopy), await readFile(hostSource));
+  assert.deepEqual(await readFile(hostCopy), hostBytes);
+  console.log('host magpie 0.1.1198 SHA-256 6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd');
   const wrapper = join(sandbox, 'fixture-plugin.mjs');
   await writeFile(wrapper, `import { _internal } from ${JSON.stringify(pathToFileURL(join(installed, 'src/index.mjs')).href)};\nimport { Bridge } from ${JSON.stringify(pathToFileURL(join(installed, 'src/bridge.mjs')).href)};\nconst bridge = new Bridge({ backend: ${JSON.stringify(join(installed, 'integrations/fixture-backend.mjs'))} });\nexport default { id: 'chatgpt-web', server: async () => _internal.createHooks({ bridge, profileRoot: ${JSON.stringify(join(home, '.config/magpie/chatgpt-web-profile'))}, pollMilliseconds: 20 }) };\n`);
   host = spawn(bun, ['run', hostCopy], { cwd: sandbox, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -111,6 +119,8 @@ try {
     host.stdin.write(JSON.stringify({ id, method, params }) + '\n');
   });
   const authPath = join(config, 'plugin-auth.json');
+  await assert.rejects(stat(authPath), { code: 'ENOENT' });
+  console.log('cold HOME has no plugin credential store before fixture sign-in');
   const init = await rpc('init', { directory: join(config, 'plugins'), authPath, plugins: [{ spec, target: wrapper }] });
   assert.deepEqual(init.plugins[0].provides, ['chatgpt-web']);
   const authorization = await rpc('authorize', { provider: 'chatgpt-web', method: 0 });
@@ -129,9 +139,9 @@ try {
   const providers = await rpc('providers');
   const provider = providers.find(value => value.id === 'chatgpt-web');
   assert.equal(provider.fellBack, false);
-  assert.equal(provider.models.length, 8);
-  assert.equal(provider.models[0].id, 'auto');
-  console.log('models listed: 8, auto first, duplicate mini names disambiguated');
+  assert.deepEqual(provider.models.map(model => [model.id, model.apiId]), [['auto', 'auto'], ['gpt-6', 'gpt-6']]);
+  assert.ok(provider.models.every(model => model.reasoning === false && model.image === false && model.imageSaid === true && JSON.stringify(model.inputs) === JSON.stringify(['text']) && JSON.stringify(model.outputs) === JSON.stringify(['text'])));
+  console.log('models listed: Auto and GPT-6, text-only, unverified slugs excluded');
   const fetchTurn = (messages, { cancel = false, conversation = 'host-session', tools, tool_choice } = {}) => new Promise((resolveReply, reject) => {
     const id = String(++sequence);
     const chunks = [];
@@ -160,7 +170,12 @@ try {
   assert.equal(firstTurn.arrivals.length, 3);
   assert.ok(firstTurn.arrivals[1] - firstTurn.arrivals[0] > 250);
   const answer = firstTurn.chunks.join('').split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6))).filter(frame => frame.type === 'content_block_delta').map(frame => frame.delta.text).join('');
-  await fetchTurn([...messages, { role: 'assistant', content: answer }, { role: 'user', content: 'Continue.' }]);
+  const secondMessages = [...messages, { role: 'assistant', content: answer }, { role: 'user', content: 'Continue the same garden description.' }];
+  const secondTurn = await fetchTurn(secondMessages);
+  assert.match(secondTurn.chunks.join(''), /event: message_stop/);
+  const thirdTurn = await fetchTurn([...secondMessages, { role: 'assistant', content: answer }, { role: 'user', content: 'Recall the garden from the first turn.' }]);
+  assert.match(thirdTurn.chunks.join(''), /event: message_stop/);
+  console.log('three fixture-backed conversation turns completed');
   const cancelled = await fetchTurn(messages, { cancel: true, conversation: 'abort-session' });
   assert.equal(cancelled.aborted, true);
   assert.match((await fetchTurn(messages, { conversation: 'abort-session' })).chunks.join(''), /event: message_stop/);
@@ -202,6 +217,9 @@ try {
   await directBridge.call({ method: 'expire' });
   await assert.rejects(hooks.provider.models({}, { auth }), error => error.signIn === 'expired');
   const loader = await hooks.auth.loader(async () => auth);
+  const unsupported = await loader.fetch('https://chatgpt-web.invalid/v1/messages', { body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: '' } }] }] }) });
+  assert.equal(unsupported.status, 400);
+  console.log('unsupported image input refused with HTTP 400 before dispatch');
   await assert.rejects(directBridge.call({ method: 'session', auth }), error => error.signIn === 'expired');
   const rejected = await loader.fetch('https://chatgpt-web.invalid/v1/messages', { body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'fixture' }] }) });
   assert.equal(rejected.status, 401);
