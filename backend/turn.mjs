@@ -8,12 +8,12 @@ import { installHarvest } from './harvest.mjs';
 import { AnswerStream } from '../src/protocol.mjs';
 
 export class TurnDriver {
-  constructor({ profileRoot, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now } = {}) {
+  constructor({ profileRoot, profile, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now } = {}) {
     this.origin = origin;
     this.network = network;
     this.timeout = timeout;
     this.bindings = new Conversations({ now });
-    this.browser = new BrowserSupervisor({ profileRoot, launch: launch ?? (async profile => {
+    this.browser = new BrowserSupervisor({ profileRoot, profile, launch: launch ?? (async profile => {
       const owned = await launchSignInBrowser(profile, new AbortController().signal);
       const context = owned.context;
       context.close = owned.close;

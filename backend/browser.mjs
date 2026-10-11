@@ -9,8 +9,9 @@ import { BackendError } from './guard.mjs';
 export class BrowserSupervisor {
   #accounts = new Map();
   #closed = false;
-  constructor({ profileRoot, launch, idleMilliseconds = 900_000, headless = true, channel = 'chrome' } = {}) {
+  constructor({ profileRoot, profile, launch, idleMilliseconds = 900_000, headless = true, channel = 'chrome' } = {}) {
     this.profileRoot = profileRoot;
+    this.profile = profile;
     this.idleMilliseconds = idleMilliseconds;
     this.options = { headless, channel };
     this.launch = launch ?? (async (profile, options) => {
@@ -25,12 +26,13 @@ export class BrowserSupervisor {
   }
   async #ensure(account) {
     if (this.#closed) throw new BackendError('browserClosed');
-    if (typeof this.profileRoot !== 'string' || !this.profileRoot || typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
+    if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
+    if (this.profile !== undefined ? typeof this.profile !== 'string' || !this.profile : typeof this.profileRoot !== 'string' || !this.profileRoot) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
     if (!entry) {
       entry = { users: 0, context: null, timer: null, crashed: new Set() };
       this.#accounts.set(account, entry);
-      entry.starting = this.launch(resolve(this.profileRoot, account), this.options).then(async context => {
+      entry.starting = this.launch(this.profile ?? resolve(this.profileRoot, account), this.options).then(async context => {
         entry.context = context;
         context.once('close', () => {
           clearTimeout(entry.timer);

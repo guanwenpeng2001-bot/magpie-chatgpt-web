@@ -6,15 +6,52 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { BackendError } from '../backend/guard.mjs';
 
+export const CONVERSATION_SUBMIT_PATTERN = /^\/backend-api\/(?:f\/)?conversation$/;
+
+export class LiveLedger {
+  #deliberateCap;
+  #submitCap;
+  constructor({ deliberateCap = 3, submitCap = 2 } = {}) {
+    this.#deliberateCap = deliberateCap;
+    this.#submitCap = submitCap;
+    this.conversationSubmits = 0;
+    this.deliberate = [];
+    this.posts = [];
+    this.browserRequests = 0;
+    this.browserByKind = {};
+    this.blockedOffOrigin = 0;
+    this.statuses = [];
+  }
+  reserve(route, path) {
+    if (this.deliberate.length >= this.#deliberateCap) return false;
+    this.deliberate.push({ route, path });
+    return true;
+  }
+  classifyBrowserRequest(method, pathname) {
+    return method === 'POST' && CONVERSATION_SUBMIT_PATTERN.test(pathname) ? 'submit' : 'record';
+  }
+  reserveSubmit(pathname) {
+    if (this.conversationSubmits >= this.#submitCap || !CONVERSATION_SUBMIT_PATTERN.test(pathname)) return false;
+    if (!this.reserve('browser', pathname)) return false;
+    this.conversationSubmits++;
+    return true;
+  }
+}
+
 export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, env }) {
+  const signedInProfile = process.env.CHATGPT_WEB_LIVE_PROFILE_DIR ?? null;
   const cookieFile = process.env.CHATGPT_WEB_LIVE_COOKIE_FILE;
   if (!cookieFile) throw new Error('CHATGPT_WEB_LIVE_COOKIE_FILE must name the explicitly authorized session source');
   const turnOnly = process.env.CHATGPT_WEB_LIVE_TURN_ONLY === '1';
+  const deliberateCap = Number.parseInt(process.env.CHATGPT_WEB_LIVE_DELIBERATE_CAP ?? '3', 10);
+  const attemptLabel = process.env.CHATGPT_WEB_LIVE_ATTEMPT_LABEL ?? '3-seeded';
+  if (!Number.isInteger(deliberateCap) || deliberateCap < 1 || deliberateCap > 8) throw new Error('Deliberate cap must be an integer from 1 through 8');
+  if (signedInProfile && !turnOnly) throw new Error('An existing profile requires turn-only mode');
   const root = join(sandbox, 'isolated-live-profile');
   const ledgerPath = join(sandbox, 'live-ledger.json');
   const factsPath = join(sandbox, 'live-facts.json');
   const notesPath = join(sandbox, 'live-backend-notes.log');
-  const facts = { attempt: turnOnly ? '5-final-turn-only' : 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
+  const facts = { attempt: attemptLabel, candidate: signedInProfile ? 'seeded-session provenance' : 'seeded baseline', sessionProvenance: signedInProfile ? 'interactive-profile-in-place' : 'injected-session', sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
   const stderrChunks = [];
   let host;
   try {
@@ -25,24 +62,24 @@ import { browserRead, launchSignInBrowser, sessionCredential } from ${imports('b
 import { productionReadClient } from ${imports('backend/http.mjs')};
 import { BackendError } from ${imports('backend/guard.mjs')};
 import { TurnDriver } from ${imports('backend/turn.mjs')};
+import { LiveLedger } from ${imports('integrations/verify-live.mjs')};
 import { readFile } from 'node:fs/promises';
 import { writeFileSync, appendFileSync } from 'node:fs';
 import https from 'node:https';
-const ledger = { conversationSubmits:0, deliberate:[], posts:[], browserRequests:0, browserByKind:{}, blockedOffOrigin:0, statuses:[] };
+const ledger = new LiveLedger({deliberateCap:${deliberateCap},submitCap:1});
 const save = () => writeFileSync(${JSON.stringify(ledgerPath)}, JSON.stringify(ledger));
 const note = line => { try { appendFileSync(${JSON.stringify(notesPath)}, JSON.stringify(line)+'\\n'); } catch {} try { process.stderr.write(JSON.stringify(line)+'\\n'); } catch {} };
 save();
-const DELIBERATE_CAP = 3;
+const DELIBERATE_CAP = ${deliberateCap};
 class ShareExhausted extends Error {
  constructor(){ super('Local live-attempt share of deliberate requests exhausted; refusing to spend further. This is a harness budget refusal, not an account rate limit.'); this.name='ShareExhausted'; }
 }
 const reserve = (route,path) => {
- if (ledger.deliberate.length >= DELIBERATE_CAP) {
+ if (!ledger.reserve(route,path)) {
   note({event:'shareExhausted',route,path,deliberate:ledger.deliberate.length,cap:DELIBERATE_CAP});
   save();
   throw new ShareExhausted();
  }
- ledger.deliberate.push({route,path});
  note({event:'reserve',route,path,deliberate:ledger.deliberate.length});
  save();
 };
@@ -65,7 +102,7 @@ const cookies = jar[1].split(';').map(pair => {
 }).filter(cookie => /^__Secure-next-auth\\.session-token(?:\\.\\d+)?$/.test(cookie.name));
 if (!cookies.length) throw new BackendError('expired');
 const refresh = cookies.map(cookie => cookie.name+'='+cookie.value).join('; ');
-const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:async profile => {
+const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},...${JSON.stringify(signedInProfile ? {profile:signedInProfile} : {})},launch:async profile => {
  const owned = await launchSignInBrowser(profile,new AbortController().signal);
  const context=owned.context;
  const inspectPage = async page => {
@@ -86,22 +123,24 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
  });
  await context.route('**/*',async route => {
   const request=route.request(); const url=new URL(request.url());
+  if(url.pathname.startsWith('/cdn-cgi/challenge-platform/')) url.pathname='/cdn-cgi/challenge-platform/[redacted]';
   if(url.origin!=='https://chatgpt.com'){ledger.blockedOffOrigin++;save();return route.abort();}
   if(request.method()==='POST') {
+   const post={path:url.pathname,status:null,headerNames:[]};
+   ledger.posts.push(post);save();
    request.response().then(response => {
-    ledger.posts.push({path:url.pathname,status:response.status(),headerNames:Object.keys(response.headers())});
-    note({event:'post',path:url.pathname,status:response.status()});
+    if(response){post.status=response.status();post.headerNames=Object.keys(response.headers());}
+    note({event:'post',path:url.pathname,status:post.status});
     save();
-   }).catch(()=>{});
+   }).catch(()=>{save();});
    if(url.pathname.endsWith('/conversation/prepare') && !request.serviceWorker()) void inspectPage(request.frame().page());
   }
-  if(request.method()==='POST' && /^\\/backend-api\\/(?:f\\/)?conversation$/.test(url.pathname)) {
-   if(ledger.conversationSubmits>=2 || ledger.deliberate.length>=DELIBERATE_CAP) {
+  if(ledger.classifyBrowserRequest(request.method(),url.pathname)==='submit') {
+   if(!ledger.reserveSubmit(url.pathname)) {
     note({event:'submitRefused',submits:ledger.conversationSubmits,deliberate:ledger.deliberate.length});
     save();
     return route.abort();
    }
-   reserve('browser',url.pathname);ledger.conversationSubmits++;
    note({event:'conversationSubmit',count:ledger.conversationSubmits});
   }
   ledger.browserRequests++;
@@ -117,7 +156,7 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
   }
   save();
  });
- await context.addCookies(cookies.map(cookie => ({...cookie,url:'https://chatgpt.com',secure:true,httpOnly:true,expires:Math.floor(Date.now()/1000)+3600})));
+ if (!${!!signedInProfile}) await context.addCookies(cookies.map(cookie => ({...cookie,url:'https://chatgpt.com',secure:true,httpOnly:true,expires:Math.floor(Date.now()/1000)+3600})));
  context.close=owned.close;
  return context;
 }});
@@ -238,7 +277,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
       return 'unknown';
     };
     const authorization = await rpc('authorize', { provider: 'chatgpt-web', method: 0 });
-    console.log(turnOnly ? 'turn-only attempt: no-network seeded credential exchange; no sign-in, no session read, no catalogue read' : 'existing session exchange started; no interactive sign-in or retained profile');
+    console.log(turnOnly ? 'turn-only attempt: no-network credential exchange; no sign-in or session read; host catalogue reads remain accounted' : 'existing session exchange started; no interactive sign-in or retained profile');
     const login = await rpc('callback', { session: authorization.session });
     if (!login.ok) throw new Error('Seeded credential exchange failed; no live turn submitted');
     if (!turnOnly) {
@@ -256,7 +295,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
       facts.sessionRoute = 'not-exercised';
       facts.catalogueRoute = 'not-exercised';
       await saveFacts();
-      console.log('turn-only attempt: reads skipped by authorization; model auto served from the declared baseline');
+      console.log('turn-only attempt: explicit reads skipped; any host-triggered catalogue reads are recorded');
     }
     const prompt = 'Write six short numbered paragraphs about an imaginary garden in the clouds. Use only invented scenery, no tools, links or personal information.';
     const tries = [];
@@ -314,6 +353,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
     let pluginErrors = null;
     try { pluginErrors = (await readFile(pluginErrorPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch {}
     const ledNow = await readLedger();
+    facts.catalogueRoute = routeOf(ledNow, '/backend-api/models');
     const last = tries.at(-1);
     facts.turn = { tries, retryUsed, completed: last.completed, pluginErrors, conversationSubmits: ledNow.conversationSubmits, deliberate: ledNow.deliberate.length };
     await saveFacts();
