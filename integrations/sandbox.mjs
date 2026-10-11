@@ -211,10 +211,11 @@ try {
       try {
         await mkdir(archive, { recursive: true });
         for (const name of ['live-ledger.json', 'live-facts.json', 'live-plugin-error.log', 'live-backend-stderr.log', 'live-backend-notes.log', 'live-backend.mjs', 'live-plugin.mjs']) {
-          try { await copyFile(join(sandbox, name), join(archive, name)); } catch {}
+          try { await copyFile(join(sandbox, name), join(archive, name)); }
+          catch (error) { if (error.code !== 'ENOENT' || ['live-ledger.json', 'live-facts.json'].includes(name)) throw error; }
         }
         console.log(`live attempt artifacts archived before teardown to ${archive}`);
-      } catch { console.log('live attempt archiving failed; artifacts may remain only in the sandbox'); }
+      } catch { throw new Error('Live archive failed; sandbox retained with its evidence'); }
     } else {
       console.log('CHATGPT_WEB_LIVE_ARCHIVE not set; live artifacts not archived');
     }

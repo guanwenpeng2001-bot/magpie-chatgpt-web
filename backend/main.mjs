@@ -162,7 +162,8 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (pending.has(command.id)) return;
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    let budgetExpired = false;
+    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, timeout);
     const entry = { controller };
     pending.set(command.id, entry);
     entry.work = (async () => {
@@ -171,7 +172,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       try {
         release = await acquire(controller.signal);
         const aborted = new Promise((resolve, reject) => {
-          onAbort = () => reject(new BackendError('upstream'));
+          onAbort = () => reject(new BackendError(budgetExpired ? 'requestBudget' : 'upstream'));
           controller.signal.addEventListener('abort', onAbort, { once: true });
           if (controller.signal.aborted) onAbort();
         });
@@ -187,7 +188,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         if (result !== undefined) await emit(result);
         await send({ id: command.id, event: 'done' });
       } catch (error) {
-        if (!stopping) await send({ id: command.id, event: 'error', error: publicError(error) }).catch(() => {});
+        if (!stopping) await send({ id: command.id, event: 'error', error: publicError(budgetExpired ? new BackendError('requestBudget') : error) }).catch(() => {});
       } finally {
         clearTimeout(timer);
         release?.();

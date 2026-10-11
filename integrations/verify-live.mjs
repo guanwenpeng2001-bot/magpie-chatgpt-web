@@ -14,7 +14,7 @@ export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, 
   const ledgerPath = join(sandbox, 'live-ledger.json');
   const factsPath = join(sandbox, 'live-facts.json');
   const notesPath = join(sandbox, 'live-backend-notes.log');
-  const facts = { attempt: turnOnly ? '4-turn-only' : 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
+  const facts = { attempt: turnOnly ? '5-final-turn-only' : 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
   const stderrChunks = [];
   let host;
   try {
@@ -32,7 +32,7 @@ const ledger = { conversationSubmits:0, deliberate:[], posts:[], browserRequests
 const save = () => writeFileSync(${JSON.stringify(ledgerPath)}, JSON.stringify(ledger));
 const note = line => { try { appendFileSync(${JSON.stringify(notesPath)}, JSON.stringify(line)+'\\n'); } catch {} try { process.stderr.write(JSON.stringify(line)+'\\n'); } catch {} };
 save();
-const DELIBERATE_CAP = 6;
+const DELIBERATE_CAP = 3;
 class ShareExhausted extends Error {
  constructor(){ super('Local live-attempt share of deliberate requests exhausted; refusing to spend further. This is a harness budget refusal, not an account rate limit.'); this.name='ShareExhausted'; }
 }
@@ -68,6 +68,22 @@ const refresh = cookies.map(cookie => cookie.name+'='+cookie.value).join('; ');
 const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:async profile => {
  const owned = await launchSignInBrowser(profile,new AbortController().signal);
  const context=owned.context;
+ const inspectPage = async page => {
+  try {
+   const state = await page.evaluate(async () => ({
+    temporary: new URL(location.href).searchParams.get('temporary-chat') === 'true',
+    serviceWorkerControlled: !!navigator.serviceWorker?.controller,
+    serviceWorkerRegistrations: navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).length : 0,
+    clientErrorVisible: /something went wrong|unable to|try again|出错|重试/i.test(document.body?.innerText ?? '')
+   }));
+   note({event:'page-state',...state});
+  } catch { note({event:'page-state-unavailable'}); }
+ };
+ context.on('page',page => {
+  page.on('console',message => { if(['error','warning'].includes(message.type())) note({event:'console',type:message.type(),length:message.text().length,handshake:/sentinel|requirements|prepare/i.test(message.text()),network:/fetch|network|failed to load/i.test(message.text())}); });
+  page.on('pageerror',error => note({event:'pageerror',length:error.message.length,handshake:/sentinel|requirements|prepare/i.test(error.message)}));
+  page.on('domcontentloaded',()=>inspectPage(page));
+ });
  await context.route('**/*',async route => {
   const request=route.request(); const url=new URL(request.url());
   if(url.origin!=='https://chatgpt.com'){ledger.blockedOffOrigin++;save();return route.abort();}
@@ -77,6 +93,7 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
     note({event:'post',path:url.pathname,status:response.status()});
     save();
    }).catch(()=>{});
+   if(url.pathname.endsWith('/conversation/prepare') && !request.serviceWorker()) void inspectPage(request.frame().page());
   }
   if(request.method()==='POST' && /^\\/backend-api\\/(?:f\\/)?conversation$/.test(url.pathname)) {
    if(ledger.conversationSubmits>=2 || ledger.deliberate.length>=DELIBERATE_CAP) {
@@ -119,7 +136,7 @@ const loginFlow = TURN_ONLY ? async (account,signal) => ({state:'signed-in',cred
 };
 await serve(process.stdin,process.stdout,{loginFlow,turnDriver,readClient:options=>productionReadClient({...options,browserRoute:async(...args)=>{
  reserve('browser-read-attempt',args[0]);return options.browserRoute(...args);
-}}),close:save,timeout:180000});
+}}),close:save});
 `);
     const wrapper = join(sandbox, 'live-plugin.mjs');
     const pluginErrorPath = join(sandbox, 'live-plugin-error.log');
@@ -153,8 +170,8 @@ bridge.open = async (command, signal) => {
 };
 const hooks = _internal.createHooks({bridge,profileRoot:${JSON.stringify(root)},pollMilliseconds:1000});
 const originalLoader = hooks.auth.loader;
-hooks.auth.loader = getAuth => {
- const loaded = originalLoader(getAuth);
+hooks.auth.loader = async getAuth => {
+ const loaded = await originalLoader(getAuth);
  if (loaded?.fetch) {
   const originalFetch = loaded.fetch.bind(loaded);
   loaded.fetch = async (input, init = {}) => {
@@ -206,7 +223,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
     });
     const rpc = (method, params, frame) => new Promise((resolve, reject) => {
       const id = String(++serial);
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Live ${method} timed out; no retry allowed`)); }, 190000);
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Live ${method} timed out; no retry allowed`)); }, 330000);
       pending.set(id, { frame, resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
       host.stdin.write(JSON.stringify({ id, method, params }) + '\n');
     });
@@ -244,7 +261,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
     const prompt = 'Write six short numbered paragraphs about an imaginary garden in the clouds. Use only invented scenery, no tools, links or personal information.';
     const tries = [];
     let retryUsed = false;
-    for (let index = 0; index < 2; index++) {
+    for (let index = 0; index < 1; index++) {
       const arrivals = [];
       const sizes = [];
       const rawChunks = [];
@@ -289,13 +306,9 @@ export default {id:'chatgpt-web',server:async()=>hooks};
         else upstreamBodyDigest = { bytes: Buffer.byteLength(raw), sha256: createHash('sha256').update(raw).digest('hex') };
       }
       const typedCode = errorEnvelope ? BackendError.fromEnvelope(errorEnvelope).code : null;
-      const temporaryState = success ? 'confirmed'
-        : typedCode === 'temporary' ? 'unconfirmed'
-        : typedCode ? `not-reached (${typedCode})`
-        : 'unknown';
+      const temporaryState = success ? 'confirmed' : typedCode === 'temporary' ? 'unconfirmed' : 'see-page-state-notes';
       tries.push({ startedAt: startedWall, elapsedMilliseconds: Date.now() - started, status, completed: success, deltas: sizes.length, arrivalMilliseconds: arrivals, sizes, errorEnvelope, typedCode, upstreamBodyDigest, fetchError, temporaryState, headFrame });
       if (success) break;
-      if (index === 0 && typedCode === 'verification') { retryUsed = true; continue; }
       break;
     }
     let pluginErrors = null;
