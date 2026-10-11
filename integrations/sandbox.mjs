@@ -40,7 +40,7 @@ try {
   const bun = join(cache, 'bun/1.4.2/magpie-bun.exe');
   await copyFile(join(liveHome, 'Downloads/magpie-windows-amd64.exe'), magpie);
   await copyFile(join(liveHome, '.cache/magpie/bun/1.4.2/magpie-bun.exe'), bun);
-  assert.match(command(magpie, ['--version']), /0\.1\.1184/);
+  assert.match(command(magpie, ['--version']), /0\.1\.1198/);
   assert.deepEqual(await snapshot(), before, 'live metadata changed during isolated version check');
   console.log('private HOME and USERPROFILE isolation checked before install');
   const repository = join(sandbox, 'package');
@@ -70,7 +70,7 @@ try {
   const launchProbe = join(sandbox, 'launch-probe.mjs');
   await writeFile(launchProbe, 'import { launchSignInBrowser } from ' + JSON.stringify(pathToFileURL(join(installed, 'backend/browser.mjs')).href) + ';\nconst owned = await launchSignInBrowser(' + JSON.stringify(join(home, 'launch-probe')) + ', new AbortController().signal); console.log("ordinary browser probe connected"); await owned.close();');
   console.log(command('node', [launchProbe]).trim());
-  const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-4bc476f3c4cb.js');
+  const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-6e85b6c721c8.js');
   const hostCopy = join(sandbox, 'host.mjs');
   await copyFile(hostSource, hostCopy);
   assert.deepEqual(await readFile(hostCopy), await readFile(hostSource));

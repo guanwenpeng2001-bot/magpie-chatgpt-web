@@ -12,7 +12,7 @@ export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, 
   const root = join(sandbox, 'isolated-live-profile');
   const ledgerPath = join(sandbox, 'live-ledger.json');
   const factsPath = join(sandbox, 'live-facts.json');
-  const facts = { attempt: 2, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
+  const facts = { attempt: 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
   const stderrChunks = [];
   let host;
   try {
@@ -30,9 +30,16 @@ const ledger = { conversationSubmits:0, deliberate:[], browserRequests:0, browse
 const save = () => writeFileSync(${JSON.stringify(ledgerPath)}, JSON.stringify(ledger));
 const note = line => process.stderr.write(JSON.stringify(line)+'\\n');
 save();
-const DELIBERATE_CAP = 3;
+const DELIBERATE_CAP = 6;
+class ShareExhausted extends Error {
+ constructor(){ super('Local live-attempt share of deliberate requests exhausted; refusing to spend further. This is a harness budget refusal, not an account rate limit.'); this.name='ShareExhausted'; }
+}
 const reserve = (route,path) => {
- if (ledger.deliberate.length >= DELIBERATE_CAP) throw new BackendError('cooldown');
+ if (ledger.deliberate.length >= DELIBERATE_CAP) {
+  note({event:'shareExhausted',route,path,deliberate:ledger.deliberate.length,cap:DELIBERATE_CAP});
+  save();
+  throw new ShareExhausted();
+ }
  ledger.deliberate.push({route,path});
  note({event:'reserve',route,path,deliberate:ledger.deliberate.length});
  save();
@@ -63,7 +70,11 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
   const request=route.request(); const url=new URL(request.url());
   if(url.origin!=='https://chatgpt.com'){ledger.blockedOffOrigin++;save();return route.abort();}
   if(request.method()==='POST' && /^\\/backend-api\\/(?:f\\/)?conversation$/.test(url.pathname)) {
-   if(ledger.conversationSubmits>=1 || ledger.deliberate.length>=DELIBERATE_CAP) return route.abort();
+   if(ledger.conversationSubmits>=2 || ledger.deliberate.length>=DELIBERATE_CAP) {
+    note({event:'submitRefused',submits:ledger.conversationSubmits,deliberate:ledger.deliberate.length});
+    save();
+    return route.abort();
+   }
    reserve('browser',url.pathname);ledger.conversationSubmits++;
    note({event:'conversationSubmit',count:ledger.conversationSubmits});
   }
@@ -128,7 +139,7 @@ hooks.auth.loader = getAuth => {
 export default {id:'chatgpt-web',server:async()=>hooks};
 `);
     const hostCopy = join(sandbox, 'live-host.mjs');
-    await copyFile(join(liveHome, '.cache/magpie/plugin-host/host-4bc476f3c4cb.js'), hostCopy);
+    await copyFile(join(liveHome, '.cache/magpie/plugin-host/host-6e85b6c721c8.js'), hostCopy);
     host = spawn(bun, ['run', hostCopy], { cwd: sandbox, env, stdio: ['pipe', 'pipe', 'pipe'] });
     host.stderr.on('data', chunk => stderrChunks.push(chunk));
     const pending = new Map();
@@ -181,61 +192,70 @@ export default {id:'chatgpt-web',server:async()=>hooks};
     await saveFacts();
     console.log(JSON.stringify({ liveCatalogue: !provider?.fellBack, models: provider?.models?.length ?? 0, catalogueRoute: facts.catalogueRoute, sessionRoute: facts.sessionRoute }));
     if (!provider || provider.fellBack || !provider.models.length) throw new Error('Live catalogue failed; no turn submitted');
-    const arrivals = [];
-    const sizes = [];
-    const rawChunks = [];
-    let status;
-    let headFrame = null;
-    let success = false;
-    let sse = '';
-    const started = Date.now();
     const prompt = 'Write six short numbered paragraphs about an imaginary garden in the clouds. Use only invented scenery, no tools, links or personal information.';
-    console.log('submitting one temporary conversation turn without retries');
-    let fetchError = null;
-    try {
-      await rpc('fetch', { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: 'live-consented', body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: prompt }] })).toString('base64') }, frame => {
-      if (frame.event === 'head') { status = frame.status; headFrame = frame; }
-      if (frame.event !== 'chunk') return;
-      const text = Buffer.from(frame.data, 'base64').toString();
-      rawChunks.push(text);
-      sse += text;
-      let end;
-      while ((end = sse.indexOf('\n\n')) >= 0) {
-        const block = sse.slice(0, end); sse = sse.slice(end + 2);
-        for (const line of block.split('\n')) if (line.startsWith('data: ')) {
-          let value;
-          try { value = JSON.parse(line.slice(6)); } catch { continue; }
-          if (value.type === 'content_block_delta') {
-            arrivals.push(Date.now() - started); sizes.push(value.delta.text.length);
-            console.log(JSON.stringify({ delta: arrivals.length, milliseconds: arrivals.at(-1), characters: sizes.at(-1) }));
+    const tries = [];
+    let retryUsed = false;
+    for (let index = 0; index < 2; index++) {
+      const arrivals = [];
+      const sizes = [];
+      const rawChunks = [];
+      let status = null;
+      let headFrame = null;
+      let success = false;
+      let sse = '';
+      const started = Date.now();
+      console.log(index === 0 ? 'submitting one temporary conversation turn' : 'the conversation POST was challenged; performing the one authorized retry of the submit alone');
+      let fetchError = null;
+      try {
+        await rpc('fetch', { provider: 'chatgpt-web', model: 'auto', npm: '@ai-sdk/anthropic', url: 'https://chatgpt-web.invalid/v1/messages', session: 'live-consented', body: Buffer.from(JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: prompt }] })).toString('base64') }, frame => {
+        if (frame.event === 'head') { status = frame.status; headFrame = frame; }
+        if (frame.event !== 'chunk') return;
+        const text = Buffer.from(frame.data, 'base64').toString();
+        rawChunks.push(text);
+        sse += text;
+        let end;
+        while ((end = sse.indexOf('\n\n')) >= 0) {
+          const block = sse.slice(0, end); sse = sse.slice(end + 2);
+          for (const line of block.split('\n')) if (line.startsWith('data: ')) {
+            let value;
+            try { value = JSON.parse(line.slice(6)); } catch { continue; }
+            if (value.type === 'content_block_delta') {
+              arrivals.push(Date.now() - started); sizes.push(value.delta.text.length);
+              console.log(JSON.stringify({ try: index + 1, delta: arrivals.length, milliseconds: arrivals.at(-1), characters: sizes.at(-1) }));
+            }
+            if (value.type === 'message_stop') success = true;
+            if (value.type === 'error') console.log('live stream returned a typed error');
           }
-          if (value.type === 'message_stop') success = true;
-          if (value.type === 'error') console.log('live stream returned a typed error');
         }
+        });
+      } catch (error) { fetchError = String(error?.message ?? error); }
+      let errorEnvelope = null;
+      let upstreamBodyDigest = null;
+      if (status !== 200) {
+        const raw = rawChunks.join('');
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch { parsed = null; }
+        if (parsed && typeof parsed.error === 'object' && parsed.error !== null && typeof parsed.error.status === 'number' && typeof parsed.error.message === 'string') errorEnvelope = parsed.error;
+        else upstreamBodyDigest = { bytes: Buffer.byteLength(raw), sha256: createHash('sha256').update(raw).digest('hex') };
       }
-      });
-    } catch (error) { fetchError = String(error?.message ?? error); }
-    let errorEnvelope = null;
-    let upstreamBodyDigest = null;
-    if (status !== 200) {
-      const raw = rawChunks.join('');
-      let parsed;
-      try { parsed = JSON.parse(raw); } catch { parsed = null; }
-      if (parsed && typeof parsed.error === 'object' && parsed.error !== null && typeof parsed.error.status === 'number' && typeof parsed.error.message === 'string') errorEnvelope = parsed.error;
-      else upstreamBodyDigest = { bytes: Buffer.byteLength(raw), sha256: createHash('sha256').update(raw).digest('hex') };
+      const typedCode = errorEnvelope ? BackendError.fromEnvelope(errorEnvelope) : null;
+      const temporaryState = success ? 'confirmed'
+        : typedCode === 'temporary' ? 'unconfirmed'
+        : typedCode ? `not-reached (${typedCode})`
+        : 'unknown';
+      tries.push({ status, completed: success, deltas: sizes.length, arrivalMilliseconds: arrivals, sizes, errorEnvelope, typedCode, upstreamBodyDigest, fetchError, temporaryState, headFrame });
+      if (success) break;
+      if (index === 0 && typedCode === 'verification') { retryUsed = true; continue; }
+      break;
     }
-    const typedCode = errorEnvelope ? BackendError.fromEnvelope(errorEnvelope) : null;
     let pluginErrors = null;
     try { pluginErrors = (await readFile(pluginErrorPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch {}
-    const temporaryState = success ? 'confirmed'
-      : typedCode === 'temporary' ? 'unconfirmed'
-      : typedCode ? `not-reached (${typedCode})`
-      : 'unknown';
     const ledNow = await readLedger();
-    facts.turn = { status, completed: success, deltas: sizes.length, arrivalMilliseconds: arrivals, sizes, errorEnvelope, typedCode, pluginErrors, upstreamBodyDigest, fetchError, temporaryState, conversationSubmits: ledNow.conversationSubmits, deliberate: ledNow.deliberate.length, headFrame };
+    const last = tries.at(-1);
+    facts.turn = { tries, retryUsed, completed: last.completed, pluginErrors, conversationSubmits: ledNow.conversationSubmits, deliberate: ledNow.deliberate.length };
     await saveFacts();
-    console.log(JSON.stringify({ status, completed: success, deltas: sizes.length, sizes, arrivalMilliseconds: arrivals, typedCode, typedMessage: errorEnvelope?.message ?? null, pluginErrors, temporaryState, fetchError }));
-    if (!success) throw new Error('One live turn failed; no retry made');
+    console.log(JSON.stringify({ status: last.status, completed: last.completed, deltas: last.deltas, sizes: last.sizes, arrivalMilliseconds: last.arrivalMilliseconds, typedCode: last.typedCode, typedMessage: last.errorEnvelope?.message ?? null, temporaryState: last.temporaryState, retryUsed, fetchError: last.fetchError }));
+    if (!last.completed) throw new Error('One live turn failed; the authorized budget for this attempt is spent');
   } finally {
     if (host) { const exit = once(host, 'exit'); host.stdin.end(); await exit; }
     await writeFile(factsPath, JSON.stringify(facts, null, 2)).catch(() => {});
