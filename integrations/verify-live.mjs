@@ -9,10 +9,11 @@ import { BackendError } from '../backend/guard.mjs';
 export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, env }) {
   const cookieFile = process.env.CHATGPT_WEB_LIVE_COOKIE_FILE;
   if (!cookieFile) throw new Error('CHATGPT_WEB_LIVE_COOKIE_FILE must name the explicitly authorized session source');
+  const turnOnly = process.env.CHATGPT_WEB_LIVE_TURN_ONLY === '1';
   const root = join(sandbox, 'isolated-live-profile');
   const ledgerPath = join(sandbox, 'live-ledger.json');
   const factsPath = join(sandbox, 'live-facts.json');
-  const facts = { attempt: 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
+  const facts = { attempt: turnOnly ? '4-turn-only' : 3, sessionRoute: 'unknown', catalogueRoute: 'unknown', turn: null };
   const stderrChunks = [];
   let host;
   try {
@@ -26,7 +27,7 @@ import { TurnDriver } from ${imports('backend/turn.mjs')};
 import { readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import https from 'node:https';
-const ledger = { conversationSubmits:0, deliberate:[], browserRequests:0, browserByKind:{}, blockedOffOrigin:0, statuses:[] };
+const ledger = { conversationSubmits:0, deliberate:[], posts:[], browserRequests:0, browserByKind:{}, blockedOffOrigin:0, statuses:[] };
 const save = () => writeFileSync(${JSON.stringify(ledgerPath)}, JSON.stringify(ledger));
 const note = line => process.stderr.write(JSON.stringify(line)+'\\n');
 save();
@@ -69,6 +70,13 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
  await context.route('**/*',async route => {
   const request=route.request(); const url=new URL(request.url());
   if(url.origin!=='https://chatgpt.com'){ledger.blockedOffOrigin++;save();return route.abort();}
+  if(request.method()==='POST') {
+   request.response().then(response => {
+    ledger.posts.push({path:url.pathname,status:response.status(),headerNames:Object.keys(response.headers())});
+    note({event:'post',path:url.pathname,status:response.status()});
+    save();
+   }).catch(()=>{});
+  }
   if(request.method()==='POST' && /^\\/backend-api\\/(?:f\\/)?conversation$/.test(url.pathname)) {
    if(ledger.conversationSubmits>=2 || ledger.deliberate.length>=DELIBERATE_CAP) {
     note({event:'submitRefused',submits:ledger.conversationSubmits,deliberate:ledger.deliberate.length});
@@ -95,7 +103,8 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},launch:as
  context.close=owned.close;
  return context;
 }});
-const loginFlow=async (account,signal) => {
+const TURN_ONLY = ${turnOnly};
+const loginFlow = TURN_ONLY ? async (account,signal) => ({state:'signed-in',credential:sessionCredential({accessToken:'seeded-credential-not-used-by-browser-turns',expires:new Date(Date.now()+7*86400000).toISOString(),user:{}},refresh,account)}) : async (account,signal) => {
  const client=productionReadClient({cookie:refresh,browserRoute:async(path,bounded,origin)=>{
   reserve('browser-read-attempt',path);
   return turnDriver.browser.run(account,async context=>{
@@ -203,19 +212,26 @@ export default {id:'chatgpt-web',server:async()=>hooks};
       return 'unknown';
     };
     const authorization = await rpc('authorize', { provider: 'chatgpt-web', method: 0 });
-    console.log('existing session exchange started; no interactive sign-in or retained profile');
+    console.log(turnOnly ? 'turn-only attempt: no-network seeded credential exchange; no sign-in, no session read, no catalogue read' : 'existing session exchange started; no interactive sign-in or retained profile');
     const login = await rpc('callback', { session: authorization.session });
-    if (!login.ok) throw new Error('Seeded session exchange failed; no live turn submitted');
-    facts.sessionRoute = routeOf(await readLedger(), '/api/auth/session');
-    await saveFacts();
-    const providers = await rpc('providers', {});
-    const provider = providers.find(value => value.id === 'chatgpt-web');
-    facts.catalogueRoute = routeOf(await readLedger(), '/backend-api/models');
-    facts.models = provider?.models?.length ?? 0;
-    facts.fellBack = provider?.fellBack ?? null;
-    await saveFacts();
-    console.log(JSON.stringify({ liveCatalogue: !provider?.fellBack, models: provider?.models?.length ?? 0, catalogueRoute: facts.catalogueRoute, sessionRoute: facts.sessionRoute }));
-    if (!provider || provider.fellBack || !provider.models.length) throw new Error('Live catalogue failed; no turn submitted');
+    if (!login.ok) throw new Error('Seeded credential exchange failed; no live turn submitted');
+    if (!turnOnly) {
+      facts.sessionRoute = routeOf(await readLedger(), '/api/auth/session');
+      await saveFacts();
+      const providers = await rpc('providers', {});
+      const provider = providers.find(value => value.id === 'chatgpt-web');
+      facts.catalogueRoute = routeOf(await readLedger(), '/backend-api/models');
+      facts.models = provider?.models?.length ?? 0;
+      facts.fellBack = provider?.fellBack ?? null;
+      await saveFacts();
+      console.log(JSON.stringify({ liveCatalogue: !provider?.fellBack, models: provider?.models?.length ?? 0, catalogueRoute: facts.catalogueRoute, sessionRoute: facts.sessionRoute }));
+      if (!provider || provider.fellBack || !provider.models.length) throw new Error('Live catalogue failed; no turn submitted');
+    } else {
+      facts.sessionRoute = 'not-exercised';
+      facts.catalogueRoute = 'not-exercised';
+      await saveFacts();
+      console.log('turn-only attempt: reads skipped by authorization; model auto served from the declared baseline');
+    }
     const prompt = 'Write six short numbered paragraphs about an imaginary garden in the clouds. Use only invented scenery, no tools, links or personal information.';
     const tries = [];
     let retryUsed = false;
@@ -228,6 +244,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
       let success = false;
       let sse = '';
       const started = Date.now();
+      const startedWall = new Date(started).toISOString();
       console.log(index === 0 ? 'submitting one temporary conversation turn' : 'the conversation POST was challenged; performing the one authorized retry of the submit alone');
       let fetchError = null;
       try {
@@ -267,7 +284,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
         : typedCode === 'temporary' ? 'unconfirmed'
         : typedCode ? `not-reached (${typedCode})`
         : 'unknown';
-      tries.push({ status, completed: success, deltas: sizes.length, arrivalMilliseconds: arrivals, sizes, errorEnvelope, typedCode, upstreamBodyDigest, fetchError, temporaryState, headFrame });
+      tries.push({ startedAt: startedWall, elapsedMilliseconds: Date.now() - started, status, completed: success, deltas: sizes.length, arrivalMilliseconds: arrivals, sizes, errorEnvelope, typedCode, upstreamBodyDigest, fetchError, temporaryState, headFrame });
       if (success) break;
       if (index === 0 && typedCode === 'verification') { retryUsed = true; continue; }
       break;
