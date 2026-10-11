@@ -43,10 +43,12 @@ export class AnswerStream {
     }
     if (patch.p === '' && patch.v?.message) {
       const message = patch.v.message;
-      this.assistant = message.author?.role === 'assistant';
-      this.visible = this.assistant && message.recipient === 'all' && (!message.channel || message.channel === 'final');
-      if (this.assistant && message.metadata?.is_visually_hidden_from_conversation === true) throw new BackendError('hidden');
-      if (this.visible) {
+      const assistant = message.author?.role === 'assistant';
+      if (assistant && message.metadata?.is_visually_hidden_from_conversation === true) throw new BackendError('hidden');
+      if (assistant && message.recipient === 'all' && (!message.channel || message.channel === 'final')) {
+        if (this.visible && this.text) throw new BackendError('protocol');
+        this.visible = true;
+        this.assistant = true;
         if (message.content?.content_type !== 'text' || !Array.isArray(message.content.parts) || message.content.parts.some(part => typeof part !== 'string')) throw new BackendError('protocol');
         this.extend(message.content.parts[0] ?? '');
         this.complete ||= message.status === 'finished_successfully';

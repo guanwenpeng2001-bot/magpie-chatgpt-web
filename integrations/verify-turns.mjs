@@ -71,5 +71,12 @@ export async function verifyTurns(dependency) {
     const afterAbort = await collect(command('abort'));
     assert.match(afterAbort.output, /message_stop/);
     console.log('fixture abort closed page, dropped binding, released guard; next turn reused session');
+    fixture.setMode('user-add');
+    const userAdd = await collect(command('user-add'));
+    const userAddDeltas = userAdd.frames.filter(frame => ['dom', 'answer'].includes(frame.event));
+    assert.equal(userAddDeltas.map(frame => frame.data.text).join(''), fixture.batches.join(''));
+    assert.equal(userAddDeltas.length, 3);
+    assert.match(userAdd.output, /message_stop/);
+    console.log('fixture mid-answer user message-add: full answer delivered, success terminal present');
   } finally { await driver.close(); await fixture.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
 }

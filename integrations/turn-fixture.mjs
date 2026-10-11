@@ -21,7 +21,8 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       if (!['empty', 'hidden'].includes(mode)) for (const [index, batch] of batches.entries()) {
         await delay(interval);
         if (response.destroyed) return;
-        frame('delta', { ...(index === 0 ? { o: 'patch' } : {}), v: [{ p: '/message/content/parts/0', o: 'append', v: batch }, { p: '/message/metadata/model_dil_v2/constants', o: 'append', v: 'metadata must not appear' }] });
+        if (mode === 'user-add' && index === 1) frame('delta', { p: '', o: 'add', v: { message: { author: { role: 'user' }, recipient: 'all', content: { content_type: 'text', parts: ['a mid-answer user note'] }, status: 'finished_successfully' } } });
+        frame('delta', { ...((index === 0 || (mode === 'user-add' && index === 1)) ? { o: 'patch' } : {}), v: [{ p: '/message/content/parts/0', o: 'append', v: batch }, { p: '/message/metadata/model_dil_v2/constants', o: 'append', v: 'metadata must not appear' }] });
         if (mode === 'truncated') { response.end(); return; }
       }
       frame('delta', { o: 'patch', v: [{ p: '/message/status', o: 'replace', v: 'finished_successfully' }] });

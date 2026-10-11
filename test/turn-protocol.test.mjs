@@ -43,6 +43,45 @@ for (const [label, frames, code] of [
   assert.equal(output.join('').includes('event: message_stop'), false);
 });
 
+const midAdd = messageBody => ({ event: 'delta', data: { p: '', o: 'add', v: { message: messageBody } } });
+const toolCall = { author: { role: 'assistant' }, recipient: 'web.run', channel: 'commentary', content: { content_type: 'text', parts: ['tool use'] }, status: 'finished_successfully' };
+const toolResult = { author: { role: 'tool' }, recipient: 'all', channel: 'final', content: { content_type: 'text', parts: ['tool output'] }, status: 'finished_successfully' };
+const commentary = { author: { role: 'assistant' }, recipient: 'all', channel: 'commentary', content: { content_type: 'text', parts: ['thinking...'] }, status: 'in_progress' };
+const userMessage = { author: { role: 'user' }, recipient: 'all', content: { content_type: 'text', parts: ['a user note'] }, status: 'finished_successfully' };
+const finishAnswer = [{ event: 'delta', data: { o: 'patch', v: [{ p: '/message/status', o: 'replace', v: 'finished_successfully' }] } }, { event: '', data: '[DONE]' }];
+
+for (const [label, intruder] of [['tool call', toolCall], ['tool result', toolResult], ['commentary thoughts', commentary], ['user message', userMessage]]) test(`a mid-answer ${label} message-add does not truncate the answer`, async () => {
+  const frames = [message(), append('First half. '), midAdd(intruder), append('Second half.'), ...finishAnswer];
+  const chunks = [];
+  for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) chunks.push(chunk);
+  const deltas = chunks.map(chunk => JSON.parse(chunk.split('\ndata: ')[1])).filter(event => event.type === 'content_block_delta').map(event => event.delta.text);
+  assert.deepEqual(deltas, ['First half. ', 'Second half.']);
+  assert.equal(chunks.join('').includes('event: message_stop'), true);
+});
+
+test('a truncated answer after a mid-answer message-add never emits a successful terminal', async () => {
+  const frames = [message(), append('First half. '), midAdd(userMessage), append('Second half.')];
+  const output = [];
+  await assert.rejects(async () => { for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) output.push(chunk); }, error => error.code === 'truncated');
+  assert.equal(output.join('').includes('event: message_stop'), false);
+});
+
+test('a second visible assistant message-add after answer text exists fails closed', async () => {
+  const frames = [message(), append('First half. '), message('Second answer'), append(' more')];
+  const output = [];
+  await assert.rejects(async () => { for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) output.push(chunk); }, error => error.code === 'protocol');
+  assert.equal(output.join('').includes('event: message_stop'), false);
+});
+
+test('a repeated visible assistant message-add before answer text exists is harmless', async () => {
+  const frames = [message(), message(), append('Only half.'), ...finishAnswer];
+  const chunks = [];
+  for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) chunks.push(chunk);
+  const deltas = chunks.map(chunk => JSON.parse(chunk.split('\ndata: ')[1])).filter(event => event.type === 'content_block_delta').map(event => event.delta.text);
+  assert.deepEqual(deltas, ['Only half.']);
+  assert.equal(chunks.join('').includes('event: message_stop'), true);
+});
+
 test('prepare preserves text history and prefers caller conversation identity', () => {
   const request = { model: 'auto', system: [{ type: 'text', text: 'Be concise' }], messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: [{ type: 'text', text: 'two' }] }, { role: 'user', content: 'three' }], conversation_id: 'caller' };
   const prepared = protocol.prepare(request, { 'x-chatgptweb-conversation': 'host-session' });
