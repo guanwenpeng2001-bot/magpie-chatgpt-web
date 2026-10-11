@@ -7,7 +7,7 @@ const definitions = Object.freeze({
   empty: [502, 'ChatGPT returned an empty reply.'],
   protocol: [502, 'The backend or upstream protocol is invalid.'],
   verification: [502, 'Complete human verification in the sign-in browser.'],
-  capacity: [503, 'Local backend capacity is exhausted; wait for active work or retained account restrictions to clear.'],
+  capacity: [503, 'Local backend capacity is exhausted; active work and cooldowns may clear, but sign-in blocks persist until the backend restarts.'],
   browserDependency: [503, 'The playwright-core dependency is unavailable; install the packaged dependency.'],
   browserProfile: [502, 'The browser profile restored a page other than about:blank.'],
   browserConfiguration: [502, 'Browser account or profile root configuration is invalid.'],

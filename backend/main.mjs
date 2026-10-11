@@ -50,22 +50,27 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (!clients.has(key)) {
       const guard = guards.get(identity) ?? new AccountGuard();
       const client = new ReadClient({ origin: command.origin, cookie, guard });
-      if (clients.size >= 64) {
-        const victim = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used)[0];
-        if (!victim) throw new BackendError('capacity');
-        clients.delete(victim[0]);
-      }
-      if (!guards.has(identity)) {
-        if (guards.size >= 64) {
-          const victim = [...guards].find(([, candidate]) => {
-            if ([...clients.values()].some(entry => entry.client.guard === candidate)) return false;
-            try { candidate.restriction(); return true; } catch { return false; }
+      const idle = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used);
+      let clientVictim = clients.size >= 64 ? idle[0] : undefined;
+      if (clients.size >= 64 && !clientVictim) throw new BackendError('capacity');
+      let guardVictim;
+      if (!guards.has(identity) && guards.size >= 64) {
+        guardVictim = [...guards].find(([, candidate]) => {
+          if ([...clients.values()].some(entry => entry.client.guard === candidate)) return false;
+          try { candidate.restriction(); return true; } catch { return false; }
+        });
+        if (!guardVictim) {
+          clientVictim = idle.find(([, entry]) => {
+            if ([...clients.values()].some(other => other !== entry && other.client.guard === entry.client.guard)) return false;
+            try { entry.client.guard.restriction(); return true; } catch { return false; }
           });
-          if (!victim) throw new BackendError('capacity');
-          guards.delete(victim[0]);
+          if (!clientVictim) throw new BackendError('capacity');
+          guardVictim = [...guards].find(([, candidate]) => candidate === clientVictim[1].client.guard);
         }
-        guards.set(identity, guard);
       }
+      if (clientVictim) clients.delete(clientVictim[0]);
+      if (guardVictim) guards.delete(guardVictim[0]);
+      if (!guards.has(identity)) guards.set(identity, guard);
       clients.set(key, { client, refs: 0, used: 0 });
     }
     const entry = clients.get(key);
