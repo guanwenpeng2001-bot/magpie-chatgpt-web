@@ -30,7 +30,8 @@ export class BackendError extends Error {
     return { status: clean.status, message: clean.message, ...(clean.retryAfter ? { retryAfter: clean.retryAfter } : {}), ...(clean.signIn ? { signIn: clean.signIn } : {}) };
   }
   get headers() {
-    return { ...(this.signIn ? { 'x-magpie-sign-in': 'expired' } : {}), ...(this.retryAfter ? { 'retry-after': this.retryAfter } : {}) };
+    const clean = this.toJSON();
+    return { ...(clean.signIn ? { 'x-magpie-sign-in': clean.signIn } : {}), ...(clean.retryAfter ? { 'retry-after': clean.retryAfter } : {}) };
   }
   static fromEnvelope(envelope) {
     const known = Object.keys(definitions).find(key => definitions[key][0] === envelope?.status && definitions[key][1] === envelope?.message);

@@ -140,3 +140,16 @@ test('login state polling represents all four states without arbitrary error tex
   assert.equal(states.finish('fixture', 'failed').state, 'failed');
   assert.equal(states.finish('fixture', 'cancelled').state, 'cancelled');
 });
+
+test('session command renews over the read client without starting login', async () => {
+  const accessToken = crypto.randomUUID();
+  const expires = Date.now() + 10 * 86400000;
+  let logins = 0;
+  const server = harness({ loginFlow: async () => { logins++; }, readClient: () => ({ session: async () => ({ accessToken, expires: new Date(expires).toISOString() }) }) });
+  server.send({ id: 'renew', method: 'session', auth: { refresh: crypto.randomUUID(), profile: 'fixture' } });
+  await server.until(frames => frames.some(frame => frame.id === 'renew' && frame.event === 'done'));
+  assert.deepEqual(server.frames.find(frame => frame.id === 'renew' && frame.event === 'data').data, { access: accessToken, expires });
+  assert.equal(logins, 0);
+  server.input.end();
+  await server.work;
+});

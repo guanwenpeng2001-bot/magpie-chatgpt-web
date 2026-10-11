@@ -1,10 +1,10 @@
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { BackendError, AccountGuard, publicError } from './guard.mjs';
-import { ReadClient } from './http.mjs';
-import { LoginStates } from './browser.mjs';
+import { ReadClient, productionReadClient } from './http.mjs';
+import { LoginStates, createLoginFlow, sessionCredential } from './browser.mjs';
 
-export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, loginFlow = async () => 'failed' } = {}) {
+export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options) } = {}) {
   const pending = new Map();
   const clients = new Map();
   const guards = new Map();
@@ -49,7 +49,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const key = createHash('sha256').update(cookie).update('\0').update(String(command.origin)).digest('hex');
     if (!clients.has(key)) {
       const guard = guards.get(identity) ?? new AccountGuard();
-      const client = new ReadClient({ origin: command.origin, cookie, guard });
+      const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, guard });
       const idle = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used);
       const clientVictims = new Set();
       if (clients.size >= 64) {
@@ -79,7 +79,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     return { client: entry.client, release: () => { entry.refs--; entry.used = ++clientClock; } };
   };
   const loginPromises = new Map();
-  const startLogin = account => {
+  const startLogin = (account, profileRoot) => {
     if (loginPromises.has(account)) return;
     if (loginPromises.size >= 64) throw new BackendError('backendDown');
     login.start(account);
@@ -89,10 +89,10 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const timer = setTimeout(() => controller.abort(), 300_000);
     const settle = outcome => {
       if (loginPromises.get(account) !== entry || stopping) return;
-      login.finish(account, controller.signal.aborted ? 'failed' : outcome?.state, controller.signal.aborted ? undefined : outcome?.credential);
+      login.finish(account, controller.signal.aborted ? 'failed' : outcome?.state, controller.signal.aborted ? undefined : outcome?.credential, outcome?.error);
     };
     controller.signal.addEventListener('abort', () => settle({ state: 'failed' }), { once: true });
-    entry.work = Promise.resolve().then(() => loginFlow(account, controller.signal)).then(settle, () => settle({ state: 'failed' })).finally(() => {
+    entry.work = Promise.resolve().then(() => loginFlow(account, controller.signal, profileRoot)).then(settle, error => settle({ state: 'failed', error })).finally(() => {
       clearTimeout(timer);
       if (loginPromises.get(account) === entry) loginPromises.delete(account);
     });
@@ -107,9 +107,17 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         const { client, release } = clientFor(command);
         try { return await client.models(signal); } finally { release(); }
       }
+      case 'session': {
+        const { client, release } = clientFor(command);
+        try {
+          const session = await client.session(signal);
+          const credential = sessionCredential(session, session.refresh ?? command.auth.refresh, command.auth.profile);
+          return { access: credential.access, expires: credential.expires, ...(session.refresh ? { refresh: session.refresh } : {}) };
+        } finally { release(); }
+      }
       case 'loginStatus': return login.status(account);
       case 'login': {
-        startLogin(account);
+        startLogin(account, command.profileRoot);
         return { state: 'pending' };
       }
       case 'logout': loginPromises.get(account)?.cancel(); loginPromises.delete(account); login.clear(account); return true;
@@ -181,7 +189,9 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     stopping = true;
     for (const entry of pending.values()) entry.controller.abort();
     await Promise.allSettled([...pending.values()].map(entry => entry.work));
-    for (const entry of loginPromises.values()) entry.cancel();
+    const logins = [...loginPromises.values()];
+    for (const entry of logins) entry.cancel();
+    await Promise.allSettled(logins.map(entry => entry.work));
     loginPromises.clear();
     await close();
     await writes.catch(() => {});
@@ -192,5 +202,5 @@ export async function serve(input, output, { handlers = {}, close = async () => 
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.stdin.destroy());
-  serve(process.stdin, process.stdout).catch(() => { process.exitCode = 1; });
+  serve(process.stdin, process.stdout, { readClient: productionReadClient, loginFlow: createLoginFlow() }).catch(() => { process.exitCode = 1; });
 }

@@ -92,3 +92,32 @@ test('error headers and pipe envelopes retain their distinct safe meanings', () 
     assert.equal(BackendError.fromEnvelope(error.toJSON()).code, code);
   }
 });
+
+test('mutated error fields cannot leak through HTTP headers', () => {
+  const marker = globalThis.crypto.randomUUID();
+  for (const code of ['expired', 'cooldown', 'upstream', 'backendDown']) {
+    const error = new BackendError(code);
+    error.message = marker;
+    error.signIn = marker;
+    error.retryAfter = marker;
+    assert.equal(JSON.stringify(error.toJSON()).includes(marker), false);
+    assert.equal(JSON.stringify(error.headers).includes(marker), false);
+    assert.equal([...new Headers(error.headers).values()].some(value => value.includes(marker)), false);
+  }
+});
+
+test('restriction reads do not alter pacing, cooldown or permanent blocking', async () => {
+  for (const status of [200, 401, 429]) {
+    const clock = forge();
+    const guard = new AccountGuard(clock);
+    guard.observe(status, '60');
+    for (let index = 0; index < 500; index++) {
+      if (status === 200) assert.doesNotThrow(() => guard.restriction());
+      else assert.throws(() => guard.restriction(), error => error.status === status);
+    }
+    assert.deepEqual(clock.sleeps, []);
+    clock.advance(60001);
+    if (status === 401) await assert.rejects(guard.begin(), error => error.status === 401);
+    else (await guard.begin())();
+  }
+});
