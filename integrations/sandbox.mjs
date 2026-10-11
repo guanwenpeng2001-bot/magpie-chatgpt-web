@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, cp, copyFile, readFile, writeFile, stat, rm } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { resolve, join, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { verifyTurns } from './verify-turns.mjs';
+import { redactLiveArtifact } from './verify-live.mjs';
 
 const source = fileURLToPath(new URL('..', import.meta.url));
 const liveHome = homedir();
@@ -40,7 +41,7 @@ try {
   const bun = join(cache, 'bun/1.4.2/magpie-bun.exe');
   await copyFile(join(liveHome, 'Downloads/magpie-windows-amd64.exe'), magpie);
   await copyFile(join(liveHome, '.cache/magpie/bun/1.4.2/magpie-bun.exe'), bun);
-  assert.match(command(magpie, ['--version']), /0\.1\.1184/);
+  assert.match(command(magpie, ['--version']), /0\.1\.1198/);
   assert.deepEqual(await snapshot(), before, 'live metadata changed during isolated version check');
   console.log('private HOME and USERPROFILE isolation checked before install');
   const repository = join(sandbox, 'package');
@@ -70,7 +71,7 @@ try {
   const launchProbe = join(sandbox, 'launch-probe.mjs');
   await writeFile(launchProbe, 'import { launchSignInBrowser } from ' + JSON.stringify(pathToFileURL(join(installed, 'backend/browser.mjs')).href) + ';\nconst owned = await launchSignInBrowser(' + JSON.stringify(join(home, 'launch-probe')) + ', new AbortController().signal); console.log("ordinary browser probe connected"); await owned.close();');
   console.log(command('node', [launchProbe]).trim());
-  const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-4bc476f3c4cb.js');
+  const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-6e85b6c721c8.js');
   const hostCopy = join(sandbox, 'host.mjs');
   await copyFile(hostSource, hostCopy);
   assert.deepEqual(await readFile(hostCopy), await readFile(hostSource));
@@ -171,8 +172,8 @@ try {
   const renewed = JSON.parse(await readFile(authPath, 'utf8'))[callback.account];
   assert.ok(renewed.expires > Date.now() + 86400000);
   assert.equal(renewed.profile, auth.profile);
-  assert.equal(renewed.refresh, auth.refresh);
-  console.log('browserless renewal merged changed fields through stock host');
+  assert.ok(renewed.refresh !== auth.refresh, 'HttpOnly session rotation must reach the stock host credential');
+  console.log('challenged Node renewal used browser fallback and persisted HttpOnly rotation through stock host');
   auths[callback.account] = { ...renewed, refresh: crypto.randomUUID(), expires: Date.now() - 1 };
   await writeFile(authPath, JSON.stringify(auths));
   await rpc('reload', { provider: 'chatgpt-web' });
@@ -203,8 +204,28 @@ try {
   console.error(error instanceof assert.AssertionError ? `Assertion failed: ${error.message}` : `Sandbox failed: ${error.code ?? error.message}`);
   process.exitCode = 1;
 } finally {
+  try {
   if (host) { const exit = once(host, 'exit'); host.stdin.end(); await exit.catch(() => {}); }
   await directBridge?.dispose();
-  await rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  console.log('sandbox discarded');
+  if (process.argv.includes('--live-once')) {
+    const archive = process.env.CHATGPT_WEB_LIVE_ARCHIVE;
+    if (archive) {
+      try {
+        const archiveRelative = relative(source, resolve(archive));
+        if (!archiveRelative || (archiveRelative !== '..' && !archiveRelative.startsWith('..' + sep) && !isAbsolute(archiveRelative))) throw new Error('Archive must be outside the worktree');
+        await mkdir(archive, { recursive: true });
+        for (const name of ['live-ledger.json', 'live-facts.json', 'live-plugin-error.log', 'live-backend-stderr.log', 'live-backend-notes.log', 'live-backend.mjs', 'live-plugin.mjs']) {
+          try { await writeFile(join(archive, name), redactLiveArtifact(await readFile(join(sandbox, name), 'utf8'))); }
+          catch (error) { if (error.code !== 'ENOENT' || ['live-ledger.json', 'live-facts.json'].includes(name)) throw error; }
+        }
+        console.log(`live attempt artifacts archived before teardown to ${archive}`);
+      } catch { throw new Error('Live archive failed; sandbox cleanup will still run'); }
+    } else {
+      console.log('CHATGPT_WEB_LIVE_ARCHIVE not set; live artifacts not archived');
+    }
+  }
+  } finally {
+    await rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    console.log('sandbox discarded');
+  }
 }

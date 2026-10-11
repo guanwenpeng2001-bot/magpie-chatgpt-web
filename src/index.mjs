@@ -42,7 +42,7 @@ function createHooks({ bridge, profileRoot, pollMilliseconds = 2000 }) {
       provider: PROVIDER,
       refreshLead: REFRESH_LEAD,
       async refresh(auth) {
-        return bridge.call({ method: 'session', auth: requireAuth(auth) });
+        return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot });
       },
       async loader(getAuth) {
         const auth = await getAuth();
@@ -116,7 +116,7 @@ function createHooks({ bridge, profileRoot, pollMilliseconds = 2000 }) {
       id: PROVIDER,
       async models(provider, { auth } = {}) {
         if (!auth) return provider.models;
-        return mapModels(await bridge.call({ method: 'models', auth: requireAuth(auth) }));
+        return mapModels(await bridge.call({ method: 'models', auth: requireAuth(auth), profileRoot }));
       },
     },
     async 'chat.headers'(input, output) {

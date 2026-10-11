@@ -3,14 +3,15 @@ import { spawn } from 'node:child_process';
 import { access, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
-import { productionReadClient } from './http.mjs';
+import { challengeEvidence, responseFailure } from './http.mjs';
 import { BackendError } from './guard.mjs';
 
 export class BrowserSupervisor {
   #accounts = new Map();
   #closed = false;
-  constructor({ profileRoot, launch, idleMilliseconds = 900_000, headless = true, channel = 'chrome' } = {}) {
+  constructor({ profileRoot, profile, launch, idleMilliseconds = 900_000, headless = true, channel = 'chrome' } = {}) {
     this.profileRoot = profileRoot;
+    this.profile = profile;
     this.idleMilliseconds = idleMilliseconds;
     this.options = { headless, channel };
     this.launch = launch ?? (async (profile, options) => {
@@ -25,12 +26,13 @@ export class BrowserSupervisor {
   }
   async #ensure(account) {
     if (this.#closed) throw new BackendError('browserClosed');
-    if (typeof this.profileRoot !== 'string' || !this.profileRoot || typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
+    if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
+    if (this.profile !== undefined ? typeof this.profile !== 'string' || !this.profile : typeof this.profileRoot !== 'string' || !this.profileRoot) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
     if (!entry) {
       entry = { users: 0, context: null, timer: null, crashed: new Set() };
       this.#accounts.set(account, entry);
-      entry.starting = this.launch(resolve(this.profileRoot, account), this.options).then(async context => {
+      entry.starting = this.launch(this.profile ?? resolve(this.profileRoot, account), this.options).then(async context => {
         entry.context = context;
         context.once('close', () => {
           clearTimeout(entry.timer);
@@ -173,7 +175,47 @@ export async function launchSignInBrowser(profile, signal) {
   }
 }
 
-export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https://chatgpt.com', readClient = productionReadClient, pollMilliseconds = 2000 } = {}) {
+export async function browserRead(context, page, path, origin, signal) {
+  const base = new URL(origin);
+  if (!(base.origin === 'https://chatgpt.com' || (['http:', 'https:'].includes(base.protocol) && ['127.0.0.1', '[::1]'].includes(base.hostname))) || base.pathname !== '/' || base.username || base.password || base.search || base.hash) throw new BackendError('protocol');
+  if (!['/api/auth/session', '/backend-api/models'].includes(path) || new URL(page.url()).origin !== base.origin) throw new BackendError('protocol');
+  signal?.throwIfAborted();
+  try {
+    const result = await page.evaluate(async path => {
+      const response = await fetch(path, { credentials: 'include', redirect: 'error', signal: AbortSignal.timeout(20000) });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let body = '';
+      let bytes = 0;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bytes += value.byteLength;
+          if (response.status !== 200 && bytes > 65536) {
+            body += decoder.decode(value.subarray(0, Math.max(0, 65536 - (bytes - value.byteLength))), { stream: true });
+            break;
+          }
+          if (bytes > 4 * 1024 * 1024) throw new Error('response exceeds limit');
+          body += decoder.decode(value, { stream: true });
+        }
+        body += decoder.decode();
+      } catch (error) { if (response.status === 200) throw error; }
+      finally { await reader.cancel().catch(() => {}); }
+      return { status: response.status, headers: { 'cf-mitigated': response.headers.get('cf-mitigated'), 'content-type': response.headers.get('content-type'), 'retry-after': response.headers.get('retry-after') }, body };
+    }, path);
+    signal?.throwIfAborted();
+    const failure = responseFailure(result.status, challengeEvidence(result.headers, result.body), undefined, result.headers['retry-after']);
+    if (failure) throw failure;
+    let value;
+    try { value = JSON.parse(result.body); } catch { throw new BackendError('protocol'); }
+    const cookies = path === '/api/auth/session' ? (await context.cookies(base.origin)).filter(cookie => /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/.test(cookie.name)).map(cookie => `${cookie.name}=${cookie.value}`).join('; ') : undefined;
+    if (path === '/api/auth/session' && (!cookies || typeof value?.accessToken !== 'string' || !value.accessToken.trim())) throw new BackendError('expired');
+    return { value, cookies };
+  } catch (error) { throw error instanceof BackendError ? error : new BackendError('upstream'); }
+}
+
+export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https://chatgpt.com', pollMilliseconds = 2000 } = {}) {
   return async (account, signal, profileRoot) => {
     if (typeof profileRoot !== 'string' || !profileRoot) throw new BackendError('browserConfiguration');
     const owned = await launch(resolve(profileRoot, account), signal);
@@ -192,9 +234,8 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
         if (await profileButton.count() && await profileButton.first().isVisible()) {
           const cookies = await context.cookies(origin);
           if (cookies.some(cookie => /^__Secure-next-auth\.session-token(?:\.\d+)?$/.test(cookie.name))) {
-            const refresh = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
-            const session = await readClient({ cookie: refresh }).session(signal);
-            return { state: 'signed-in', credential: sessionCredential(session, session.refresh ?? refresh, account) };
+            const result = await browserRead(context, page, '/api/auth/session', origin, signal);
+            return { state: 'signed-in', credential: sessionCredential(result.value, result.cookies, account) };
           }
         }
         await delay(pollMilliseconds, undefined, { signal });

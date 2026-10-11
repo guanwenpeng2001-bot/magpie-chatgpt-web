@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { serve } from '../backend/main.mjs';
+import { BackendError } from '../backend/guard.mjs';
 import { LoginStates } from '../backend/browser.mjs';
 
 function harness(options) {
@@ -48,6 +49,42 @@ test('backend streams head/data/done and cancels a live handler on abort', async
   await server.work;
 });
 
+test('the serve request budget expires as its own typed error, not upstream', async () => {
+  const server = harness({ timeout: 50, handlers: {
+    async complete(command, signal) {
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new BackendError('upstream')), { once: true });
+      });
+    },
+  } });
+  server.send({ id: 'budget', method: 'complete' });
+  await server.until(frames => frames.some(frame => frame.id === 'budget' && frame.event === 'error'));
+  const frame = server.frames.find(frame => frame.id === 'budget' && frame.event === 'error');
+  assert.equal(frame.error.status, 504);
+  assert.notEqual(frame.error.message, new BackendError('upstream').message);
+  assert.equal(BackendError.fromEnvelope(frame.error).code, 'requestBudget');
+  server.input.end();
+  await server.work;
+});
+
+test('a client abort command still cancels without the budget code', async () => {
+  const server = harness({ timeout: 60000, handlers: {
+    async complete(command, signal) {
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new BackendError('upstream')), { once: true });
+      });
+    },
+  } });
+  server.send({ id: 'cancelled', method: 'complete' });
+  await server.until(frames => frames.some(frame => frame.id === 'cancelled' && frame.event === 'head'));
+  server.send({ id: 'cancelled', method: 'abort' });
+  await server.until(frames => frames.some(frame => frame.id === 'cancelled' && frame.event === 'error'));
+  const frame = server.frames.find(frame => frame.id === 'cancelled' && frame.event === 'error');
+  assert.notEqual(BackendError.fromEnvelope(frame.error).code, 'requestBudget');
+  server.input.end();
+  await server.work;
+});
+
 test('stdin EOF aborts work and disposes owned resources', async () => {
   let aborted = false;
   let disposed = false;
@@ -74,7 +111,7 @@ test('request timeout emits a sanitized error without success', async () => {
   server.input.end();
   await server.work;
   assert.equal(server.frames.some(frame => frame.event === 'done'), false);
-  assert.equal(server.frames.at(-1).error.status, 502);
+  assert.equal(server.frames.at(-1).error.status, 504);
 });
 
 test('backend bounds active executions to sixteen and drains on EOF', async () => {

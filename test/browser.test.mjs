@@ -51,6 +51,40 @@ for (const [label, options, account, expected] of [
   } finally { await browser.close(); }
 });
 
+test('an explicit profile directory is launched in place instead of composed from the account', async () => {
+  const launched = [];
+  const browser = new module.BrowserSupervisor({
+    profile: 'C:/signed-in-profile',
+    launch: async dir => {
+      launched.push(dir);
+      const context = new EventEmitter();
+      context.close = async () => context.emit('close');
+      context.pages = () => [{ url: () => 'about:blank' }];
+      return context;
+    },
+  });
+  await browser.run('fixture', async () => {});
+  assert.deepEqual(launched, ['C:/signed-in-profile']);
+  await browser.close();
+});
+
+test('TurnDriver forwards an explicit profile directory to its supervisor without changing the launch shape', async () => {
+  const launched = [];
+  const driver = new (await import('../backend/turn.mjs')).TurnDriver({
+    profile: 'C:/signed-in-profile',
+    launch: async dir => {
+      launched.push(dir);
+      const context = new EventEmitter();
+      context.close = async () => context.emit('close');
+      context.pages = () => [{ url: () => 'about:blank' }];
+      return context;
+    },
+  });
+  await driver.browser.run('fixture', async () => {});
+  assert.deepEqual(launched, ['C:/signed-in-profile']);
+  await driver.close();
+});
+
 test('closed supervisor reports lifecycle failure', async () => {
   const browser = new module.BrowserSupervisor({ profileRoot: '.' });
   await browser.close();

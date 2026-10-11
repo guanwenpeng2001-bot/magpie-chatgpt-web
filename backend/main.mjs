@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { BackendError, AccountGuard, publicError } from './guard.mjs';
 import { ReadClient, productionReadClient } from './http.mjs';
-import { LoginStates, createLoginFlow, sessionCredential } from './browser.mjs';
+import { LoginStates, createLoginFlow, sessionCredential, browserRead } from './browser.mjs';
 import { TurnDriver } from './turn.mjs';
 
 export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
@@ -51,7 +51,29 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const key = createHash('sha256').update(cookie).update('\0').update(String(command.origin)).digest('hex');
     if (!clients.has(key)) {
       const guard = guards.get(identity) ?? new AccountGuard();
-      const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, guard });
+      const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, guard,
+        browserRoute: async (path, signal, origin) => {
+          if (typeof command.auth?.profile !== 'string' || typeof command.profileRoot !== 'string') throw new BackendError('browserConfiguration');
+          turns ??= new TurnDriver({ profileRoot: command.profileRoot });
+          return turns.browser.run(command.auth.profile, async context => {
+            const page = await context.newPage();
+            const abort = () => { page.close().catch(() => {}); };
+            signal.addEventListener('abort', abort, { once: true });
+            let verification = false;
+            try {
+              signal.throwIfAborted();
+              await page.goto(origin.href, { waitUntil: 'domcontentloaded', timeout: 20000 });
+              return await browserRead(context, page, path, origin, signal);
+            } catch (error) {
+              if (error instanceof BackendError && error.code === 'expired') guard.observe(401);
+              if (error instanceof BackendError && error.code === 'cooldown') guard.observe(429, error.retryAfter);
+              verification = error instanceof BackendError && error.code === 'verification';
+              throw error;
+            }
+            finally { signal.removeEventListener('abort', abort); if (!verification) await page.close().catch(() => {}); }
+          }, signal);
+        },
+      });
       const idle = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used);
       const clientVictims = new Set();
       if (clients.size >= 64) {
@@ -145,7 +167,8 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (pending.has(command.id)) return;
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    let budgetExpired = false;
+    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, timeout);
     const entry = { controller };
     pending.set(command.id, entry);
     entry.work = (async () => {
@@ -154,7 +177,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       try {
         release = await acquire(controller.signal);
         const aborted = new Promise((resolve, reject) => {
-          onAbort = () => reject(new BackendError('upstream'));
+          onAbort = () => reject(new BackendError(budgetExpired ? 'requestBudget' : 'upstream'));
           controller.signal.addEventListener('abort', onAbort, { once: true });
           if (controller.signal.aborted) onAbort();
         });
@@ -170,7 +193,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         if (result !== undefined) await emit(result);
         await send({ id: command.id, event: 'done' });
       } catch (error) {
-        if (!stopping) await send({ id: command.id, event: 'error', error: publicError(error) }).catch(() => {});
+        if (!stopping) await send({ id: command.id, event: 'error', error: publicError(budgetExpired ? new BackendError('requestBudget') : error) }).catch(() => {});
       } finally {
         clearTimeout(timer);
         release?.();

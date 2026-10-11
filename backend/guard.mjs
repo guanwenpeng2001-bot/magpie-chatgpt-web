@@ -4,6 +4,7 @@ const definitions = Object.freeze({
   expired: [401, 'Sign in again to refresh the ChatGPT session.'],
   cooldown: [429, 'The account is cooling down after a rate limit.'],
   upstream: [502, 'The upstream request failed.'],
+  requestBudget: [504, 'This request exceeded its local time budget and was stopped before any confirmed result.'],
   empty: [502, 'ChatGPT returned an empty reply.'],
   hidden: [502, 'ChatGPT hid the reply from the conversation.'],
   truncated: [502, 'ChatGPT stopped before confirming the reply was complete.'],

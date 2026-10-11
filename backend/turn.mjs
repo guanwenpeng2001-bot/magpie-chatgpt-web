@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BackendError } from './guard.mjs';
+import { responseFailure } from './http.mjs';
 import { BrowserSupervisor, launchSignInBrowser } from './browser.mjs';
 import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
 import { AnswerStream } from '../src/protocol.mjs';
 
 export class TurnDriver {
-  constructor({ profileRoot, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now } = {}) {
+  constructor({ profileRoot, profile, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now } = {}) {
     this.origin = origin;
     this.network = network;
     this.timeout = timeout;
     this.bindings = new Conversations({ now });
-    this.browser = new BrowserSupervisor({ profileRoot, launch: launch ?? (async profile => {
+    this.browser = new BrowserSupervisor({ profileRoot, profile, launch: launch ?? (async profile => {
       const owned = await launchSignInBrowser(profile, new AbortController().signal);
       const context = owned.context;
       context.close = owned.close;
@@ -78,8 +79,7 @@ export class TurnDriver {
             if (turn.failure) throw turn.failure;
             for (const item of turn.queue.splice(0)) {
               if (item.kind === 'status' && item.status !== 200) {
-                const retryAfter = guard.observe(item.status, item.retryAfter);
-                throw new BackendError(item.status === 429 ? 'cooldown' : [401, 403].includes(item.status) ? 'expired' : 'upstream', { retryAfter });
+                throw responseFailure(item.status, item, guard, item.retryAfter);
               }
               if (item.kind === 'failure') throw new BackendError(item.code);
               if (item.kind === 'fallback') {
