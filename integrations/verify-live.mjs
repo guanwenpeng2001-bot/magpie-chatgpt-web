@@ -133,14 +133,19 @@ const originalOpen = bridge.open.bind(bridge);
 bridge.open = async (command, signal) => {
  const startedAt = Date.now();
  try {
-  const upstream = await originalOpen(command, signal);
-  return (async function*(){
-   try { yield* upstream; }
-   catch (error) {
-    record({stage:'open-stream',method:command?.method,elapsedMilliseconds:Date.now()-startedAt,name:error?.name,message:String(error?.message??error),signalAborted:!!signal?.aborted,abortReason:String(signal?.reason??''),stack:String(error?.stack??'').slice(0,2000)});
-    throw error;
-   }
-  })();
+  const stream = await originalOpen(command, signal);
+  return {
+   [Symbol.asyncIterator]() { return this; },
+   async next(...args) {
+    try { return await stream.next(...args); }
+    catch (error) {
+     record({stage:'open-stream',method:command?.method,elapsedMilliseconds:Date.now()-startedAt,name:error?.name,message:String(error?.message??error),signalAborted:!!signal?.aborted,abortReason:String(signal?.reason??''),stack:String(error?.stack??'').slice(0,2000)});
+     throw error;
+    }
+   },
+   async return(...args) { return stream.return(...args); },
+   close(...args) { return stream.close(...args); },
+  };
  } catch (error) {
   record({stage:'open',method:command?.method,elapsedMilliseconds:Date.now()-startedAt,name:error?.name,message:String(error?.message??error),signalAborted:!!signal?.aborted,abortReason:String(signal?.reason??''),stack:String(error?.stack??'').slice(0,2000)});
   throw error;
