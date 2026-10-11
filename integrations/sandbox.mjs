@@ -20,7 +20,7 @@ const snapshot = async () => Promise.all(liveFiles.map(async path => {
   catch (error) { if (error.code === 'ENOENT') return [path, null]; throw error; }
 }));
 const before = await snapshot();
-const sandbox = await mkdtemp(join(tmpdir(), 'chatgpt-web-sandbox-'));
+const sandbox = await mkdtemp(join(process.argv.includes('--live-once') ? source : tmpdir(), 'chatgpt-web-sandbox-'));
 console.log(`sandbox ${sandbox}`);
 const home = join(sandbox, 'home');
 const config = join(home, '.config/magpie');
