@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { BackendError } from '../backend/guard.mjs';
 const module = await import('../backend/browser.mjs').catch(() => ({}));
 test('supervisor lazily launches, closes idle contexts and relaunches after a crash', async () => {
   assert.equal(typeof module.BrowserSupervisor, 'function');
@@ -26,4 +27,32 @@ test('supervisor lazily launches, closes idle contexts and relaunches after a cr
   }), error => error.status === 503);
   await browser.run('fixture', async context => assert.equal(context, contexts[2]));
   await browser.close();
+});
+
+for (const [label, options, account, expected] of [
+  ['configuration', {}, 'fixture', 'browserConfiguration'],
+  ['account', { profileRoot: '.' }, '../invalid', 'browserConfiguration'],
+  ['dependency', { profileRoot: '.', launch: async () => { throw new BackendError('browserDependency'); } }, 'fixture', 'browserDependency'],
+  ['launch', { profileRoot: '.', launch: async () => { throw new Error('synthetic foreign diagnostic'); } }, 'fixture', 'backendDown'],
+  ['profile', { profileRoot: '.', launch: async () => {
+    const context = new EventEmitter();
+    context.pages = () => [{ url: () => 'about:blank#restored' }];
+    context.close = async () => context.emit('close');
+    return context;
+  } }, 'fixture', 'browserProfile'],
+]) test(`browser distinguishes ${label} failure`, async () => {
+  const browser = new module.BrowserSupervisor(options);
+  try {
+    await assert.rejects(browser.run(account, () => assert.fail('operation must not start')), error => {
+      assert.equal(error.code, expected);
+      assert.deepEqual(error.toJSON(), new BackendError(expected).toJSON());
+      return true;
+    });
+  } finally { await browser.close(); }
+});
+
+test('closed supervisor reports lifecycle failure', async () => {
+  const browser = new module.BrowserSupervisor({ profileRoot: '.' });
+  await browser.close();
+  await assert.rejects(browser.run('fixture', () => {}), error => error.code === 'browserClosed');
 });

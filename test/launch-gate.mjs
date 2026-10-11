@@ -33,15 +33,21 @@ for (const headless of [true, false]) {
     await supervisor.run('fixture', async context => {
       assert.equal(context.pages()[0].url(), 'about:blank');
     });
+    let crashedContext;
+    let launchesAtCrash;
     await assert.rejects(supervisor.run('fixture', async context => {
+      crashedContext = context;
+      launchesAtCrash = launches;
       const session = await context.newCDPSession(context.pages()[0]);
       await session.send('Browser.crash').catch(() => {});
       await new Promise(() => {});
     }));
     await supervisor.run('fixture', async context => {
+      assert.notEqual(context, crashedContext);
+      assert.ok(launches > launchesAtCrash);
       assert.equal(await context.pages()[0].evaluate(() => location.href), 'about:blank');
     });
-    row.crashRelaunch = launches === 3;
+    row.crashRelaunch = launches >= 3;
   } catch { row.failure = 'Launch or lifecycle assertion failed'; }
   finally {
     await supervisor.close();

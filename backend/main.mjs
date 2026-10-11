@@ -40,6 +40,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     for (const entry of pending.values()) entry.controller.abort();
     input.destroy();
   };
+  let clientClock = 0;
   const clientFor = command => {
     const cookie = command.auth?.refresh;
     if (typeof cookie !== 'string' || !cookie) throw new BackendError('expired');
@@ -47,11 +48,29 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const identity = createHash('sha256').update(session || cookie).digest('hex');
     const key = createHash('sha256').update(cookie).update('\0').update(String(command.origin)).digest('hex');
     if (!clients.has(key)) {
-      if (clients.size >= 64 || guards.size >= 64) throw new BackendError('cooldown', { retryAfter: 1 });
-      if (!guards.has(identity)) guards.set(identity, new AccountGuard());
-      clients.set(key, new ReadClient({ origin: command.origin, cookie, guard: guards.get(identity) }));
+      const guard = guards.get(identity) ?? new AccountGuard();
+      const client = new ReadClient({ origin: command.origin, cookie, guard });
+      if (clients.size >= 64) {
+        const victim = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used)[0];
+        if (!victim) throw new BackendError('capacity');
+        clients.delete(victim[0]);
+      }
+      if (!guards.has(identity)) {
+        if (guards.size >= 64) {
+          const victim = [...guards].find(([, candidate]) => {
+            if ([...clients.values()].some(entry => entry.client.guard === candidate)) return false;
+            try { candidate.restriction(); return true; } catch { return false; }
+          });
+          if (!victim) throw new BackendError('capacity');
+          guards.delete(victim[0]);
+        }
+        guards.set(identity, guard);
+      }
+      clients.set(key, { client, refs: 0, used: 0 });
     }
-    return clients.get(key);
+    const entry = clients.get(key);
+    entry.refs++;
+    return { client: entry.client, release: () => { entry.refs--; entry.used = ++clientClock; } };
   };
   const loginPromises = new Map();
   const startLogin = account => {
@@ -78,7 +97,10 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const account = command.account ?? 'default';
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('protocol');
     switch (command.method) {
-      case 'models': return clientFor(command).models(signal);
+      case 'models': {
+        const { client, release } = clientFor(command);
+        try { return await client.models(signal); } finally { release(); }
+      }
       case 'loginStatus': return login.status(account);
       case 'login': {
         startLogin(account);
@@ -91,9 +113,9 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     }
   };
   const accept = command => {
-    if (!command || typeof command.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(command.id) || typeof command.method !== 'string') throw new BackendError('protocol');
+    if (!command || typeof command.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(command.id) || typeof command.method !== 'string') return;
     if (command.method === 'abort') { pending.get(command.id)?.controller.abort(); return; }
-    if (pending.has(command.id)) throw new BackendError('protocol');
+    if (pending.has(command.id)) return;
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
@@ -142,7 +164,9 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (Buffer.byteLength(line) >= 16 << 20) throw new BackendError('protocol');
-        accept(JSON.parse(line));
+        let command;
+        try { command = JSON.parse(line); } catch { continue; }
+        accept(command);
       }
       if (Buffer.byteLength(buffer) >= 16 << 20) throw new BackendError('protocol');
     }

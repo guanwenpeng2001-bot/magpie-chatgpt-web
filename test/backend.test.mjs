@@ -111,6 +111,28 @@ test('login commands keep polling status pending and resolve through the flow', 
   await server.work;
 });
 
+for (const [label, line] of [
+  ['unparseable', '{not json\n'], ['blank', '\n'],
+  ['invalid id', '{"id":"bad:id","method":"models"}\n'],
+  ['missing id', '{"method":"models"}\n'],
+  ['duplicate id', '{"id":"active","method":"complete"}\n'],
+]) test(`bad input ${label} preserves concurrent work`, { timeout: 2000 }, async t => {
+  let finish;
+  const held = new Promise(resolve => { finish = resolve; });
+  const server = harness({ handlers: { complete: async () => { await held; return true; } } });
+  t.after(async () => { finish(); server.input.end(); await server.work; });
+  server.send({ id: 'active', method: 'complete' });
+  await server.until(frames => frames.some(frame => frame.id === 'active'));
+  server.input.write(line);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(server.input.destroyed, false);
+  server.send({ id: 'later', method: 'loginStatus' });
+  await server.until(frames => frames.some(frame => frame.id === 'later' && frame.event === 'done'));
+  finish();
+  await server.until(frames => frames.some(frame => frame.id === 'active' && frame.event === 'done'));
+  assert.equal(server.frames.filter(frame => frame.id === 'active' && frame.event === 'head').length, 1);
+});
+
 test('login state polling represents all four states without arbitrary error text', () => {
   const states = new LoginStates();
   assert.deepEqual(states.start('fixture'), { state: 'pending' });

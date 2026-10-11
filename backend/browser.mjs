@@ -9,7 +9,9 @@ export class BrowserSupervisor {
     this.idleMilliseconds = idleMilliseconds;
     this.options = { headless, channel };
     this.launch = launch ?? (async (profile, options) => {
-      const { chromium } = await import('playwright-core');
+      let chromium;
+      try { ({ chromium } = await import('playwright-core')); }
+      catch { throw new BackendError('browserDependency'); }
       return chromium.launchPersistentContext(profile, {
         ...options, offline: true, serviceWorkers: 'block',
         args: ['--disable-background-networking', '--disable-component-update', '--no-first-run', '--host-resolver-rules=MAP * ~NOTFOUND'],
@@ -17,7 +19,8 @@ export class BrowserSupervisor {
     });
   }
   async #ensure(account) {
-    if (this.#closed || !this.profileRoot || typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('backendDown');
+    if (this.#closed) throw new BackendError('browserClosed');
+    if (typeof this.profileRoot !== 'string' || !this.profileRoot || typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
     if (!entry) {
       entry = { users: 0, context: null, timer: null, crashed: new Set() };
@@ -27,17 +30,17 @@ export class BrowserSupervisor {
         context.once('close', () => {
           clearTimeout(entry.timer);
           if (this.#accounts.get(account) === entry) this.#accounts.delete(account);
-          for (const reject of entry.crashed) reject(new BackendError('backendDown'));
+          for (const reject of entry.crashed) reject(new BackendError('browserClosed'));
         });
         if (context.pages().some(page => page.url() !== 'about:blank')) {
           await context.close();
-          throw new BackendError('protocol');
+          throw new BackendError('browserProfile');
         }
-        if (this.#closed) { await context.close(); throw new BackendError('backendDown'); }
+        if (this.#closed) { await context.close(); throw new BackendError('browserClosed'); }
         return context;
-      }).catch(() => {
+      }).catch(error => {
         if (this.#accounts.get(account) === entry) this.#accounts.delete(account);
-        throw new BackendError('backendDown');
+        throw error instanceof BackendError ? error : new BackendError('backendDown');
       });
     }
     clearTimeout(entry.timer);

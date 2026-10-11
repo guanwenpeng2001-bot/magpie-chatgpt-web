@@ -7,6 +7,11 @@ const definitions = Object.freeze({
   empty: [502, 'ChatGPT returned an empty reply.'],
   protocol: [502, 'The backend or upstream protocol is invalid.'],
   verification: [502, 'Complete human verification in the sign-in browser.'],
+  capacity: [503, 'Local backend capacity is exhausted; wait for active work or retained account restrictions to clear.'],
+  browserDependency: [503, 'The playwright-core dependency is unavailable; install the packaged dependency.'],
+  browserProfile: [502, 'The browser profile restored a page other than about:blank.'],
+  browserConfiguration: [502, 'Browser account or profile root configuration is invalid.'],
+  browserClosed: [503, 'The browser context closed or its supervisor stopped.'],
   backendDown: [503, 'Backend unavailable; install Node 20 or newer and Chrome or Edge.'],
 });
 
@@ -28,7 +33,8 @@ export class BackendError extends Error {
     return { ...(this.signIn ? { 'x-magpie-sign-in': 'expired' } : {}), ...(this.retryAfter ? { 'retry-after': this.retryAfter } : {}) };
   }
   static fromEnvelope(envelope) {
-    const code = envelope?.status === 401 ? 'expired' : envelope?.status === 429 ? 'cooldown' : envelope?.status === 503 ? 'backendDown' : Object.keys(definitions).find(key => definitions[key][1] === envelope?.message) ?? 'protocol';
+    const known = Object.keys(definitions).find(key => definitions[key][0] === envelope?.status && definitions[key][1] === envelope?.message);
+    const code = known ?? (envelope?.status === 401 ? 'expired' : envelope?.status === 429 ? 'cooldown' : envelope?.status === 503 ? 'backendDown' : 'protocol');
     return new BackendError(code, { retryAfter: envelope?.retryAfter });
   }
 }

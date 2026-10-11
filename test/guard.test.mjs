@@ -70,7 +70,7 @@ test('a 401 blocks the account for the guard lifetime', async () => {
 });
 
 test('every error envelope is credential-free', () => {
-  for (const code of ['expired', 'cooldown', 'upstream', 'empty', 'protocol', 'verification', 'backendDown']) {
+  for (const code of ['expired', 'cooldown', 'upstream', 'empty', 'protocol', 'verification', 'backendDown', 'capacity', 'browserDependency', 'browserProfile', 'browserConfiguration', 'browserClosed']) {
     const envelope = publicError(new BackendError(code));
     assert.ok(!('cookie' in envelope));
     assert.ok(!('token' in envelope));
@@ -81,4 +81,14 @@ test('every error envelope is credential-free', () => {
   const envelope = publicError(foreign);
   assert.equal(envelope.message, new BackendError('upstream').message);
   assert.ok(!JSON.stringify(envelope).includes(marker));
+});
+
+test('error headers and pipe envelopes retain their distinct safe meanings', () => {
+  assert.deepEqual(new BackendError('expired').headers, { 'x-magpie-sign-in': 'expired' });
+  assert.deepEqual(new BackendError('cooldown', { retryAfter: 12 }).headers, { 'retry-after': '12' });
+  for (const code of ['capacity', 'browserDependency', 'browserProfile', 'browserConfiguration', 'browserClosed', 'backendDown']) {
+    const error = new BackendError(code);
+    assert.deepEqual(error.headers, {});
+    assert.equal(BackendError.fromEnvelope(error.toJSON()).code, code);
+  }
 });
