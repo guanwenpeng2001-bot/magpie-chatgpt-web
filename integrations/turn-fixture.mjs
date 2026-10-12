@@ -39,12 +39,13 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
         response.end(mode === 'post-challenge' ? '<title>Just a moment</title>Enable JavaScript and cookies to continue /cdn-cgi/challenge-platform/' : '{}');
         return;
       }
+      if (mode === 'upstream-reject') { request.socket.destroy(); return; }
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       const frame = (event, data) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       await delay(stall);
       if (mode === 'changed') { frame('changed_encoding', {}); response.end(); return; }
       if (mode.startsWith('present-')) {
-        if (mode === 'present-handoff') for (const item of handoffFrames) frame(item.event, item.data);
+        if (['present-handoff', 'present-handoff-failure'].includes(mode)) for (const item of handoffFrames) frame(item.event, item.data);
         response.end(); return;
       }
       frame('delta_encoding', 'v1');
@@ -73,6 +74,11 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       let conversation = location.pathname.startsWith('/c/') ? location.pathname.slice(3) : crypto.randomUUID();
       if (!['normal', 'app-shell-script'].includes(mode)) document.querySelector('script[src*="/cdn-cgi/challenge-platform/"]').remove();
       if (mode === 'clone-failure') Response.prototype.clone = function () { throw new Error('fixture refuses clone'); };
+      if (mode === 'present-handoff-failure') Response.prototype.clone = function () {
+        return new Response(this.body.pipeThrough(new TransformStream({
+          flush(controller) { controller.error(new Error('fixture post-handoff reader crash')); },
+        })));
+      };
       if (mode === 'page-shape') document.body.append(input.cloneNode());
       input.addEventListener('keydown', async event => {
         if (event.key !== 'Enter') return;
