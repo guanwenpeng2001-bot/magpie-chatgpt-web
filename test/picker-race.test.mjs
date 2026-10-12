@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TurnDriver } from '../backend/turn.mjs';
+
+// Captured structural attributes; the delayed replacement models the view transition.
+function pickerHtml(mode) {
+  return `<!doctype html><title>Offline picker</title>
+    <button data-codex-intelligence-trigger="true" aria-haspopup="menu" data-composer-navigation-target="reasoning">选择 ChatGPT 模型</button>
+    <div role="menu"></div>
+    <script>
+      const mode = ${JSON.stringify(mode)};
+      const menu = document.querySelector('[role="menu"]');
+      window.toggleClicks = 0;
+      const models = () => {
+        menu.innerHTML = '<div role="menuitemradio" aria-checked="true">GPT-6</div><div role="menuitemradio">GPT-5.6 Sol</div><div role="menuitemradio">GPT-5.5<br>Leaving on October 14</div>';
+        if (mode === 'ambiguous') menu.innerHTML += '<div role="menuitemradio">GPT-6</div>';
+        if (mode === 'hidden') menu.innerHTML += '<div role="menuitemradio" style="display:none">GPT-6</div>';
+        for (const entry of menu.querySelectorAll('[role="menuitemradio"]')) entry.onclick = () => { window.selected = entry.innerText.split('\\n')[0]; };
+      };
+      const toggle = () => {
+        const node = document.createElement('div'); node.setAttribute('role', 'menuitem'); node.dataset.modelPickerViewToggle = 'true'; node.textContent = 'Instant';
+        node.onclick = () => { window.toggleClicks++; menu.replaceChildren(); setTimeout(models, 200); };
+        menu.prepend(node);
+      };
+      document.querySelector('button').onclick = () => {
+        if (mode === 'delayed') { toggle(); const empty = document.createElement('div'); empty.setAttribute('role', 'menuitem'); menu.append(empty); }
+        else { models(); if (mode === 'already-applied') toggle(); }
+      };
+    </script>`;
+}
+
+test('picker view transitions in an offline browser', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--disable-background-networking'] });
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await context.route('**/*', route => route.abort());
+  if (process.env.PICKER_TRACE) await context.tracing.start({ screenshots: true, snapshots: true });
+  try {
+    for (const mode of ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden']) await t.test(mode, async () => {
+      const page = await context.newPage();
+      try {
+        await page.setContent(pickerHtml(mode));
+        let failure;
+        try { await TurnDriver.prototype.selectModel(page, 'gpt-6'); } catch (error) { failure = error; }
+        const state = await page.evaluate(() => ({ selected: window.selected, toggleClicks: window.toggleClicks }));
+        console.log(JSON.stringify({ mode, code: failure?.code, ...state }));
+        if (mode === 'ambiguous') { assert.equal(failure?.code, 'pageShape'); assert.equal(state.selected, undefined); }
+        else { assert.equal(failure?.code, undefined); assert.equal(state.selected, 'GPT-6'); }
+        assert.equal(state.toggleClicks, mode === 'delayed' ? 1 : 0);
+      } finally { await page.close(); }
+    });
+  } finally {
+    if (process.env.PICKER_TRACE) await context.tracing.stop({ path: process.env.PICKER_TRACE });
+    await browser.close();
+  }
+});

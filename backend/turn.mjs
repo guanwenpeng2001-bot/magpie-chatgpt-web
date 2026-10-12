@@ -158,7 +158,15 @@ export class TurnDriver {
     await picker.click();
     try {
       const modelView = page.locator('[role="menu"] [role="menuitem"][data-model-picker-view-toggle="true"]').filter({ visible: true });
-      if (await modelView.count() === 1) await modelView.click();
+      if (await page.getByRole('menuitemradio').filter({ visible: true }).count() === 0) {
+        if (await modelView.count() === 1) await modelView.click();
+        const rendered = page.getByRole('menuitemradio').filter({ visible: true });
+        if (await rendered.count() === 0) {
+          try { await rendered.first().waitFor({ state: 'visible', timeout: 5000 }); }
+          catch { throw new BackendError('pageShape'); }
+        }
+      }
+      // Localized server-rendered titles are a fallback, not structural anchors.
       // GPT-6 and GPT-5.5 are unique-title mappings against the archived picker.
       // Selection and submission were measured; answer provenance was not, so no
       // mapping carries a generation claim. Mini variants and the catalogue's
