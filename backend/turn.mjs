@@ -159,7 +159,7 @@ export class TurnDriver {
     if (await picker.count() !== 1) throw new BackendError('pageShape');
     await picker.click();
     try {
-      const menu = page.locator('[role="menu"]');
+      const menu = page.locator('[role="menu"]').filter({ visible: true });
       try { await menu.first().waitFor({ state: 'visible', timeout: 10000 }); }
       catch { throw new BackendError('pageShape'); }
       const modelView = page.locator('[role="menu"] [role="menuitem"][data-model-picker-view-toggle="true"]').filter({ visible: true });

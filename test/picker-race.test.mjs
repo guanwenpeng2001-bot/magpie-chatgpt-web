@@ -4,13 +4,17 @@ import { TurnDriver } from '../backend/turn.mjs';
 
 // Captured structural attributes; the delayed replacement models the view transition.
 function pickerHtml(mode) {
+  const decoyMenu = mode === 'hidden-decoy-menu' ? '<div role="menu" style="display:none"></div>'
+    : mode === 'empty-decoy-menu' ? '<div role="menu"></div>'
+    : mode === 'populated-decoy-menu' ? '<div role="menu"><div>Other dropdown</div></div>' : '';
   return `<!doctype html><title>Offline picker</title>
+    ${decoyMenu}
     <button data-codex-intelligence-trigger="true" aria-haspopup="menu" data-composer-navigation-target="reasoning">选择 ChatGPT 模型</button>
-    <div role="menu"></div>
+    <div role="menu" id="picker-menu"></div>
     <script>
       const mode = ${JSON.stringify(mode)};
       const trigger = document.querySelector('button');
-      const menu = document.querySelector('[role="menu"]');
+      const menu = document.getElementById('picker-menu');
       window.toggleClicks = 0;
       const models = () => {
         menu.innerHTML = '<div role="menuitemradio" aria-checked="true">GPT-6</div><div role="menuitemradio">GPT-5.6 Sol</div><div role="menuitemradio">GPT-5.5<br>Leaving on October 14</div>';
@@ -39,7 +43,7 @@ function pickerHtml(mode) {
     </script>`;
 }
 
-const ALWAYS = ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden', 'late-trigger', 'slow-menu', 'two-triggers'];
+const ALWAYS = ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden', 'late-trigger', 'slow-menu', 'two-triggers', 'hidden-decoy-menu', 'empty-decoy-menu', 'populated-decoy-menu'];
 
 test('picker view transitions in an offline browser', async t => {
   try { import.meta.resolve('playwright-core'); }

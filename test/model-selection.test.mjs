@@ -11,7 +11,7 @@ function pickerFixture() {
     click: async () => { selected = text.split('\n')[0]; },
   }));
   const collection = items => ({ filter: () => collection(items), count: async () => items.length, all: async () => items });
-  const menu = { first() { return this; }, waitFor: async () => {} };
+  const menu = { filter() { return this; }, first() { return this; }, waitFor: async () => {} };
   const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; }, waitFor: async () => {}, first() { return this; } };
   const toggle = { click: async () => { view = 'models'; }, count: async () => view === 'effort' ? 1 : 0, filter() { return this; } };
   return {
@@ -69,7 +69,7 @@ function visibilityFixture(rows) {
     count: async () => items.length,
     all: async () => items,
   });
-  const menu = { first() { return this; }, waitFor: async () => {} };
+  const menu = { filter() { return this; }, first() { return this; }, waitFor: async () => {} };
   const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; }, waitFor: async () => {}, first() { return this; } };
   const toggle = { click: async () => { view = 'models'; }, count: async () => view === 'effort' ? 1 : 0, filter() { return this; } };
   return {
