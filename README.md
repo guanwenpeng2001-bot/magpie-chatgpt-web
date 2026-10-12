@@ -4,7 +4,11 @@ Use a ChatGPT web session as a magpie text provider. Replies arrive in batches a
 
 ## Requirements and installation
 
-Install Node.js 20 or later on PATH, Google Chrome, Git and magpie before installing this plugin. No browser or runtime is bundled. The tested platform is Windows 11 with Chrome 151 and magpie 0.1.1198. Edge fallback is not implemented.
+Install magpie first, then Node.js 20 or later, Google Chrome and Git, all reachable on PATH. No browser or runtime is bundled. The tested platform is Windows 11 with Chrome 151 and magpie 0.1.1198. Edge fallback is not implemented.
+
+magpie is distributed at https://usemagpie.ai, with sources at https://github.com/yetone/magpie. The project's releases publish `magpie-windows-amd64.exe` for Windows — the build this document was tested against — and `magpie update` upgrades an installed copy from the terminal. The commands below invoke the executable by the bare name `magpie`, so it must be on PATH under that name: if `magpie --version` fails with PowerShell's CommandNotFoundException (or the command not being recognized), either add the folder containing the executable to PATH, or copy the executable into a folder already on PATH and name it `magpie.exe`.
+
+The optional disposable rehearsal near the end of this document additionally needs a Bun runtime and the pinned plugin-host bundle at the exact paths listed under **Disposable cold-HOME verification**, plus dependency resolution over the network.
 
 From the checked-out repository, in PowerShell:
 
@@ -14,15 +18,15 @@ magpie plugin add $pluginSpec
 magpie plugin login chatgpt-web
 ```
 
-Use a committed checkout: a git install consumes committed source. Installing restarts magpie's plugin host. The installer resolves the sole dependency, `playwright-core ~1.62.0`; the lockfile fixes the measured package to 1.62.1. No install lifecycle scripts are needed. This repository is not published to a registry.
+Use a committed checkout: a git install consumes committed source. Installing restarts magpie's plugin host: expect the running host process to be replaced, and an in-flight turn served by any plugin provider to fail and need retrying; behaviour beyond that is not established here. The installer resolves the sole dependency, `playwright-core ~1.62.0`; the lockfile fixes the measured package to 1.62.1. No install lifecycle scripts are needed. This repository is not published to a registry.
 
-Choose **ChatGPT account (browser sign-in)**. A normal Chrome window opens on chatgpt.com with a separate plugin-owned profile. Sign in normally, including any MFA requested by the site. You do not need developer tools, cookie copying or token pasting. The window closes when the session is verified. Closing it early cancels sign-in.
+Choose **ChatGPT account (browser sign-in)**. Sign-in and later turns run Chrome with a plugin-owned profile below `~/.config/magpie/chatgpt-web-profile/`; that directory holds a live browser session and is separate from your normal Chrome profile. A normal Chrome window opens on chatgpt.com. Sign in normally, including any MFA requested by the site. You do not need developer tools, cookie copying or token pasting. The window closes when the session is verified. Closing it early cancels sign-in.
 
 Open magpie's usual model picker, choose **ChatGPT Web**, and select an offered model exactly as you select another provider's model. Send a message, continue the same conversation, and use the normal stop control to cancel a reply. `magpie plugin list --json` confirms the installed provider; model selection takes place in the application's normal picker.
 
 ## Ordinary use and session cleanup
 
-Magpie stores the session in its credential store. Renewal begins 24 hours before token expiry and uses the stored session first. A positively identified challenge routes the read through the plugin-owned browser. A failed catalogue read remains an error, not an empty list. Catalogue reads are cached for 60 seconds.
+Magpie stores the session in its credential store. Renewal begins 24 hours before token expiry and uses the stored session first. A positively identified challenge routes the read through the plugin-owned browser. A failed catalogue read remains an error, not an empty list; the same applies when a successfully read catalogue contains none of the exposed slugs, so a provider with zero usable models is reported as an error rather than appearing silently. Catalogue reads are cached for 60 seconds.
 
 Each sign-in allocates a profile below `~/.config/magpie/chatgpt-web-profile/`. Ordinary turns reuse the session, open visible Chrome on demand, and close idle browser contexts. One turn per account is allowed, with pacing and rate-limit cooldown. Temporary chats are required. Cancellation closes the active page and drops its local conversation binding; a later turn rebuilds from the full supplied history when needed. Bindings expire after 30 idle minutes. The plugin never deletes remote conversations.
 
@@ -68,17 +72,20 @@ Invalid definitions produce HTTP 400 before dispatch. Unknown tools, malformed J
 
 This developer rehearsal uses a local fixture in place of chatgpt.com. It does not sign in to a real account or spend live turns. It tests the stock plugin host API; it does not substitute for a person assessing the application's model-picker UI.
 
-On the measured Windows machine, the harness requires the existing magpie binary at `~/Downloads/magpie-windows-amd64.exe`, Bun at `~/.cache/magpie/bun/1.4.2/magpie-bun.exe`, and pinned host bundle `~/.cache/magpie/plugin-host/host-6e85b6c721c8.js`. A different installation layout needs a harness adjustment. It verifies host SHA-256 `6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd`. It uses the installer's dependency resolution, so a registry connection or compatible package cache is required.
+On the measured Windows machine, the harness requires the existing magpie binary at `~/Downloads/magpie-windows-amd64.exe`, Bun at `~/.cache/magpie/bun/1.4.2/magpie-bun.exe`, and pinned host bundle `~/.cache/magpie/plugin-host/host-6e85b6c721c8.js`. A different installation layout needs a harness adjustment. It verifies host SHA-256 `6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd`. It uses the installer's dependency resolution, so a registry connection is required; the harness points the install at a fresh empty cache directory, so a warm package cache elsewhere does not satisfy it.
 
 Run, from this committed checkout:
 
 ```powershell
 node scripts/check-package.mjs
 node --test
+node test/launch-gate.mjs
 node integrations/sandbox.mjs
 ```
 
-The last command performs one sequence. It creates `%TEMP%/chatgpt-web-sandbox-<random>/`, with `home/` as HOME and USERPROFILE, separate config/cache/AppData paths, `package/` as a disposable committed Git repository, and a private copy of the executable. It installs using `magpie plugin add git+file:///.../package`, lists the provider, checks the credential store is absent before fixture sign-in, performs fixture browser sign-in, discovers models, selects a model through the stock host, streams a three-turn conversation, aborts and reuses the session, checks unsupported-input and expiry failures, and deletes the sandbox in `finally`. The synthetic `plugin-auth.json` is never copied out. The harness prints the allocated path and each checked result; success is exit code 0 and `sandbox discarded`.
+`node --test` skips `test/launch-gate.mjs` with a visible reason because it launches real Chrome; run `node test/launch-gate.mjs` separately to exercise the browser launch, idle-close and crash-relaunch lifecycle. The gate forces browser traffic offline and needs only Chrome installed.
+
+The last command performs one sequence. It creates `%TEMP%/chatgpt-web-sandbox-<random>/`, with `home/` as HOME and USERPROFILE, separate config/cache/AppData paths, `package/` as a disposable committed Git repository, and a private copy of the executable. It installs using `magpie plugin add git+file:///.../package`, lists the provider, checks the credential store is absent before fixture sign-in, performs fixture browser sign-in, discovers models and asserts the exposed list through the stock host, streams a three-turn conversation on the site-default model (`auto`) and exercises no non-default model selection, aborts and reuses the session, checks unsupported-input and expiry failures, and deletes the sandbox in `finally`. The synthetic `plugin-auth.json` is never copied out. The harness prints the allocated path and each checked result; success is exit code 0 and `sandbox discarded`.
 
 The fixture changes only the upstream boundary through a harness wrapper. Browser login, pipe transport, model mapping, translation, stock-host credential persistence and stock-host streaming execute production code. Fixture replies prove transport and history handling, not live model intelligence. Live generation smoke requires separate explicit authorization and is never part of this command.
 

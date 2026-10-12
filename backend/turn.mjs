@@ -157,8 +157,10 @@ export class TurnDriver {
     try {
       const modelView = page.locator('[role="menu"] [role="menuitem"][data-model-picker-view-toggle="true"]').filter({ visible: true });
       if (await modelView.count() === 1) await modelView.click();
-      // GPT-6 is stream-confirmed; GPT-5.5 is a unique-title mapping.
-      // Mini variants and the catalogue's Luna versus the picker's Sol are unmapped.
+      // GPT-6 and GPT-5.5 are unique-title mappings against the archived picker.
+      // Selection and submission were measured; answer provenance was not, so no
+      // mapping carries a generation claim. Mini variants and the catalogue's
+      // Luna versus the picker's Sol are unmapped.
       const labels = { 'gpt-6': 'GPT-6', 'gpt-5-5': 'GPT-5.5' };
       const entries = page.getByRole('menuitemradio').filter({ visible: true });
       const matches = [];

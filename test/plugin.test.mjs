@@ -22,6 +22,13 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
   }
 });
 
+test('a successfully read catalogue with no exposed slug is an error, not an empty list', async () => {
+  const { BackendError } = await import('../backend/guard.mjs');
+  const catalogue = { models: [{ slug: 'gpt-5-6', title: 'GPT-5.6 Luna' }, { slug: 'gpt-6-mini', title: 'GPT-6' }] };
+  const hooks = plugin._internal.createHooks({ bridge: { call: async () => catalogue }, profileRoot: '.' });
+  await assert.rejects(hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } }), error => error instanceof BackendError && error.code === 'protocol');
+});
+
 test('unauthenticated models preserve static config and failures remain loud', async () => {
   const { BackendError } = await import('../backend/guard.mjs');
   const hooks = plugin._internal.createHooks({ bridge: { call: async () => { throw new BackendError('expired'); } }, profileRoot: '.' });

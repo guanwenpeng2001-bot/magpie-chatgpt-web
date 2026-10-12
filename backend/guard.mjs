@@ -32,7 +32,7 @@ const definitions = Object.freeze({
   browserProfile: [502, 'The browser profile restored a page other than about:blank.'],
   browserConfiguration: [502, 'Browser account or profile root configuration is invalid.'],
   browserClosed: [503, 'The browser context closed or its supervisor stopped.'],
-  backendDown: [503, 'Backend unavailable; install Node 20 or newer and Chrome or Edge.'],
+  backendDown: [503, 'Backend unavailable; install Node 20 or newer and Chrome.'],
 });
 
 export class BackendError extends Error {

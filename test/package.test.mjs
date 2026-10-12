@@ -72,6 +72,13 @@ for (const mutation of ['missing', 'mismatch', 'integrity', 'extra', 'install'])
   });
 }
 
+test('package gate rejects a lock entry whose version and resolved URL disagree', async t => {
+  const { root, lock, save } = await fixture(t);
+  lock.packages['node_modules/playwright-core'].version = '1.62.5';
+  await save();
+  assert.ok((await checker.checkPackage(root)).errors.includes('Lockfile must consistently pin the sole dependency with registry integrity.'));
+});
+
 test('package gate rejects a changed host manifest', async t => {
   const { root, pkg, save } = await fixture(t);
   pkg.magpie.maxConcurrency = 2;

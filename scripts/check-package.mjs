@@ -32,7 +32,8 @@ export async function checkPackage(root) {
   else checks.push('manifest contract');
   const lock = await readJson('package-lock.json');
   const locked = lock.packages?.['node_modules/playwright-core'];
-  if (lock.lockfileVersion !== 3 || lock.name !== pkg.name || lock.version !== pkg.version || JSON.stringify(lock.packages?.['']?.dependencies) !== JSON.stringify(pkg.dependencies) || !/^1\.62\.\d+$/.test(locked?.version ?? '') || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(locked?.integrity ?? '') || !/^https:\/\/registry\.npmjs\.org\/playwright-core\/-\/playwright-core-1\.62\.\d+\.tgz$/.test(locked?.resolved ?? '') || Object.keys(lock.packages ?? {}).some(name => !['', 'node_modules/playwright-core'].includes(name)) || locked?.hasInstallScript) errors.push('Lockfile must consistently pin the sole dependency with registry integrity.');
+  const coherent = typeof locked?.version === 'string' && locked?.resolved === `https://registry.npmjs.org/playwright-core/-/playwright-core-${locked.version}.tgz`;
+  if (lock.lockfileVersion !== 3 || lock.name !== pkg.name || lock.version !== pkg.version || JSON.stringify(lock.packages?.['']?.dependencies) !== JSON.stringify(pkg.dependencies) || !/^1\.62\.\d+$/.test(locked?.version ?? '') || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(locked?.integrity ?? '') || !coherent || !/^https:\/\/registry\.npmjs\.org\/playwright-core\/-\/playwright-core-1\.62\.\d+\.tgz$/.test(locked?.resolved ?? '') || Object.keys(lock.packages ?? {}).some(name => !['', 'node_modules/playwright-core'].includes(name)) || locked?.hasInstallScript) errors.push('Lockfile must consistently pin the sole dependency with registry integrity.');
   else checks.push('lockfile consistency and integrity metadata');
   let scanned = 0;
   async function walk(directory) {

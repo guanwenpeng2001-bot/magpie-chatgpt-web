@@ -93,6 +93,10 @@ test('error headers and pipe envelopes retain their distinct safe meanings', () 
   }
 });
 
+test('backendDown names the dependencies the code actually needs', () => {
+  assert.equal(new BackendError('backendDown').message, 'Backend unavailable; install Node 20 or newer and Chrome.');
+});
+
 test('mutated error fields cannot leak through HTTP headers', () => {
   const marker = globalThis.crypto.randomUUID();
   for (const code of ['expired', 'cooldown', 'upstream', 'backendDown']) {
