@@ -30,7 +30,7 @@ test('offline challenge turn routing', async t => {
   const command = () => ({ ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }), auth: { profile: 'fixture' } });
   try {
     for (const [mode, expected] of [
-      ['app-shell-challenge', 'verification'], ['app-shell-card', 'verification'], ['app-shell-script', 'verification'],
+      ['app-shell-challenge', 'verification'], ['app-shell-card', 'verification'], ['app-shell-script', null],
       ['xhr-challenge', 'verification'], ['xhr-interstitial', 'verification'], ['xhr-forbidden', 'expired'],
       ['xhr-expired', 'expired'], ['xhr-rate', 'cooldown'], ['challenge', 'verification'],
       ['post-challenge', 'verification'], ['page-shape', 'pageShape'],
@@ -42,15 +42,16 @@ test('offline challenge turn routing', async t => {
       let failure;
       try { await driver.complete(command(), guard, 'fixture', new AbortController().signal, frame => frames.push(frame)); }
       catch (error) { failure = error; }
-      console.log(JSON.stringify({ mode, code: failure?.code, error: failure?.toJSON() }));
-      assert.equal(failure?.code, expected);
-      assert.deepEqual(frames, []);
+      console.log(JSON.stringify({ mode, code: failure?.code, error: failure?.toJSON(), text: frames.filter(frame => frame.event === 'answer').map(frame => frame.data.text).join('') }));
+      assert.equal(failure?.code ?? null, expected);
+      if (expected) assert.deepEqual(frames, []);
+      else assert.equal(frames.filter(frame => frame.event === 'answer').map(frame => frame.data.text).join(''), fixture.batches.join(''));
       assert.equal(fixture.requests.length - before, ['challenge', 'page-shape'].includes(mode) ? 0 : 1);
       if (expected === 'verification') {
         assert.deepEqual(failure.toJSON(), { status: 502, message: verification });
         (await guard.begin())();
         if (mode.startsWith('app-shell-')) {
-          const page = context.pages().find(page => new URL(page.url()).pathname.startsWith('/c/'));
+          const page = context.pages().find(page => !page.isClosed() && page.url().startsWith(fixture.origin));
           assert.ok(page, 'challenge page remains open for manual verification');
           assert.equal(await page.title(), 'Local chat fixture');
           assert.equal(await page.getByRole('textbox').count(), 1);
@@ -61,12 +62,23 @@ test('offline challenge turn routing', async t => {
       } else if (expected === 'expired') await assert.rejects(guard.begin(), { code: 'expired' });
       else if (expected === 'cooldown') assert.equal(failure.retryAfter, '120');
     });
-    await t.test('healthy fixture still completes', async () => {
+    await t.test('healthy fixture carrying the normal challenge-platform script completes', async () => {
       fixture.setMode('normal');
+      await Promise.all(context.pages().map(page => page.close()));
       const frames = [];
-      await driver.complete(command(), new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame));
+      const seen = {};
+      await driver.complete(command(), new AccountGuard(), 'fixture', new AbortController().signal, async frame => {
+        frames.push(frame);
+        if (frame.event === 'answer' && !seen.script) {
+          const page = context.pages().find(page => !page.isClosed() && page.url().startsWith(fixture.origin));
+          seen.script = await page.evaluate(() => [...document.scripts].filter(script => script.src.includes('/cdn-cgi/challenge-platform/')).length);
+          seen.answer = await page.locator('[aria-label="Assistant response"]').innerText();
+        }
+      });
       assert.equal(frames.filter(frame => frame.event === 'answer').map(frame => frame.data.text).join(''), fixture.batches.join(''));
       assert.equal(frames.at(-1).data.type, 'message_stream_complete');
+      assert.equal(seen.script, 1);
+      assert.equal(seen.answer.startsWith(fixture.batches[0]), true);
     });
   } finally {
     if (process.env.CHALLENGE_TRACE && context) await context.tracing.stop({ path: process.env.CHALLENGE_TRACE });

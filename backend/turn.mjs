@@ -137,12 +137,9 @@ export class TurnDriver {
     const state = await page.evaluate(() => {
       const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alert"]')].map(node => node.innerText).join('\n');
       const challengeCard = [...document.querySelectorAll('[data-dil-message-id], [data-message-author-role="assistant"], [aria-label="Assistant response"], [role="alert"]')].some(node => /(?:^|\n)\s*cloudflare_challenge\s*(?:\n|$)/.test(node.innerText));
-      const challengeScript = [...document.querySelectorAll('script[src]')].some(node => {
-        try { return new URL(node.src).pathname.startsWith('/cdn-cgi/challenge-platform/'); } catch { return false; }
-      });
       return {
         rate: /usage limit|rate limit|reached.*limit|too many requests|使用上限|达到.*上限|请求过多|limite.*atteinte|límite.*alcanzado|Limit.*erreicht|limite.*atingido|上限に達|한도.*도달/i.test(dialogs),
-        challenge: challengeCard || challengeScript || [...document.querySelectorAll('iframe')].some(node => /challenge|captcha/i.test(node.title ?? '')) || /verify you are human|验证您是真人|请完成验证/i.test(dialogs) || /just a moment|请稍候/i.test(document.title),
+        challenge: challengeCard || [...document.querySelectorAll('iframe')].some(node => /challenge|captcha/i.test(node.title ?? '')) || /verify you are human|验证您是真人|请完成验证/i.test(dialogs) || /just a moment|请稍候/i.test(document.title),
         expired: [...document.querySelectorAll('button')].some(node => /^(log in|sign in|登录)$/i.test(node.innerText.trim())) && !document.querySelector('[contenteditable="true"], textarea'),
       };
     });

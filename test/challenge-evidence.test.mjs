@@ -42,12 +42,17 @@ test('XHR ignores responses from a previous turn', async () => {
   fixture.xhr.fire('load'); fixture.xhr.fire('error'); await fixture.flush();
   assert.deepEqual(fixture.events, []);
 });
-for (const signal of ['card', 'script']) test(`pageError detects app-shell ${signal} independently`, async () => {
+function page({ card = false, script = false } = {}) {
   const document = { title: 'Garden conversation', querySelector: () => null, querySelectorAll(selector) {
-    if (selector === 'script[src]') return signal === 'script' ? [{ src: 'http://127.0.0.1/cdn-cgi/challenge-platform/scripts/jsd/api.js' }] : [];
-    if (selector.includes('data-message-author-role')) return signal === 'card' ? [{ innerText: 'cloudflare_challenge\nRetry' }] : [];
+    if (selector === 'script[src]') return script ? [{ src: 'http://127.0.0.1/cdn-cgi/challenge-platform/scripts/jsd/api.js' }] : [];
+    if (selector.includes('data-message-author-role')) return card ? [{ innerText: 'cloudflare_challenge\nRetry' }] : [];
     return [];
   } };
-  const page = { evaluate: callback => runInNewContext(`(${callback.toString()})()`, { document, URL }) };
-  await assert.rejects(TurnDriver.prototype.pageError(page, new AccountGuard()), { code: 'verification' });
+  return { evaluate: callback => runInNewContext(`(${callback.toString()})()`, { document, URL }) };
+}
+test('pageError detects the challenge card independently', async () => {
+  await assert.rejects(TurnDriver.prototype.pageError(page({ card: true, script: true }), new AccountGuard()), { code: 'verification' });
+});
+test('pageError ignores the challenge-platform script on a healthy page', async () => {
+  await TurnDriver.prototype.pageError(page({ script: true }), new AccountGuard());
 });

@@ -15,7 +15,7 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       requests.push(submitted);
       const marker = submitted.prompt.match(/\[MAGPIE_TOOL_([a-f0-9]{32})\]/);
       const scripted = marker ? ['Before the call. ', `[MAGPIE_TOOL_${marker[1]}]${JSON.stringify({ name: 'lookup', input: { query: 'garden' } })}[/MAGPIE_TOOL_${marker[1]}]`, 'After the call.'] : batches;
-      if (mode.startsWith('xhr-') || mode.startsWith('app-shell-')) {
+      if ((mode.startsWith('xhr-') || mode.startsWith('app-shell-')) && mode !== 'app-shell-script') {
         const headers = { 'content-type': mode === 'xhr-interstitial' ? 'text/html' : 'application/json' };
         if (['xhr-challenge', 'app-shell-challenge'].includes(mode)) headers['cf-mitigated'] = 'challenge';
         response.writeHead(mode === 'xhr-expired' ? 401 : mode === 'xhr-rate' ? 429 : 403, { ...headers, 'retry-after': '120' });
@@ -50,10 +50,12 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
     response.end(`<!doctype html><html><head><title>Local chat fixture</title></head><body>
       <button aria-label="Open profile menu">Fixture account</button><p>Temporary chat</p>
       <main id="messages"></main><textarea aria-label="Message"></textarea>
+      <script src="/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload"></script>
       <script>
       const mode = ${JSON.stringify(mode)};
       const input = document.querySelector('textarea');
       let conversation = location.pathname.startsWith('/c/') ? location.pathname.slice(3) : crypto.randomUUID();
+      if (!['normal', 'app-shell-script'].includes(mode)) document.querySelector('script[src*="/cdn-cgi/challenge-platform/"]').remove();
       if (mode === 'clone-failure') Response.prototype.clone = function () { throw new Error('fixture refuses clone'); };
       if (mode === 'page-shape') document.body.append(input.cloneNode());
       input.addEventListener('keydown', async event => {
@@ -69,13 +71,13 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
         article.append(answer); document.querySelector('main').append(article);
         const stop = document.createElement('button'); stop.setAttribute('aria-label', 'Stop generating'); document.body.append(stop);
         history.replaceState(null, '', '/c/' + conversation);
-        if (mode.startsWith('xhr-') || mode.startsWith('app-shell-')) {
+        if ((mode.startsWith('xhr-') || mode.startsWith('app-shell-')) && mode !== 'app-shell-script') {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', '/backend-api/f/conversation');
           xhr.addEventListener('load', () => {
             stop.remove();
             if (mode.startsWith('app-shell-')) {
-              if (mode !== 'app-shell-script') { const error = document.createElement('p'); error.textContent = 'cloudflare_challenge'; answer.append(error); }
+              const error = document.createElement('p'); error.textContent = 'cloudflare_challenge'; answer.append(error);
               const retry = document.createElement('button'); retry.textContent = 'Retry'; article.append(retry);
               if (mode !== 'app-shell-card') { const script = document.createElement('script'); script.src = '/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload'; document.head.append(script); }
               const sandbox = document.createElement('iframe'); sandbox.title = 'DIL execution sandbox'; sandbox.src = 'about:blank'; document.body.append(sandbox);
