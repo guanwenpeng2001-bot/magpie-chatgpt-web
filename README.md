@@ -6,7 +6,7 @@ Use a ChatGPT web session as a magpie text provider. Replies arrive in batches a
 
 Install magpie first, then Node.js 20 or later, Google Chrome and Git, all reachable on PATH. No browser or runtime is bundled. The tested platform is Windows 11 with Chrome 151 and magpie 0.1.1198. Edge fallback is not implemented.
 
-magpie is distributed at https://usemagpie.ai, with sources at https://github.com/yetone/magpie. The project's releases publish `magpie-windows-amd64.exe` for Windows — the build this document was tested against — and `magpie update` upgrades an installed copy from the terminal. The commands below invoke the executable by the bare name `magpie`, so it must be on PATH under that name: if `magpie --version` fails with PowerShell's CommandNotFoundException (or the command not being recognized), either add the folder containing the executable to PATH, or copy the executable into a folder already on PATH and name it `magpie.exe`.
+magpie is distributed at https://usemagpie.ai, with sources at https://github.com/yetone/magpie. The project's [magpie-releases](https://github.com/yetone/magpie-releases/releases) publish `magpie-windows-amd64.exe` for Windows — the build this document was tested against — and `magpie update` upgrades an installed copy from the terminal. The commands below invoke the executable by the bare name `magpie`, so it must be on PATH under that name: if `magpie --version` fails with PowerShell's CommandNotFoundException (or the command not being recognized), rename the downloaded `magpie-windows-amd64.exe` to `magpie.exe` and add its folder to PATH, or copy it into a folder already on PATH as `magpie.exe`. Open a new terminal and confirm `magpie --version` succeeds before continuing.
 
 The optional disposable rehearsal near the end of this document additionally needs a Bun runtime and the pinned plugin-host bundle at the exact paths listed under **Disposable cold-HOME verification**, plus dependency resolution over the network.
 
@@ -18,7 +18,7 @@ magpie plugin add $pluginSpec
 magpie plugin login chatgpt-web
 ```
 
-Use a committed checkout: a git install consumes committed source. Installing restarts magpie's plugin host: expect the running host process to be replaced, and an in-flight turn served by any plugin provider to fail and need retrying; behaviour beyond that is not established here. The installer resolves the sole dependency, `playwright-core ~1.62.0`; the lockfile fixes the measured package to 1.62.1. No install lifecycle scripts are needed. This repository is not published to a registry.
+Use a committed checkout: a git install consumes committed source. Installing restarts magpie's plugin host. The effect on the application's UI and in-flight turns has not been established in this rehearsal; finish active turns before installing. The installer resolves the sole dependency, `playwright-core ~1.62.0`; the lockfile fixes the measured package to 1.62.1. No install lifecycle scripts are needed. This repository is not published to a registry.
 
 Choose **ChatGPT account (browser sign-in)**. Sign-in and later turns run Chrome with a plugin-owned profile below `~/.config/magpie/chatgpt-web-profile/`; that directory holds a live browser session and is separate from your normal Chrome profile. A normal Chrome window opens on chatgpt.com. Sign in normally, including any MFA requested by the site. You do not need developer tools, cookie copying or token pasting. The window closes when the session is verified. Closing it early cancels sign-in.
 
