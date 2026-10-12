@@ -15,6 +15,13 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       requests.push(submitted);
       const marker = submitted.prompt.match(/\[MAGPIE_TOOL_([a-f0-9]{32})\]/);
       const scripted = marker ? ['Before the call. ', `[MAGPIE_TOOL_${marker[1]}]${JSON.stringify({ name: 'lookup', input: { query: 'garden' } })}[/MAGPIE_TOOL_${marker[1]}]`, 'After the call.'] : batches;
+      if (mode.startsWith('xhr-') || mode.startsWith('app-shell-')) {
+        const headers = { 'content-type': mode === 'xhr-interstitial' ? 'text/html' : 'application/json' };
+        if (['xhr-challenge', 'app-shell-challenge'].includes(mode)) headers['cf-mitigated'] = 'challenge';
+        response.writeHead(mode === 'xhr-expired' ? 401 : mode === 'xhr-rate' ? 429 : 403, { ...headers, 'retry-after': '120' });
+        response.end(mode === 'xhr-interstitial' ? '<title>Just a moment</title>Enable JavaScript and cookies to continue /cdn-cgi/challenge-platform/' : '{}');
+        return;
+      }
       if (['post-challenge', 'post-expired', 'post-forbidden'].includes(mode)) {
         response.writeHead(mode === 'post-expired' ? 401 : 403, { 'content-type': mode === 'post-challenge' ? 'text/html' : 'application/json' });
         response.end(mode === 'post-challenge' ? '<title>Just a moment</title>Enable JavaScript and cookies to continue /cdn-cgi/challenge-platform/' : '{}');
@@ -38,6 +45,7 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       response.end('data: [DONE]\n\n');
       return;
     }
+    if (url.pathname.startsWith('/cdn-cgi/challenge-platform/')) { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end('// Offline challenge marker; no challenge execution.'); return; }
     response.setHeader('content-type', 'text/html');
     response.end(`<!doctype html><html><head><title>Local chat fixture</title></head><body>
       <button aria-label="Open profile menu">Fixture account</button><p>Temporary chat</p>
@@ -47,6 +55,7 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       const input = document.querySelector('textarea');
       let conversation = location.pathname.startsWith('/c/') ? location.pathname.slice(3) : crypto.randomUUID();
       if (mode === 'clone-failure') Response.prototype.clone = function () { throw new Error('fixture refuses clone'); };
+      if (mode === 'page-shape') document.body.append(input.cloneNode());
       input.addEventListener('keydown', async event => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
@@ -60,6 +69,20 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
         article.append(answer); document.querySelector('main').append(article);
         const stop = document.createElement('button'); stop.setAttribute('aria-label', 'Stop generating'); document.body.append(stop);
         history.replaceState(null, '', '/c/' + conversation);
+        if (mode.startsWith('xhr-') || mode.startsWith('app-shell-')) {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/backend-api/f/conversation');
+          xhr.addEventListener('load', () => {
+            stop.remove();
+            if (mode.startsWith('app-shell-')) {
+              if (mode !== 'app-shell-script') { const error = document.createElement('p'); error.textContent = 'cloudflare_challenge'; answer.append(error); }
+              const retry = document.createElement('button'); retry.textContent = 'Retry'; article.append(retry);
+              if (mode !== 'app-shell-card') { const script = document.createElement('script'); script.src = '/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload'; document.head.append(script); }
+              const sandbox = document.createElement('iframe'); sandbox.title = 'DIL execution sandbox'; sandbox.src = 'about:blank'; document.body.append(sandbox);
+            }
+          });
+          xhr.send(JSON.stringify({ conversation, prompt: input.value })); input.value = ''; return;
+        }
         const response = await fetch('/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ conversation, prompt: input.value }) });
         input.value = '';
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let completed = false;

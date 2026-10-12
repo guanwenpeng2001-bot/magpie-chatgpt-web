@@ -98,10 +98,21 @@ export function installHarvest() {
     return open.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function (...args) {
-    if (active && this.__chatgptConversation) {
+    const run = active;
+    if (run && this.__chatgptConversation) {
       send({ kind: 'fallback', reason: 'xhr' });
-      this.addEventListener('load', () => send({ kind: 'status', status: this.status, mitigated: false, interstitial: false }));
-      this.addEventListener('error', () => send({ kind: 'failure', code: 'upstream' }));
+      this.addEventListener('load', () => {
+        if (active !== run) return;
+        const evidence = { mitigated: this.getResponseHeader('cf-mitigated') === 'challenge', interstitial: false };
+        if (this.status === 403 && !evidence.mitigated && /text\/html/i.test(this.getResponseHeader('content-type') ?? '')) {
+          try {
+            const body = this.responseText.slice(0, 65536);
+            evidence.interstitial = body.includes('/cdn-cgi/challenge-platform') && /Enable JavaScript and cookies to continue|Just a moment/i.test(body);
+          } catch {}
+        }
+        send({ kind: 'status', status: this.status, retryAfter: this.getResponseHeader('retry-after'), ...evidence });
+      }, { once: true });
+      this.addEventListener('error', () => { if (active === run) send({ kind: 'failure', code: 'upstream' }); }, { once: true });
     }
     return xhrSend.apply(this, args);
   };
