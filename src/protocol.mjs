@@ -11,6 +11,7 @@ const auxiliaryTypes = new Set(['resume_conversation_token', 'message_marker', '
 export class AnswerStream {
   text = '';
   complete = false;
+  handedOff = false;
   assistant = false;
   visible = false;
   operation = 'add';
@@ -34,6 +35,7 @@ export class AnswerStream {
       this.apply({ ...patch, o: this.operation, p: this.path });
     } else if (!frame.event || frame.event === 'message') {
       if (frame.data === '[DONE]' || frame.data?.type === 'message_stream_complete') this.complete = true;
+      else if (frame.data?.type === 'stream_handoff') this.handedOff = true;
       else if (!auxiliaryTypes.has(frame.data?.type)) throw new BackendError('protocol');
     } else throw new BackendError('protocol');
     return this.text.slice(before.length);

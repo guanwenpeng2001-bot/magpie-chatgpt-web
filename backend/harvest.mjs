@@ -1,6 +1,8 @@
 export function installHarvest() {
   if (window.__chatgptHarvest) return;
   let active;
+  const assistantSelector = '[data-content-search-unit-key$=":assistant"]';
+  const legacySelector = '[data-dil-message-id], [data-message-author-role="assistant"], [aria-label="Assistant response"]';
   const send = value => {
     if (!active) return;
     const run = active;
@@ -8,7 +10,7 @@ export function installHarvest() {
   };
   const state = window.__chatgptHarvest = {
     start(id, network = true) {
-      active = { id, network, pending: Promise.resolve(), readers: new Set(), baseline: new Set(document.querySelectorAll('[data-dil-message-id], [data-message-author-role="assistant"], [aria-label="Assistant response"]')) };
+      active = { id, network, pending: Promise.resolve(), readers: new Set(), baseline: new Set([...document.querySelectorAll(assistantSelector), ...document.querySelectorAll(legacySelector)]) };
     },
     stop() {
       const run = active;
@@ -16,11 +18,15 @@ export function installHarvest() {
       for (const reader of run?.readers ?? []) reader.cancel().catch(() => {});
     },
     snapshot() {
-      const nodes = [...document.querySelectorAll('[data-dil-message-id], [data-message-author-role="assistant"], [aria-label="Assistant response"]')].filter(node => !active?.baseline.has(node));
+      const present = [...document.querySelectorAll(assistantSelector)].filter(node => !active?.baseline.has(node));
+      const nodes = present.length ? present : [...document.querySelectorAll(legacySelector)].filter(node => !active?.baseline.has(node));
       const node = nodes.at(-1);
-      const stop = [...document.querySelectorAll('button')].some(button => /stop (generating|streaming)|停止生成|停止流式传输/i.test(button.getAttribute('aria-label') ?? button.textContent));
-      const finished = !!node && [...(node.closest('article') ?? node.parentElement ?? node).querySelectorAll('button')].some(button => /copy|复制|read aloud|朗读/i.test(button.getAttribute('aria-label') ?? button.textContent));
-      return { text: node?.innerText ?? '', stop, finished, failed: active?.failed ?? false, nodes: nodes.length };
+      const stop = !!document.querySelector('main button[aria-label="停止"]') || [...document.querySelectorAll('button')].some(button => /stop (generating|streaming)|停止生成|停止流式传输/i.test(button.getAttribute('aria-label') ?? button.textContent));
+      const answer = present.length ? node.querySelector(':scope > [data-conversation-role="assistant"] + div') : node;
+      const finished = present.length
+        ? !!answer && node.closest('[data-talvt-turn-state]')?.getAttribute('data-talvt-turn-state') === 'complete' && !stop
+        : !!node && [...(node.closest('article') ?? node.parentElement ?? node).querySelectorAll('button')].some(button => /copy|复制|read aloud|朗读/i.test(button.getAttribute('aria-label') ?? button.textContent));
+      return { text: answer?.innerText ?? '', stop, finished, failed: active?.failed ?? false, nodes: nodes.length };
     },
   };
   const conversation = input => {

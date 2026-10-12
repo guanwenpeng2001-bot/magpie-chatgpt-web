@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { handoffFrames } from '../integrations/turn-fixture.mjs';
 
 const protocol = await import('../src/protocol.mjs').catch(() => ({}));
 const message = (text = '') => ({ event: 'delta', data: { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, recipient: 'all', channel: 'final', content: { content_type: 'text', parts: [text] }, status: 'in_progress' } } } });
@@ -41,6 +42,40 @@ for (const [label, frames, code] of [
   const output = [];
   await assert.rejects(async () => { for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) output.push(chunk); }, error => error.code === code);
   assert.equal(output.join('').includes('event: message_stop'), false);
+});
+
+const handoff = { event: '', data: { type: 'stream_handoff', conversation_id: '6acd141c-6b40-83e9-a915-fbdf180e0a3d', turn_exchange_id: '24373ad2-694f-4cfe-bebb-d25be8bcef56', options: [{ type: 'resume_sse_endpoint', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }, { type: 'subscribe_ws_topic', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }] } };
+
+test('stream handoff leaves the answer open for DOM continuation', () => {
+  const answer = new protocol.AnswerStream();
+  assert.doesNotThrow(() => assert.equal(answer.accept(handoff), ''));
+  assert.equal(answer.complete, false);
+  assert.throws(() => answer.finish(), { code: 'truncated' });
+  assert.equal(answer.accept({ event: 'dom', data: { text: 'pong', complete: true } }), 'pong');
+  assert.doesNotThrow(() => answer.finish());
+});
+
+test('handoff without a DOM answer never emits a successful terminal', async () => {
+  const chunks = [];
+  await assert.rejects(async () => {
+    for await (const chunk of protocol.translate([handoff], { model: 'auto', prompt: '' })) chunks.push(chunk);
+  }, { code: 'truncated' });
+  assert.equal(chunks.join('').includes('event: message_stop'), false);
+});
+
+test('eight-frame handoff routing fixture never sets answer text or completes', () => {
+  const answer = new protocol.AnswerStream();
+  assert.equal(handoffFrames.length, 8);
+  assert.deepEqual(handoffFrames.at(-1), handoff);
+  for (const [index, frame] of handoffFrames.entries()) {
+    assert.doesNotThrow(() => assert.equal(answer.accept(frame), ''), `frame ${index + 1}`);
+    assert.equal(answer.text, '', `frame ${index + 1} must not produce assistant text`);
+    assert.equal(answer.complete, false, `frame ${index + 1} must not complete`);
+  }
+});
+
+test('an unrelated unnamed frame type still fails with protocol', () => {
+  assert.throws(() => new protocol.AnswerStream().accept({ event: '', data: { type: 'unknown_handoff' } }), { code: 'protocol' });
 });
 
 const midAdd = messageBody => ({ event: 'delta', data: { p: '', o: 'add', v: { message: messageBody } } });

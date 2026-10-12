@@ -2,6 +2,18 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 
+// Frames 2–7 reconstruct routing fields from truncated capture heads; frame 8 is complete.
+export const handoffFrames = [
+  { event: 'delta_encoding', data: 'v1' },
+  { event: '', data: { type: 'resume_conversation_token', kind: 'topic', token: 'offline-synthetic-token' } },
+  { event: 'delta', data: { p: '', o: 'add', v: { message: { author: { role: 'user' }, content: { content_type: 'text', parts: ['[Human]\nReply with exactly: pong'] }, status: 'finished_successfully' } } } },
+  { event: 'delta', data: { v: { message: { author: { role: 'system' }, content: { content_type: 'text', parts: [''] }, status: 'finished_successfully', metadata: { rebase_system_message: true, is_visually_hidden_from_conversation: true, resolved_model_slug: 'gpt-6-pro' } } } } },
+  { event: 'delta', data: { v: { message: { author: { role: 'system' }, content: { content_type: 'text', parts: [''] }, status: 'finished_successfully', metadata: { rebase_developer_message: true, is_visually_hidden_from_conversation: true, resolved_model_slug: 'gpt-6-pro' } } } } },
+  { event: 'delta', data: { v: { message: { author: { role: 'system' }, content: { content_type: 'text', parts: [''] }, status: 'finished_successfully', metadata: { exclusive_key: 'plugin_upsell', rebase_developer_message: false } } } } },
+  { event: 'delta', data: { v: { message: { author: { role: 'tool', name: 'a8km123' }, content: { content_type: 'text', parts: [''] }, status: 'in_progress' } } } },
+  { event: '', data: { type: 'stream_handoff', conversation_id: '6acd141c-6b40-83e9-a915-fbdf180e0a3d', turn_exchange_id: '24373ad2-694f-4cfe-bebb-d25be8bcef56', options: [{ type: 'resume_sse_endpoint', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }, { type: 'subscribe_ws_topic', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }] } },
+];
+
 export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
   const requests = [];
   let mode = 'normal';
@@ -31,6 +43,10 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       const frame = (event, data) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       await delay(stall);
       if (mode === 'changed') { frame('changed_encoding', {}); response.end(); return; }
+      if (mode.startsWith('present-')) {
+        if (mode === 'present-handoff') for (const item of handoffFrames) frame(item.event, item.data);
+        response.end(); return;
+      }
       frame('delta_encoding', 'v1');
       frame('delta', { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, recipient: 'all', channel: 'final', content: { content_type: 'text', parts: [''] }, metadata: { is_visually_hidden_from_conversation: mode === 'hidden' }, status: 'in_progress' } } });
       if (!['empty', 'hidden'].includes(mode)) for (const [index, batch] of scripted.entries()) {
@@ -47,7 +63,7 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
     }
     if (url.pathname.startsWith('/cdn-cgi/challenge-platform/')) { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end('// Offline challenge marker; no challenge execution.'); return; }
     response.setHeader('content-type', 'text/html');
-    response.end(`<!doctype html><html><head><title>Local chat fixture</title></head><body>
+    response.end(`<!doctype html><html><head><meta charset="utf-8"><title>Local chat fixture</title></head><body>
       <button aria-label="Open profile menu">Fixture account</button><p>Temporary chat</p>
       <main id="messages"></main><textarea aria-label="Message"></textarea>
       <script src="/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload"></script>
@@ -65,6 +81,34 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
           const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog');
           dialog.textContent = mode === 'rate' ? 'You have reached the usage limit' : 'Verify you are human';
           document.body.append(dialog); return;
+        }
+        if (mode.startsWith('present-')) {
+          const main = document.querySelector('main');
+          const turn = document.createElement('div');
+          turn.setAttribute('data-turn-key', 'fixture-turn');
+          turn.innerHTML = '<div data-content-search-turn-key="fallback-turn-0"><div><div data-talvt-turn-state="complete"><div><div><h4>你说：</h4><div data-chatgpt-search-unit-key="fallback-turn-0:0:user" data-chatgpt-search-message-ids="fixture-user"><div data-content-search-unit-key="fallback-turn-0:0:user"><div id="user-text"></div></div></div></div><div>思考了 23s</div><div id="assistant-wrapper"></div></div></div></div></div>';
+          turn.querySelector('#user-text').textContent = input.value;
+          const stop = document.createElement('button'); stop.setAttribute('aria-label', '停止');
+          main.append(turn, stop);
+          const state = turn.querySelector('[data-talvt-turn-state]');
+          const stages = window.fixtureStages = [];
+          const record = phase => stages.push({ phase });
+          record('user-only');
+          window.advancePresentTurn = phase => {
+            if (phase === 'answer') {
+              state.setAttribute('data-talvt-turn-state', 'in_progress');
+              turn.querySelector('#assistant-wrapper').innerHTML = '<div data-content-search-unit-key="fallback-turn-0:2:assistant" data-chatgpt-search-unit-key="fallback-turn-0:2:assistant" data-chatgpt-search-message-ids="fixture-assistant fixture-assistant"><h4 data-conversation-role="assistant">ChatGPT 说：</h4><div style="white-space: pre-wrap"></div></div><span></span>';
+              turn.querySelector('[data-conversation-role="assistant"] + div').textContent = mode === 'present-challenge' ? 'cloudflare_challenge' : 'ORCA_DOM_ALPHA';
+            }
+            if (phase === 'grow') turn.querySelector('[data-conversation-role="assistant"] + div').textContent += '\\nORCA_DOM_BETA\\nORCA_DOM_GAMMA';
+            if (phase === 'complete-with-stop' || phase === 'complete') state.setAttribute('data-talvt-turn-state', 'complete');
+            if (phase === 'complete' || phase === 'in-progress-no-stop') stop.remove();
+            record(phase);
+          };
+          history.replaceState(null, '', '/c/' + conversation);
+          await fetch('/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ conversation, prompt: input.value }) });
+          input.value = '';
+          return;
         }
         const article = document.createElement('article');
         const answer = document.createElement('div'); answer.setAttribute('aria-label', 'Assistant response');
