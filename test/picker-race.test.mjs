@@ -25,6 +25,7 @@ function pickerHtml(mode) {
       };
       if (mode === 'late-trigger') trigger.remove();
       if (mode === 'never-trigger') trigger.remove();
+      if (mode === 'two-triggers') document.body.append(trigger.cloneNode(true));
       const attachTrigger = () => document.body.prepend(trigger);
       trigger.onclick = () => {
         if (mode === 'delayed') { toggle(); const empty = document.createElement('div'); empty.setAttribute('role', 'menuitem'); menu.append(empty); }
@@ -38,7 +39,7 @@ function pickerHtml(mode) {
     </script>`;
 }
 
-const ALWAYS = ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden', 'late-trigger', 'slow-menu'];
+const ALWAYS = ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden', 'late-trigger', 'slow-menu', 'two-triggers'];
 
 test('picker view transitions in an offline browser', async t => {
   try { import.meta.resolve('playwright-core'); }
@@ -62,7 +63,7 @@ test('picker view transitions in an offline browser', async t => {
         try { await TurnDriver.prototype.selectModel(page, 'gpt-6'); } catch (error) { failure = error; }
         const state = await page.evaluate(() => ({ selected: window.selected, toggleClicks: window.toggleClicks }));
         console.log(JSON.stringify({ mode, code: failure?.code, milliseconds: Date.now() - started, ...state }));
-        if (mode === 'ambiguous') { assert.equal(failure?.code, 'pageShape'); assert.equal(state.selected, undefined); }
+        if (mode === 'ambiguous' || mode === 'two-triggers') { assert.equal(failure?.code, 'pageShape'); assert.equal(state.selected, undefined); }
         else { assert.equal(failure?.code, undefined); assert.equal(state.selected, 'GPT-6'); }
         assert.equal(state.toggleClicks, ['delayed', 'slow-menu'].includes(mode) ? 1 : 0);
       } finally { await page.close(); }
