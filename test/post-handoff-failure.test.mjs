@@ -89,6 +89,15 @@ test('a post-handoff reader failure survives a DOM answer that arrives only afte
   } finally { await turn.close(); }
 });
 
+test('a stream completion frame after the handoff does not end the turn before the DOM answer', async () => {
+  const turn = await runFixtureTurn({ mode: 'present-handoff-done', answerDelayMs: 1000 });
+  try {
+    assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
+    assert.deepEqual(turn.frames.filter(frame => frame.event === 'dom').map(frame => frame.data.text), ['ORCA_DOM_ALPHA', expected]);
+    assert.equal(turn.frames.at(-1).data.type, 'message_stream_complete');
+  } finally { await turn.close(); }
+});
+
 test('an upstream request failure still fails the turn', async () => {
   const turn = await runFixtureTurn({ mode: 'upstream-reject' });
   try {

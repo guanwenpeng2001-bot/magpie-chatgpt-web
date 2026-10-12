@@ -72,6 +72,7 @@ export class TurnDriver {
           let sawStop = false;
           let eof = false;
           let observationFailure = null;
+          let domComplete = false;
           const started = Date.now();
           while (Date.now() - started < this.timeout) {
             signal.throwIfAborted();
@@ -121,9 +122,13 @@ export class TurnDriver {
               sawStop ||= snapshot.stop;
               const frame = { event: 'dom', data: { text: snapshot.text, complete: snapshot.finished && !snapshot.stop && sawStop } };
               const delta = answer.accept(frame);
+              domComplete ||= frame.data.complete === true;
               if (delta) await emit({ event: 'dom', data: { text: answer.text } });
             }
-            if (answer.complete) {
+            // Once the stream has handed off, the DOM route is the answer's
+            // carrier: a stream-side completion frame after the handoff does
+            // not confirm the answer, only the page's own completion does.
+            if (answer.complete && (domComplete || !fallback)) {
               answer.finish();
               await emit({ event: '', data: { type: 'message_stream_complete' } });
               binding.conversationUrl = /^\/c\/[^/]+$/.test(new URL(page.url()).pathname) ? page.url() : undefined;

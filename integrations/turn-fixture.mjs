@@ -45,7 +45,8 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
       await delay(stall);
       if (mode === 'changed') { frame('changed_encoding', {}); response.end(); return; }
       if (mode.startsWith('present-')) {
-        if (['present-handoff', 'present-handoff-failure'].includes(mode)) for (const item of handoffFrames) frame(item.event, item.data);
+        if (['present-handoff', 'present-handoff-done', 'present-handoff-failure'].includes(mode)) for (const item of handoffFrames) frame(item.event, item.data);
+        if (mode === 'present-handoff-done') response.write('data: [DONE]\n\n');
         response.end(); return;
       }
       frame('delta_encoding', 'v1');
