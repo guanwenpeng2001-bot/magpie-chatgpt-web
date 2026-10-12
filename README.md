@@ -74,7 +74,15 @@ This developer rehearsal uses a local fixture in place of chatgpt.com. It does n
 
 On the measured Windows machine, the harness requires the existing magpie binary at `~/Downloads/magpie-windows-amd64.exe`, Bun at `~/.cache/magpie/bun/1.4.2/magpie-bun.exe`, and pinned host bundle `~/.cache/magpie/plugin-host/host-6e85b6c721c8.js`. A different installation layout needs a harness adjustment. It verifies host SHA-256 `6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd`. It uses the installer's dependency resolution, so a registry connection is required; the harness points the install at a fresh empty cache directory, so a warm package cache elsewhere does not satisfy it.
 
-Run, from this committed checkout:
+From a clean committed checkout, the package check needs no installed dependency. `node --test` runs the dependency-free tests and visibly skips the answer-observer test when `playwright-core` is absent; it also visibly skips the separately invoked launch gate. To run the answer-observer test and launch gate, install Google Chrome and the locked local dependency first:
+
+```powershell
+npm ci --ignore-scripts
+```
+
+This setup requires registry access or an already populated npm cache (`npm ci --offline --ignore-scripts` uses only that cache and fails explicitly if it is incomplete). Magpie's plugin installation does not install dependencies into this source checkout. The answer-observer test runs automatically when the dependency is present; rerun it alone with `node --test test/answer-observer.test.mjs`. Chrome must also be installed in that case; its launch failure is not silently skipped.
+
+Run the following checks from the committed checkout after satisfying their prerequisites. The final sandbox command additionally requires the exact binaries, host bundle and registry connection stated above; omit it when working under an offline-only constraint:
 
 ```powershell
 node scripts/check-package.mjs
@@ -83,7 +91,7 @@ node test/launch-gate.mjs
 node integrations/sandbox.mjs
 ```
 
-`node --test` skips `test/launch-gate.mjs` with a visible reason because it launches real Chrome; run `node test/launch-gate.mjs` separately to exercise the browser launch, idle-close and crash-relaunch lifecycle. The gate forces browser traffic offline and needs only Chrome installed.
+`node --test` skips `test/launch-gate.mjs` with a visible reason because it launches real Chrome; run `node test/launch-gate.mjs` separately to exercise the browser launch, idle-close and crash-relaunch lifecycle. The gate forces browser traffic offline and requires both Google Chrome and a resolvable `playwright-core` dependency (installed by the setup command above); without that dependency, the direct command fails with `ERR_MODULE_NOT_FOUND`.
 
 The last command performs one sequence. It creates `%TEMP%/chatgpt-web-sandbox-<random>/`, with `home/` as HOME and USERPROFILE, separate config/cache/AppData paths, `package/` as a disposable committed Git repository, and a private copy of the executable. It installs using `magpie plugin add git+file:///.../package`, lists the provider, checks the credential store is absent before fixture sign-in, performs fixture browser sign-in, discovers models and asserts the exposed list through the stock host, streams a three-turn conversation on the site-default model (`auto`) and exercises no non-default model selection, aborts and reuses the session, checks unsupported-input and expiry failures, and deletes the sandbox in `finally`. The synthetic `plugin-auth.json` is never copied out. The harness prints the allocated path and each checked result; success is exit code 0 and `sandbox discarded`.
 
