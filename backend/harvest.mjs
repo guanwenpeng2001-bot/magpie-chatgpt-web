@@ -1,12 +1,18 @@
 export function installHarvest() {
   if (window.__chatgptHarvest) return;
   let active;
+  const describeCause = error => {
+    if (!error) return 'unknown error';
+    const name = typeof error?.name === 'string' && error.name ? error.name : 'Error';
+    const message = typeof error?.message === 'string' && error.message ? error.message : String(error);
+    return `${name}: ${message}`.slice(0, 512);
+  };
   const assistantSelector = '[data-content-search-unit-key$=":assistant"]';
   const legacySelector = '[data-dil-message-id], [data-message-author-role="assistant"], [aria-label="Assistant response"]';
   const send = value => {
     if (!active) return;
     const run = active;
-    run.pending = run.pending.then(() => window.__chatgptHarvestEvent({ turn: run.id, ...value })).catch(() => { run.failed = true; });
+    run.pending = run.pending.then(() => window.__chatgptHarvestEvent({ turn: run.id, ...value })).catch(error => { run.failed ||= describeCause(error); });
   };
   const state = window.__chatgptHarvest = {
     start(id, network = true) {
@@ -61,7 +67,7 @@ export function installHarvest() {
         if (done) { send({ kind: 'eof', partial: !!buffer.trim() }); break; }
         await run.pending;
       }
-    } catch { if (active === run) send({ kind: 'failure', code: 'harvest' }); }
+    } catch (error) { if (active === run) send({ kind: 'failure', code: 'harvest', cause: describeCause(error) }); }
     finally { run.readers.delete(reader); reader.cancel().catch(() => {}); }
   }
   const originalFetch = window.fetch;
@@ -70,7 +76,7 @@ export function installHarvest() {
     const relevant = run && conversation(args[0]);
     let response;
     try { response = await originalFetch.apply(this, args); }
-    catch (error) { if (relevant && active === run) send({ kind: 'failure', code: 'upstream' }); throw error; }
+    catch (error) { if (relevant && active === run) send({ kind: 'failure', code: 'upstream', cause: describeCause(error) }); throw error; }
     if (relevant && active === run) {
       const evidence = { mitigated: response.headers.get('cf-mitigated') === 'challenge', interstitial: false };
       if (response.status === 403 && !evidence.mitigated && /text\/html/i.test(response.headers.get('content-type') ?? '')) {

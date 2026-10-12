@@ -71,6 +71,7 @@ export class TurnDriver {
           let fallback = false;
           let sawStop = false;
           let eof = false;
+          let observationFailure = null;
           const started = Date.now();
           while (Date.now() - started < this.timeout) {
             signal.throwIfAborted();
@@ -81,7 +82,20 @@ export class TurnDriver {
               if (item.kind === 'status' && item.status !== 200) {
                 throw responseFailure(item.status, item, guard, item.retryAfter);
               }
-              if (item.kind === 'failure') throw new BackendError(item.code);
+              if (item.kind === 'failure') {
+                if (item.code === 'upstream') {
+                  const upstream = new BackendError(item.code);
+                  if (item.cause) upstream.cause = item.cause;
+                  throw upstream;
+                }
+                // 'harvest' and 'protocol' reader failures describe the
+                // observation route, not the turn: the DOM fallback can still
+                // complete the answer, so the turn stays alive and records why.
+                if (item.code !== 'harvest' && item.code !== 'protocol') throw new BackendError(item.code);
+                observationFailure ??= new BackendError(item.code);
+                if (item.cause) observationFailure.cause ??= item.cause;
+                fallback = true;
+              }
               if (item.kind === 'fallback') {
                 if (answer.text) throw new BackendError('harvest');
                 fallback = true;
@@ -100,7 +114,10 @@ export class TurnDriver {
             if (fallback) {
               const snapshot = await page.evaluate(() => window.__chatgptHarvest.snapshot());
               await this.pageError(page, guard);
-              if (snapshot.failed) throw new BackendError('harvest');
+              if (snapshot.failed) {
+                observationFailure ??= new BackendError('harvest');
+                observationFailure.cause ??= typeof snapshot.failed === 'string' ? snapshot.failed : 'the page reader reported a failure';
+              }
               sawStop ||= snapshot.stop;
               const frame = { event: 'dom', data: { text: snapshot.text, complete: snapshot.finished && !snapshot.stop && sawStop } };
               const delta = answer.accept(frame);
@@ -116,7 +133,9 @@ export class TurnDriver {
             if (eof && !fallback) throw new BackendError('truncated');
             await delay(50, undefined, { signal });
           }
-          throw new BackendError('truncated');
+          const expired = new BackendError('truncated');
+          if (observationFailure) expired.cause = observationFailure.cause ? `${observationFailure.code}: ${observationFailure.cause}` : observationFailure.code;
+          throw expired;
         } finally {
           signal.removeEventListener('abort', abort);
           this.turns.delete(page);
