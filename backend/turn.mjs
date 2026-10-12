@@ -154,9 +154,14 @@ export class TurnDriver {
       if (await item.getAttribute('data-model-id') === slug) { await item.click(); return; }
     }
     const picker = page.locator('button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"][data-composer-navigation-target="reasoning"]').filter({ visible: true });
+    try { await picker.first().waitFor({ state: 'visible', timeout: 10000 }); }
+    catch { throw new BackendError('pageShape'); }
     if (await picker.count() !== 1) throw new BackendError('pageShape');
     await picker.click();
     try {
+      const menu = page.locator('[role="menu"]');
+      try { await menu.first().waitFor({ state: 'visible', timeout: 10000 }); }
+      catch { throw new BackendError('pageShape'); }
       const modelView = page.locator('[role="menu"] [role="menuitem"][data-model-picker-view-toggle="true"]').filter({ visible: true });
       if (await page.getByRole('menuitemradio').filter({ visible: true }).count() === 0) {
         if (await modelView.count() === 1) await modelView.click();

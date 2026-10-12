@@ -11,13 +11,15 @@ function pickerFixture() {
     click: async () => { selected = text.split('\n')[0]; },
   }));
   const collection = items => ({ filter: () => collection(items), count: async () => items.length, all: async () => items });
-  const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; } };
+  const menu = { first() { return this; }, waitFor: async () => {} };
+  const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; }, waitFor: async () => {}, first() { return this; } };
   const toggle = { click: async () => { view = 'models'; }, count: async () => view === 'effort' ? 1 : 0, filter() { return this; } };
   return {
     state: () => ({ view, selected }),
     page: {
       locator(selector) {
         if (selector === '[data-model-id]') return collection([]);
+        if (selector === '[role="menu"]') return menu;
         if (selector.includes('data-codex-intelligence-trigger') && selector.includes('aria-haspopup')) return trigger;
         if (selector.includes('data-model-picker-view-toggle')) return toggle;
         throw new Error('Unrecognized structural selector');
@@ -67,13 +69,15 @@ function visibilityFixture(rows) {
     count: async () => items.length,
     all: async () => items,
   });
-  const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; } };
+  const menu = { first() { return this; }, waitFor: async () => {} };
+  const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; }, waitFor: async () => {}, first() { return this; } };
   const toggle = { click: async () => { view = 'models'; }, count: async () => view === 'effort' ? 1 : 0, filter() { return this; } };
   return {
     state: () => ({ view, selected }),
     page: {
       locator(selector) {
         if (selector === '[data-model-id]') return collection([]);
+        if (selector === '[role="menu"]') return menu;
         if (selector.includes('data-codex-intelligence-trigger') && selector.includes('aria-haspopup')) return trigger;
         if (selector.includes('data-model-picker-view-toggle')) return toggle;
         throw new Error('Unrecognized structural selector');

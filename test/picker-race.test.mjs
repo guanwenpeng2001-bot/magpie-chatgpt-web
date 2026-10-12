@@ -9,6 +9,7 @@ function pickerHtml(mode) {
     <div role="menu"></div>
     <script>
       const mode = ${JSON.stringify(mode)};
+      const trigger = document.querySelector('button');
       const menu = document.querySelector('[role="menu"]');
       window.toggleClicks = 0;
       const models = () => {
@@ -22,12 +23,22 @@ function pickerHtml(mode) {
         node.onclick = () => { window.toggleClicks++; menu.replaceChildren(); setTimeout(models, 200); };
         menu.prepend(node);
       };
-      document.querySelector('button').onclick = () => {
+      if (mode === 'late-trigger') trigger.remove();
+      if (mode === 'never-trigger') trigger.remove();
+      const attachTrigger = () => document.body.prepend(trigger);
+      trigger.onclick = () => {
         if (mode === 'delayed') { toggle(); const empty = document.createElement('div'); empty.setAttribute('role', 'menuitem'); menu.append(empty); }
+        else if (mode === 'slow-menu') { setTimeout(toggle, 3500); }
         else { models(); if (mode === 'already-applied') toggle(); }
       };
+      if (['late-trigger', 'never-trigger'].includes(mode)) {
+        trigger.setAttribute('aria-expanded', 'false');
+        if (mode === 'late-trigger') setTimeout(attachTrigger, 3000);
+      }
     </script>`;
 }
+
+const ALWAYS = ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden', 'late-trigger', 'slow-menu'];
 
 test('picker view transitions in an offline browser', async t => {
   try { import.meta.resolve('playwright-core'); }
@@ -42,17 +53,31 @@ test('picker view transitions in an offline browser', async t => {
   await context.route('**/*', route => route.abort());
   if (process.env.PICKER_TRACE) await context.tracing.start({ screenshots: true, snapshots: true });
   try {
-    for (const mode of ['delayed', 'no-toggle', 'already-applied', 'ambiguous', 'hidden']) await t.test(mode, async () => {
+    for (const mode of ALWAYS) await t.test(mode, async () => {
       const page = await context.newPage();
       try {
+        const started = Date.now();
         await page.setContent(pickerHtml(mode));
         let failure;
         try { await TurnDriver.prototype.selectModel(page, 'gpt-6'); } catch (error) { failure = error; }
         const state = await page.evaluate(() => ({ selected: window.selected, toggleClicks: window.toggleClicks }));
-        console.log(JSON.stringify({ mode, code: failure?.code, ...state }));
+        console.log(JSON.stringify({ mode, code: failure?.code, milliseconds: Date.now() - started, ...state }));
         if (mode === 'ambiguous') { assert.equal(failure?.code, 'pageShape'); assert.equal(state.selected, undefined); }
         else { assert.equal(failure?.code, undefined); assert.equal(state.selected, 'GPT-6'); }
-        assert.equal(state.toggleClicks, mode === 'delayed' ? 1 : 0);
+        assert.equal(state.toggleClicks, ['delayed', 'slow-menu'].includes(mode) ? 1 : 0);
+      } finally { await page.close(); }
+    });
+    await t.test('never-trigger fails bounded with pageShape', async () => {
+      const page = await context.newPage();
+      try {
+        const started = Date.now();
+        await page.setContent(pickerHtml('never-trigger'));
+        let failure;
+        try { await TurnDriver.prototype.selectModel(page, 'gpt-6'); } catch (error) { failure = error; }
+        const milliseconds = Date.now() - started;
+        console.log(JSON.stringify({ mode: 'never-trigger', code: failure?.code, milliseconds }));
+        assert.equal(failure?.code, 'pageShape');
+        assert.ok(milliseconds >= 7000 && milliseconds < 15000, `bounded wait took ${milliseconds} ms`);
       } finally { await page.close(); }
     });
   } finally {
