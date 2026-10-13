@@ -4,7 +4,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { chromium } from 'playwright-core';
 import { installHarvest } from '../backend/harvest.mjs';
 import { TurnDriver } from '../backend/turn.mjs';
 import { AccountGuard } from '../backend/guard.mjs';
@@ -13,6 +12,8 @@ import { createTurnFixture } from '../integrations/turn-fixture.mjs';
 
 const expected = 'ORCA_DOM_ALPHA\nORCA_DOM_BETA\nORCA_DOM_GAMMA';
 const readerCrash = 'fixture post-handoff reader crash';
+
+let chromium;
 
 async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000, renderAnswer = true } = {}) {
   const fixture = await createTurnFixture();
@@ -66,7 +67,14 @@ async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000, render
   };
 }
 
-test('a post-handoff reader failure does not abort a turn the DOM route completes', async () => {
+test('a post-handoff reader failure does not abort a turn the DOM route completes', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const turn = await runFixtureTurn({ mode: 'present-handoff-failure' });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
@@ -79,7 +87,14 @@ test('a post-handoff reader failure does not abort a turn the DOM route complete
   } finally { await turn.close(); }
 });
 
-test('a post-handoff reader failure survives a DOM answer that arrives only after a substantial gap', async () => {
+test('a post-handoff reader failure survives a DOM answer that arrives only after a substantial gap', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const turn = await runFixtureTurn({ mode: 'present-handoff-failure', answerDelayMs: 2500 });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
@@ -90,7 +105,14 @@ test('a post-handoff reader failure survives a DOM answer that arrives only afte
   } finally { await turn.close(); }
 });
 
-test('a stream completion frame after the handoff does not end the turn before the DOM answer', async () => {
+test('a stream completion frame after the handoff does not end the turn before the DOM answer', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const turn = await runFixtureTurn({ mode: 'present-handoff-done', answerDelayMs: 1000 });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
@@ -99,7 +121,14 @@ test('a stream completion frame after the handoff does not end the turn before t
   } finally { await turn.close(); }
 });
 
-test('an upstream request failure still fails the turn', async () => {
+test('an upstream request failure still fails the turn', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const turn = await runFixtureTurn({ mode: 'upstream-reject' });
   try {
     assert.equal(turn.failure?.code, 'upstream');
@@ -107,7 +136,14 @@ test('an upstream request failure still fails the turn', async () => {
   } finally { await turn.close(); }
 });
 
-test('a non-200 response status still fails the turn', async () => {
+test('a non-200 response status still fails the turn', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const turn = await runFixtureTurn({ mode: 'post-expired' });
   try {
     assert.equal(turn.failure?.code, 'expired');
@@ -121,7 +157,14 @@ test('a non-200 response status still fails the turn', async () => {
 // reply whose DOM answer never renders holds the turn to its budget and
 // reports 'truncated' (we never confirmed what the reply was) instead of
 // exiting 'empty' on the untrusted stream-side completion, as the base did.
-test('a post-handoff stream completion whose DOM answer never renders holds the turn to its budget and reports truncated', async () => {
+test('a post-handoff stream completion whose DOM answer never renders holds the turn to its budget and reports truncated', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const turn = await runFixtureTurn({ mode: 'present-handoff-done', renderAnswer: false, timeout: 3000 });
   try {
     assert.equal(turn.failure?.code, 'truncated', `got ${turn.failure?.code}: ${turn.failure?.message}`);
@@ -131,6 +174,13 @@ test('a post-handoff stream completion whose DOM answer never renders holds the 
 });
 
 test('the harvest send path records the binding failure cause on the page', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const fixture = await createTurnFixture();
   fixture.setMode('present-dom');
   const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--disable-background-networking'] });

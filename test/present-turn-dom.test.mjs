@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright-core';
 import { installHarvest } from '../backend/harvest.mjs';
 import { TurnDriver } from '../backend/turn.mjs';
 import { AccountGuard } from '../backend/guard.mjs';
@@ -14,7 +13,16 @@ const expected = 'ORCA_DOM_ALPHA\nORCA_DOM_BETA\nORCA_DOM_GAMMA';
 const assistantSelector = '[data-content-search-unit-key$=":assistant"]';
 const answerSelector = `${assistantSelector} > [data-conversation-role="assistant"] + div`;
 
+let chromium;
+
 test('present DOM answer, stop and completion evidence', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const fixture = await createTurnFixture();
   fixture.setMode('present-dom');
   const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--disable-background-networking'] });
@@ -88,7 +96,14 @@ test('present DOM answer, stop and completion evidence', async t => {
   }
 });
 
-for (const network of [false, true]) test(`present DOM ${network ? 'handoff' : 'fallback'} completes through TurnDriver with incremental answer-only frames`, async () => {
+for (const network of [false, true]) test(`present DOM ${network ? 'handoff' : 'fallback'} completes through TurnDriver with incremental answer-only frames`, async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  ({ chromium } = await import('playwright-core'));
   const fixture = await createTurnFixture();
   fixture.setMode(network ? 'present-handoff' : 'present-dom');
   const root = await mkdtemp(join(tmpdir(), 'present-turn-'));
