@@ -4,13 +4,20 @@ Use a ChatGPT web session as a magpie text provider. Replies arrive in batches a
 
 ## Requirements and installation
 
-Install magpie first, then Node.js 20 or later, Google Chrome and Git, all reachable on PATH. No browser or runtime is bundled. The tested platform is Windows 11 with Chrome 151 and magpie 0.1.1198. Edge fallback is not implemented.
+Install magpie first, then Node.js 20 or later, Google Chrome and Git, all reachable on PATH. No browser or runtime is bundled. The tested platform is Windows 11 with Chrome 151 and magpie 0.1.1198. Edge fallback is not implemented. The package is not Bun-native: it runs under Node.js and drives a real Google Chrome through `playwright-core`, its sole dependency.
 
 magpie is distributed at https://usemagpie.ai, with sources at https://github.com/yetone/magpie. The project's [magpie-releases](https://github.com/yetone/magpie-releases/releases) publish `magpie-windows-amd64.exe` for Windows — the build this document was tested against — and `magpie update` upgrades an installed copy from the terminal. The commands below invoke the executable by the bare name `magpie`, so it must be on PATH under that name: if `magpie --version` fails with PowerShell's CommandNotFoundException (or the command not being recognized), rename the downloaded `magpie-windows-amd64.exe` to `magpie.exe` and add its folder to PATH, or copy it into a folder already on PATH as `magpie.exe`. Open a new terminal and confirm `magpie --version` succeeds before continuing.
 
 The optional disposable rehearsal near the end of this document additionally needs a Bun runtime and the pinned plugin-host bundle at the exact paths listed under **Disposable cold-HOME verification**, plus dependency resolution over the network.
 
-From the checked-out repository, in PowerShell:
+Install from the published GitHub repository, in PowerShell:
+
+```powershell
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web
+magpie plugin login chatgpt-web
+```
+
+From a checked-out repository instead, in PowerShell:
 
 ```powershell
 $pluginSpec = node -e "console.log('git+' + require('node:url').pathToFileURL(process.cwd()).href)"
@@ -58,7 +65,7 @@ No attachment or image input, reasoning controls or traces, native tool API, web
 | Local time budget | HTTP 504 reports “This request exceeded its local time budget and was stopped before any confirmed result.” It is not an account rate-limit diagnosis. |
 | Unsupported input | Attachments and other unsupported content blocks are rejected before submission. |
 
-A read has a default 20-second Node budget and, only after a confirmed challenge, one independent 20-second browser fallback budget. Queue time and account pacing are additional. A recognized expiry or cooldown is retained even when cleanup outlasts the caller's budget. Network collection preserves answer text and Markdown. If cloning is unavailable before text is forwarded, DOM snapshots provide plain text with reduced formatting. Reader failure after collection starts, incomplete streams and changed vocabulary remain errors.
+A read has a default 20-second Node budget and, only after a confirmed challenge, one independent 20-second browser fallback budget. Queue time and account pacing are additional. A recognized expiry or cooldown is retained even when cleanup outlasts the caller's budget. Network collection preserves answer text and Markdown. If cloning is unavailable before text is forwarded, DOM snapshots provide plain text with reduced formatting. A stream reader that reports its own failure no longer fails the turn: the turn falls back to the DOM route and can still complete the answer. Upstream request failures, every non-200 status, incomplete streams and changed vocabulary remain errors. A handed-off reply whose DOM answer never renders holds to its time budget and reports `truncated` rather than `empty`.
 
 ## Prompt-level tool emulation
 
@@ -97,4 +104,4 @@ The last command performs one sequence. It creates `%TEMP%/chatgpt-web-sandbox-<
 
 The fixture changes only the upstream boundary through a harness wrapper. Browser login, pipe transport, model mapping, translation, stock-host credential persistence and stock-host streaming execute production code. Fixture replies prove transport and history handling, not live model intelligence. Live generation smoke requires separate explicit authorization and is never part of this command.
 
-MIT licensed. Adapted components and inherited notices are recorded in `THIRD_PARTY_NOTICES`.
+MIT licensed. Adapted components and inherited notices are recorded in `THIRD_PARTY_NOTICES`. The plugin icon is the author's own drawing.
