@@ -198,8 +198,9 @@ export class TurnDriver {
       }
       // Localized server-rendered titles are a fallback, not structural anchors.
       // GPT-6 and GPT-5.5 are unique-title mappings against the archived picker.
-      // Selection and submission were measured; answer provenance was not, so no
-      // mapping carries a generation claim. Mini variants and the catalogue's
+      // Selection and submission were measured; the 2026-10-11 smoke did not prove
+      // answer provenance, but gpt-6 generation has since been verified (2026-10-13)
+      // and GPT-5.5 remains unmeasured. Mini variants and the catalogue's
       // Luna versus the picker's Sol are unmapped.
       const labels = { 'gpt-6': 'GPT-6', 'gpt-5-5': 'GPT-5.5' };
       const entries = page.getByRole('menuitemradio').filter({ visible: true });

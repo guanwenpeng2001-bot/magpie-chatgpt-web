@@ -25,11 +25,12 @@ function mapModels(catalogue) {
   const titles = new Map();
   for (const model of models) titles.set(model.title, (titles.get(model.title) ?? 0) + 1);
   // Dated compatibility filter from 2026-10-11. The smoke measured selection and
-  // submission for Auto and GPT-6; the observed DOM node was never proven to be
-  // assistant answer text, so generation and incremental delivery stay unverified
-  // and no exposed model carries a generation claim. GPT-5.5 was selectable but
-  // its instrument timed out, which is UNDECIDED rather than a proven failure.
-  // Other slugs have no supported picker mapping.
+  // submission for Auto and GPT-6, but its observed DOM node was never proven to
+  // be assistant answer text, so the smoke itself verified neither generation nor
+  // incremental delivery. Generation has since been verified for gpt-6 (2026-10-13:
+  // HTTP 200 with a complete answer); incremental delivery remains unverified.
+  // GPT-5.5 was selectable but its instrument timed out, which is UNDECIDED rather
+  // than a proven failure. Other slugs have no supported picker mapping.
   // Keep account discovery authoritative: never synthesize an absent catalogue entry.
   const supported = new Set(['auto', 'gpt-6']);
   const ordered = models.filter(model => supported.has(model.slug)).sort((left, right) => Number(right.slug === 'auto') - Number(left.slug === 'auto'));
