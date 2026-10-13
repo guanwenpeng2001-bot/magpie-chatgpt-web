@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { writeFile, copyFile, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { BackendError } from '../backend/guard.mjs';
@@ -48,6 +48,44 @@ export class LiveLedger {
     this.conversationSubmits++;
     return true;
   }
+}
+
+export function hostBundlesFromCommandLines(commandLines) {
+  const names = [];
+  for (const line of commandLines) {
+    const match = /[/\\]\.cache[/\\]magpie[/\\]plugin-host[/\\](host-[0-9a-f]{12}\.js)/i.exec(String(line));
+    if (match) names.push(match[1].toLowerCase());
+  }
+  return names;
+}
+
+function magpieBunCommandLines() {
+  return new Promise((resolveQuery, rejectQuery) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(Get-CimInstance Win32_Process -Filter "Name=\'magpie-bun.exe\'").CommandLine'], { windowsHide: true, timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      if (error) rejectQuery(new Error(`The Windows process table could not be queried for the running plugin host (powershell Get-CimInstance failed: ${error.message})`));
+      else resolveQuery(stdout.split(/\r?\n/).filter(Boolean));
+    });
+  });
+}
+
+export async function resolveLiveHost({ liveHome, commandLines } = {}) {
+  const hostDir = join(liveHome, '.cache/magpie/plugin-host');
+  const names = [...new Set(hostBundlesFromCommandLines(commandLines ?? await magpieBunCommandLines()))];
+  if (!names.length) throw new Error('No running magpie-bun.exe process names a plugin-host bundle in the Windows process table; the live instrument cannot establish which host this machine runs. Start magpie before a live attempt.');
+  if (names.length > 1) throw new Error(`Ambiguous live host: ${names.join(', ')} are all running; refusing to guess which one the live attempt must use.`);
+  const [filename] = names;
+  const hostPath = join(hostDir, filename);
+  let bytes;
+  try { bytes = await readFile(hostPath); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`The process table names the running host bundle ${filename}, but ${hostPath} does not exist; the named host is not installed.`);
+    throw error;
+  }
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  if (sha256.slice(0, 12) !== filename.slice('host-'.length, -'.js'.length)) {
+    throw new Error(`Host bundle ${filename} failed self-validation: its SHA-256 ${sha256} does not begin with the digest in its filename; the bundle is corrupt or was modified after download.`);
+  }
+  return { filename, path: hostPath, sha256 };
 }
 
 export async function verifyLiveOnce({ installed, home, sandbox, bun, liveHome, env }) {
@@ -246,7 +284,11 @@ hooks.auth.loader = async getAuth => {
 export default {id:'chatgpt-web',server:async()=>hooks};
 `);
     const hostCopy = join(sandbox, 'live-host.mjs');
-    await copyFile(join(liveHome, '.cache/magpie/plugin-host/host-6e85b6c721c8.js'), hostCopy);
+    const liveHost = await resolveLiveHost({ liveHome });
+    facts.host = { filename: liveHost.filename, sha256: liveHost.sha256, selection: 'process-table', bun: basename(bun) };
+    await copyFile(liveHost.path, hostCopy);
+    const copiedSha256 = createHash('sha256').update(await readFile(hostCopy)).digest('hex');
+    if (copiedSha256 !== liveHost.sha256) throw new Error(`The copied live host ${hostCopy} does not match the verified bundle (${copiedSha256} != ${liveHost.sha256}); refusing to spawn unverified bytes.`);
     host = spawn(bun, ['run', hostCopy], { cwd: sandbox, env, stdio: ['pipe', 'pipe', 'pipe'] });
     host.stderr.on('data', chunk => stderrChunks.push(chunk));
     const pending = new Map();
