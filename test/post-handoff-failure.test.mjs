@@ -14,7 +14,7 @@ import { createTurnFixture } from '../integrations/turn-fixture.mjs';
 const expected = 'ORCA_DOM_ALPHA\nORCA_DOM_BETA\nORCA_DOM_GAMMA';
 const readerCrash = 'fixture post-handoff reader crash';
 
-async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000 } = {}) {
+async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000, renderAnswer = true } = {}) {
   const fixture = await createTurnFixture();
   fixture.setMode(mode);
   const root = await mkdtemp(join(tmpdir(), 'post-handoff-'));
@@ -26,7 +26,7 @@ async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000 } = {})
     await context.route('**/*', route => new URL(route.request().url()).origin === fixture.origin ? route.continue() : route.abort());
     await context.exposeBinding('fixtureHarvestEvents', ({ page }, payload) => { harvestEvents.push(payload); });
     await context.exposeBinding('fixtureSnapshotObserved', async ({ page }, state) => {
-      if (mode.startsWith('present-') && !answerScheduled && state.nodes === 0) {
+      if (mode.startsWith('present-') && renderAnswer && !answerScheduled && state.nodes === 0) {
         answerScheduled = true;
         if (answerDelayMs > 0) await delay(answerDelayMs);
         await page.evaluate(() => window.advancePresentTurn('answer'));
@@ -56,11 +56,12 @@ async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000 } = {})
   const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: 'Answer from the page.' }] });
   const frames = [];
   let failure;
+  const startedAt = Date.now();
   try {
     await driver.complete({ ...prepared, auth: { profile: 'fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame));
   } catch (error) { failure = error; }
   return {
-    frames, failure, harvestEvents,
+    frames, failure, harvestEvents, elapsedMs: Date.now() - startedAt,
     async close() { await driver.close(); await fixture.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); },
   };
 }
@@ -114,6 +115,21 @@ test('a non-200 response status still fails the turn', async () => {
   } finally { await turn.close(); }
 });
 
+// Pins a deliberate trade: once the stream has handed off, its completion
+// frame is not evidence that the reply is empty - the live body completed
+// carrying no text long before the DOM answer rendered. So a post-handoff
+// reply whose DOM answer never renders holds the turn to its budget and
+// reports 'truncated' (we never confirmed what the reply was) instead of
+// exiting 'empty' on the untrusted stream-side completion, as the base did.
+test('a post-handoff stream completion whose DOM answer never renders holds the turn to its budget and reports truncated', async () => {
+  const turn = await runFixtureTurn({ mode: 'present-handoff-done', renderAnswer: false, timeout: 3000 });
+  try {
+    assert.equal(turn.failure?.code, 'truncated', `got ${turn.failure?.code}: ${turn.failure?.message}`);
+    assert.ok(turn.elapsedMs >= 3000, `the turn must hold to its budget, elapsed ${turn.elapsedMs} ms`);
+    assert.deepEqual(turn.frames, [], 'no answer may be emitted for a reply the driver could not confirm');
+  } finally { await turn.close(); }
+});
+
 test('the harvest send path records the binding failure cause on the page', async t => {
   const fixture = await createTurnFixture();
   fixture.setMode('present-dom');
@@ -132,7 +148,10 @@ test('the harvest send path records the binding failure cause on the page', asyn
     await page.evaluate(() => window.__chatgptHarvest.start('fixture', false));
     await page.getByRole('textbox').fill('Turn the send failure into a reported cause');
     await page.getByRole('textbox').press('Enter');
-    await page.waitForFunction(() => window.fixtureStages?.some(item => item.phase === 'user-only'));
+    // Wait on the condition under test: the send catch must have recorded
+    // run.failed. The fixture reaches 'user-only' inside its keydown handler
+    // before `await fetch(...)` runs, so that stage proves nothing.
+    await page.waitForFunction(() => window.__chatgptHarvest.snapshot().failed !== false);
     const state = await page.evaluate(() => window.__chatgptHarvest.snapshot());
     assert.equal(state.failed, 'Error: fixture binding rejection');
   } finally {
