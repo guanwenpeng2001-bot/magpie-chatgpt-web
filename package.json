@@ -1,10 +1,16 @@
 {
   "name": "magpie-chatgpt-web",
   "version": "0.1.0",
+  "description": "Use a ChatGPT web session as a magpie text provider: visible-Chrome sign-in, temporary chats and batched reply streaming.",
   "type": "module",
   "main": "./src/index.mjs",
   "exports": "./src/index.mjs",
   "license": "MIT",
+  "keywords": ["magpie", "magpie-plugin", "chatgpt", "chatgpt-web", "browser"],
+  "author": "magpie-chatgpt-web contributors",
+  "repository": { "type": "git", "url": "git+https://github.com/guanwenpeng2001-bot/magpie-chatgpt-web.git" },
+  "homepage": "https://github.com/guanwenpeng2001-bot/magpie-chatgpt-web#readme",
+  "bugs": { "url": "https://github.com/guanwenpeng2001-bot/magpie-chatgpt-web/issues" },
   "engines": { "node": ">=20" },
   "files": ["src", "backend", "integrations/fixture-backend.mjs", "integrations/turn-fixture.mjs", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"],
   "magpie": {
