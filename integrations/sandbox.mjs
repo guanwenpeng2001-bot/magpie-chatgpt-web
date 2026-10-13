@@ -45,7 +45,7 @@ try {
   const bun = join(cache, 'bun/1.4.2/magpie-bun.exe');
   await copyFile(join(liveHome, 'Downloads/magpie-windows-amd64.exe'), magpie);
   await copyFile(join(liveHome, '.cache/magpie/bun/1.4.2/magpie-bun.exe'), bun);
-  assert.match(command(magpie, ['--version']), /0\.1\.1198/);
+  assert.match(command(magpie, ['--version']), /0\.1\.1212/);
   assert.deepEqual(await snapshot(), before, 'live metadata changed during isolated version check');
   console.log('private HOME and USERPROFILE isolation checked before install');
   const repository = join(sandbox, 'package');
@@ -76,13 +76,13 @@ try {
   const launchProbe = join(sandbox, 'launch-probe.mjs');
   await writeFile(launchProbe, 'import { launchSignInBrowser } from ' + JSON.stringify(pathToFileURL(join(installed, 'backend/browser.mjs')).href) + ';\nconst owned = await launchSignInBrowser(' + JSON.stringify(join(home, 'launch-probe')) + ', new AbortController().signal); console.log("ordinary browser probe connected"); await owned.close();');
   console.log(command('node', [launchProbe]).trim());
-  const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-6e85b6c721c8.js');
+  const hostSource = join(liveHome, '.cache/magpie/plugin-host/host-52772ce524a8.js');
   const hostCopy = join(sandbox, 'host.mjs');
   const hostBytes = await readFile(hostSource);
-  assert.equal(createHash('sha256').update(hostBytes).digest('hex'), '6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd', 'pinned host changed');
+  assert.equal(createHash('sha256').update(hostBytes).digest('hex'), '52772ce524a80bdf614ebca3281105f732e3b6dd0b16b07ec136532e112984c3', 'pinned host changed');
   await copyFile(hostSource, hostCopy);
   assert.deepEqual(await readFile(hostCopy), hostBytes);
-  console.log('host magpie 0.1.1198 SHA-256 6e85b6c721c84bc0326ec38e9dad67a105919e3b5712646750f502f5e03e7fcd');
+  console.log('host magpie 0.1.1212 SHA-256 52772ce524a80bdf614ebca3281105f732e3b6dd0b16b07ec136532e112984c3');
   const wrapper = join(sandbox, 'fixture-plugin.mjs');
   await writeFile(wrapper, `import { _internal } from ${JSON.stringify(pathToFileURL(join(installed, 'src/index.mjs')).href)};\nimport { Bridge } from ${JSON.stringify(pathToFileURL(join(installed, 'src/bridge.mjs')).href)};\nconst bridge = new Bridge({ backend: ${JSON.stringify(join(installed, 'integrations/fixture-backend.mjs'))} });\nexport default { id: 'chatgpt-web', server: async () => _internal.createHooks({ bridge, profileRoot: ${JSON.stringify(join(home, '.config/magpie/chatgpt-web-profile'))}, pollMilliseconds: 20 }) };\n`);
   host = spawn(bun, ['run', hostCopy], { cwd: sandbox, env, stdio: ['pipe', 'pipe', 'pipe'] });
