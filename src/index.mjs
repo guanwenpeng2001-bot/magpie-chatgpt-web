@@ -13,7 +13,8 @@ function modelEntry(slug, name) {
   return {
     name, api: { id: slug, url: API, npm: '@ai-sdk/anthropic' },
     limit: { context: 200_000, output: 34_834 },
-    // Prompt-level tool emulation compliance matrix is pending for every model.
+    // Prompt-level tool emulation compliance matrix ran 2026-10-12: auto failed the bar at probe A;
+    // gpt-6 was never reached (model-selection failure). Both keep toolcall: false.
     capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
   };
 }
