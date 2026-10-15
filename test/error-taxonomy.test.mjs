@@ -109,11 +109,45 @@ test('new codes carry their §3.1 statuses and plain headers', () => {
   }
 });
 
-test('a slotted code cannot be constructed with a missing or null value', () => {
-  assert.throws(() => new BackendError('missingComponent'), TypeError);
+test('a slotted code constructed without values carries the raw template and never throws', () => {
+  for (const code of Object.keys(slotValues)) {
+    const error = new BackendError(code);
+    assert.equal(error.code, code, code);
+    assert.equal(error.status, taxonomy[code][0], code);
+    assert.equal(error.message, taxonomy[code][1], code);
+    for (const values of [undefined, null, false, 0, 'invalid', []]) {
+      const fallback = new BackendError(code, { values });
+      assert.equal(fallback.code, code);
+      assert.equal(fallback.status, taxonomy[code][0]);
+      assert.equal(fallback.message, taxonomy[code][1]);
+      assert.equal(fallback.toJSON().message, taxonomy[code][1]);
+    }
+  }
+});
+
+test('a provided values object with a missing or null slot still throws', () => {
   assert.throws(() => new BackendError('modelNotOffered', { values: {} }), TypeError);
   assert.throws(() => new BackendError('modelNotOffered', { values: { slug: null } }), TypeError);
   assert.throws(() => new BackendError('imageRejected', { values: { detail: undefined } }), TypeError);
+});
+
+test('the template-match fallback never throws for any of the 39 raw templates', () => {
+  assert.equal(Object.keys(errorTable).length, 39);
+  for (const [code, [status, template]] of Object.entries(errorTable)) {
+    const restored = BackendError.fromEnvelope({ status, message: template });
+    assert.ok(restored instanceof BackendError, code);
+    assert.equal(restored.code, code, code);
+    assert.equal(restored.status, status, code);
+  }
+});
+
+test('the exported error table is deep-frozen', () => {
+  for (const [code, entry] of Object.entries(errorTable)) {
+    assert.throws(() => { entry[0] = 999; }, TypeError, code);
+    assert.throws(() => { entry[1] = 'tampered'; }, TypeError, code);
+    assert.throws(() => { entry.push('tampered'); }, TypeError, code);
+  }
+  assert.throws(() => { errorTable.extra = [400, 'tampered']; }, TypeError);
 });
 
 test('a parameterized message survives the envelope round trip', () => {

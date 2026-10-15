@@ -1,12 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-// Error taxonomy (codes, statuses, message templates) duplicated from
-// src/errors.mjs, which is the canonical source. Parity between the two tables
-// is locked by test/errors-parity.test.mjs. Codes with {slots} in their
-// template require a `values` object at construction; the envelope carries the
-// code and values so the parameterized message survives the bridge round trip.
+// Taxonomy duplicated from canonical src/errors.mjs; absent values preserve literal placeholders.
 
-const definitions = Object.freeze({
+const definitions = Object.freeze(Object.fromEntries(Object.entries({
   expired: [401, 'Sign in again to refresh the ChatGPT session.'],
   cooldown: [429, 'The account is cooling down after a rate limit.'],
   upstream: [502, 'The upstream request failed.'],
@@ -46,7 +42,7 @@ const definitions = Object.freeze({
   modelNotOffered: [400, '{slug} is not offered to this ChatGPT account. Pick one of the listed models; refresh the model list if the account changed.'],
   attachmentUnsupported: [400, 'This message contains {kind}, which chatgpt-web cannot send. Remove it and retry. Images are supported up to {maxCount} files / {maxBytes} each.'],
   imageRejected: [502, 'ChatGPT refused the image upload ({detail}). Retry; if it persists, send the message without the image.'],
-});
+}).map(([code, entry]) => [code, Object.freeze(entry)])));
 
 export const errorTable = definitions;
 
@@ -65,8 +61,7 @@ export class BackendError extends Error {
     const kind = Object.hasOwn(definitions, code) ? code : 'upstream';
     const slots = slotValues(kind);
     let stored;
-    if (slots.length) {
-      if (!values || typeof values !== 'object' || Array.isArray(values)) throw new TypeError(`BackendError('${code}') requires a values object with: ${slots.join(', ')}`);
+    if (slots.length && values && typeof values === 'object' && !Array.isArray(values)) {
       stored = {};
       for (const slot of slots) {
         if (values[slot] === undefined || values[slot] === null) throw new TypeError(`BackendError('${code}') requires values.${slot}`);
