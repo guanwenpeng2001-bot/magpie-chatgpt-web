@@ -100,7 +100,7 @@ for (const kind of ['supervisor', 'turn']) test(`production ${kind} launch prese
       await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Fixture</title>' }));
       await context.setOffline(false);
       await page.goto('http://127.0.0.1/');
-      const identity = await page.evaluate(async () => ({ ua: navigator.userAgent, hints: await navigator.userAgentData?.getHighEntropyValues(['fullVersionList']) }));
+      const identity = await page.evaluate(async () => ({ ua: navigator.userAgent, hints: await navigator.userAgentData?.getHighEntropyValues(['fullVersionList', 'platformVersion']) }));
       assert.doesNotMatch(identity.ua, /HeadlessChrome/);
       const major = identity.ua.match(/Chrome\/(\d+)/)?.[1];
       assert.ok(major);
@@ -109,7 +109,15 @@ for (const kind of ['supervisor', 'turn']) test(`production ${kind} launch prese
       assert.ok(identity.hints.brands.some(brand => /Chrom/i.test(brand.brand)));
       const cdp = await context.newCDPSession(page);
       const version = await cdp.send('Browser.getVersion');
-      assert.equal(major, version.product.match(/\/(\d+)/)[1]);
+      const buildMajor = version.product.match(/\/(\d+)/)[1];
+      assert.equal(major, buildMajor);
+      assert.ok(Array.isArray(identity.hints.fullVersionList), 'fullVersionList must be present');
+      assert.notDeepEqual(identity.hints.fullVersionList, [], 'fullVersionList must not be empty');
+      const chromiumVersion = identity.hints.fullVersionList.find(brand => brand.brand === 'Chromium');
+      assert.ok(chromiumVersion, 'fullVersionList must include Chromium');
+      assert.equal(chromiumVersion.version.split('.')[0], buildMajor);
+      assert.equal(typeof identity.hints.platformVersion, 'string');
+      assert.ok(identity.hints.platformVersion.length > 0, 'platformVersion must be present');
       await cdp.detach();
     });
   } finally { await owner.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }

@@ -39,7 +39,7 @@ export async function launchBrowserContext(profile, options) {
     const session = await probe.newBrowserCDPSession();
     userAgent = (await session.send('Browser.getVersion')).userAgent.replace('HeadlessChrome/', 'Chrome/');
   } finally { await probe.close(); }
-  return chromium.launchPersistentContext(profile, { ...options, args: [...(options.args ?? []), '--user-agent=' + userAgent] });
+  return chromium.launchPersistentContext(profile, { ...options, userAgent });
 }
 
 export class BrowserSupervisor {
