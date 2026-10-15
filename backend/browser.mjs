@@ -28,6 +28,20 @@ async function reconcileSessionCookies(context, credential, origin) {
   } catch { throw new BackendError('upstream'); }
 }
 
+export async function launchBrowserContext(profile, options) {
+  let chromium;
+  try { ({ chromium } = await import('playwright-core')); }
+  catch { throw new BackendError('browserDependency'); }
+  if (!options.headless) return chromium.launchPersistentContext(profile, options);
+  const probe = await chromium.launch({ channel: options.channel, headless: true, args: ['--disable-background-networking', '--disable-component-update', '--no-first-run', '--host-resolver-rules=MAP * ~NOTFOUND'] });
+  let userAgent;
+  try {
+    const session = await probe.newBrowserCDPSession();
+    userAgent = (await session.send('Browser.getVersion')).userAgent.replace('HeadlessChrome/', 'Chrome/');
+  } finally { await probe.close(); }
+  return chromium.launchPersistentContext(profile, { ...options, args: [...(options.args ?? []), '--user-agent=' + userAgent] });
+}
+
 export class BrowserSupervisor {
   #accounts = new Map();
   #closed = false;
@@ -37,10 +51,7 @@ export class BrowserSupervisor {
     this.idleMilliseconds = idleMilliseconds;
     this.options = { headless, channel };
     this.launch = launch ?? (async (profile, options) => {
-      let chromium;
-      try { ({ chromium } = await import('playwright-core')); }
-      catch { throw new BackendError('browserDependency'); }
-      return chromium.launchPersistentContext(profile, {
+      return launchBrowserContext(profile, {
         ...options, offline: true, serviceWorkers: 'block',
         args: ['--disable-background-networking', '--disable-component-update', '--no-first-run', '--host-resolver-rules=MAP * ~NOTFOUND'],
       });
