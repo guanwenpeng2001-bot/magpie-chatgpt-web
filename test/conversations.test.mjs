@@ -19,6 +19,23 @@ test('matching history resumes after the completed assistant message', async () 
   assert.equal(result.entry.busy, true);
 });
 
+test('equal-length completed history rebuilds with the full transcript', async () => {
+  const bindings = new Conversations();
+  const first = await bindings.take(request, 'account');
+  let closed = 0;
+  first.page = { ...page(), close: async () => { closed++; } };
+  bindings.finish(first, request, 'answer');
+  const replay = { ...request, history: [...request.history, { role: 'assistant', content: 'answer' }] };
+  const fresh = await bindings.take(replay, 'account');
+  assert.notEqual(fresh, first);
+  assert.equal(fresh.resumeFrom, 0);
+  assert.ok(fresh.resumeFrom < replay.history.length);
+  assert.deepEqual(replay.history.slice(fresh.resumeFrom), replay.history);
+  assert.equal(fresh.page, undefined);
+  assert.equal(closed, 1);
+  assert.equal(bindings.entries.get('caller'), fresh);
+});
+
 for (const history of [request.history, [{ role: 'user', content: 'compacted' }], [{ role: 'user', content: 'changed' }, ...continued.history.slice(1)]]) {
   test(`changed or shortened history rebuilds the binding: ${JSON.stringify(history)}`, async () => {
     const bindings = new Conversations();
@@ -87,6 +104,37 @@ test('idle expiry closes the page at thirty minutes but leaves busy bindings alo
   assert.equal(fresh.resumeFrom, 0);
   assert.equal(closed, 1);
 });
+
+for (const reason of ['idle expiry', 'history rebuild', 'capacity eviction']) {
+  test(`synchronously throwing cleanup cannot wedge a key during ${reason}`, async () => {
+    let now = 0;
+    const bindings = new Conversations({ now: () => now });
+    const first = await bindings.take(request, 'account');
+    let closed = 0;
+    first.page = { ...page(), close: () => { closed++; throw new Error('sync close failure'); } };
+    bindings.finish(first, request, 'answer');
+    if (reason === 'idle expiry') now = 1800000;
+    if (reason === 'capacity eviction') {
+      for (let index = 0; index < 63; index++) await bindings.take({ ...request, conversationKey: String(index) }, 'account');
+    }
+    const input = reason === 'capacity eviction' ? { ...request, conversationKey: 'fresh' } : request;
+    let fresh;
+    await assert.doesNotReject(async () => { fresh = await bindings.take(input, 'account'); });
+    assert.notEqual(fresh, first);
+    assert.equal(bindings.entries.get(input.conversationKey), fresh);
+    assert.equal(fresh.busy, true);
+    assert.equal(fresh.resumeFrom, 0);
+    assert.equal(closed, 1);
+    fresh.page = page();
+    bindings.finish(fresh, input, 'answer');
+    const resumed = await bindings.take({ ...continued, conversationKey: input.conversationKey }, 'account');
+    assert.equal(resumed, fresh);
+    assert.equal(resumed.resumeFrom, 2);
+    assert.ok(resumed.resumeFrom < continued.history.length);
+    await bindings.failed(resumed);
+    assert.equal(bindings.entries.has(input.conversationKey), false);
+  });
+}
 
 test('keyless turns stay independent even when all 64 bindings are busy', async () => {
   const bindings = new Conversations();

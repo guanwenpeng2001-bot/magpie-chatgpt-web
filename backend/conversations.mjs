@@ -10,13 +10,13 @@ export class Conversations {
   }
   async take(request, account) {
     const closing = [];
-    for (const [key, entry] of this.entries) if (!entry.busy && this.now() - entry.used >= this.idleMilliseconds) closing.push(this.discard(key));
+    for (const [key, entry] of this.entries) if (!entry.busy && this.now() - entry.used >= this.idleMilliseconds) closing.push(this.discard(key).catch(() => {}));
     const key = request.conversationKey;
     let entry = key && this.entries.get(key);
     if (entry) {
       if (entry.account !== account || entry.busy || entry.model !== request.model || entry.system !== request.system) throw new BackendError('binding');
-      if (entry.history && (request.history.length < entry.resumeIndex || digest(request.history.slice(0, entry.resumeIndex)) !== entry.contextDigest)) {
-        closing.push(this.discard(key));
+      if (entry.history && (request.history.length <= entry.resumeIndex || digest(request.history.slice(0, entry.resumeIndex)) !== entry.contextDigest)) {
+        closing.push(this.discard(key).catch(() => {}));
         entry = undefined;
       }
     }
@@ -24,7 +24,7 @@ export class Conversations {
       if (key && this.entries.size >= 64) {
         const victim = [...this.entries].filter(([, value]) => !value.busy).sort((left, right) => left[1].used - right[1].used)[0];
         if (!victim) throw new BackendError('capacity');
-        closing.push(this.discard(victim[0]));
+        closing.push(this.discard(victim[0]).catch(() => {}));
       }
       entry = { key, account, model: request.model, system: request.system, used: this.now(), resumeIndex: 0 };
       // Preserve direct-entry callers while supporting the new destructuring seam.
