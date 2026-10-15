@@ -1,6 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-const definitions = Object.freeze({
+// Taxonomy duplicated from canonical src/errors.mjs; absent values preserve literal placeholders.
+
+const definitions = Object.freeze(Object.fromEntries(Object.entries({
   expired: [401, 'Sign in again to refresh the ChatGPT session.'],
   cooldown: [429, 'The account is cooling down after a rate limit.'],
   upstream: [502, 'The upstream request failed.'],
@@ -33,27 +35,67 @@ const definitions = Object.freeze({
   browserConfiguration: [502, 'Browser account or profile root configuration is invalid.'],
   browserClosed: [503, 'The browser context closed or its supervisor stopped.'],
   backendDown: [503, 'Backend unavailable; install Node 20 or newer and Chrome.'],
-});
+  signinTimeout: [504, 'Sign-in did not finish within {windowMinutes} minutes. Start sign-in again; the previous attempt was cancelled cleanly.'],
+  missingComponent: [503, '{component} was not found. {remedy}'],
+  pickerMissing: [502, 'The ChatGPT page changed: {component} was not found (selector {selector}, adapter {adapterVersion}). Update the plugin; if it is already latest, report this adapter version.'],
+  pickerAmbiguous: [502, "The model picker shows {count} entries for {slug}; the plugin cannot choose safely. Retry, or select the model once by hand in a visible browser (enable 'visible-turns')."],
+  modelNotOffered: [400, '{slug} is not offered to this ChatGPT account. Pick one of the listed models; refresh the model list if the account changed.'],
+  attachmentUnsupported: [400, 'This message contains {kind}, which chatgpt-web cannot send. Remove it and retry. Images are supported up to {maxCount} files / {maxBytes} each.'],
+  imageRejected: [502, 'ChatGPT refused the image upload ({detail}). Retry; if it persists, send the message without the image.'],
+}).map(([code, entry]) => [code, Object.freeze(entry)])));
+
+export const errorTable = definitions;
+
+function renderMessage(template, values) {
+  return values ? template.replace(/\{(\w+)\}/g, (slot, key) => (Object.hasOwn(values, key) ? values[key] : slot)) : template;
+}
+
+function slotValues(code) {
+  const slots = definitions[code][1].match(/\{(\w+)\}/g);
+  return slots ? [...new Set(slots.map(slot => slot.slice(1, -1)))] : [];
+}
 
 export class BackendError extends Error {
-  constructor(code = 'upstream', { retryAfter } = {}) {
+  #values;
+  constructor(code = 'upstream', { retryAfter, values } = {}) {
     const kind = Object.hasOwn(definitions, code) ? code : 'upstream';
-    super(definitions[kind][1]);
+    const slots = slotValues(kind);
+    let stored;
+    if (slots.length && values && typeof values === 'object' && !Array.isArray(values)) {
+      stored = {};
+      for (const slot of slots) {
+        if (values[slot] === undefined || values[slot] === null) throw new TypeError(`BackendError('${code}') requires values.${slot}`);
+        stored[slot] = String(values[slot]);
+      }
+    }
+    super(renderMessage(definitions[kind][1], stored));
     this.name = 'BackendError';
     this.code = kind;
     this.status = definitions[kind][0];
+    this.#values = stored && Object.freeze(stored);
     if (kind === 'expired') this.signIn = 'expired';
     if (kind === 'cooldown') this.retryAfter = String(Math.min(604800, Math.max(1, Math.ceil(Number(retryAfter) || 60))));
   }
   toJSON() {
-    const clean = new BackendError(this.code, { retryAfter: this.retryAfter });
-    return { status: clean.status, message: clean.message, ...(clean.retryAfter ? { retryAfter: clean.retryAfter } : {}), ...(clean.signIn ? { signIn: clean.signIn } : {}) };
+    const clean = new BackendError(this.code, { retryAfter: this.retryAfter, values: this.#values });
+    return {
+      status: clean.status,
+      message: clean.message,
+      ...(clean.#values ? { code: this.code, values: { ...clean.#values } } : {}),
+      ...(clean.retryAfter ? { retryAfter: clean.retryAfter } : {}),
+      ...(clean.signIn ? { signIn: clean.signIn } : {}),
+    };
   }
   get headers() {
     const clean = this.toJSON();
     return { ...(clean.signIn ? { 'x-magpie-sign-in': clean.signIn } : {}), ...(clean.retryAfter ? { 'retry-after': clean.retryAfter } : {}) };
   }
   static fromEnvelope(envelope) {
+    if (typeof envelope?.code === 'string' && Object.hasOwn(definitions, envelope.code) && envelope.values && typeof envelope.values === 'object' && !Array.isArray(envelope.values)) {
+      try {
+        return new BackendError(envelope.code, { retryAfter: envelope.retryAfter, values: envelope.values });
+      } catch { /* fall through to the template-match path */ }
+    }
     const known = Object.keys(definitions).find(key => definitions[key][0] === envelope?.status && definitions[key][1] === envelope?.message);
     const code = known ?? (envelope?.status === 401 ? 'expired' : envelope?.status === 429 ? 'cooldown' : envelope?.status === 503 ? 'backendDown' : 'protocol');
     return new BackendError(code, { retryAfter: envelope?.retryAfter });
