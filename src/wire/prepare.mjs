@@ -12,7 +12,7 @@ function attachmentError(kind) {
   const error = new BackendError('unsupported');
   error.code = 'attachmentUnsupported';
   error.message = errors.attachmentUnsupported.template.replace('{kind}', kind).replace('{maxCount}', MAX_INPUT_IMAGES).replace('{maxBytes}', MAX_IMAGE_BYTES);
-  error.toJSON = () => ({ status: 400, message: error.message });
+  error.toJSON = () => ({ status: 400, code: error.code, values: { kind, maxCount: MAX_INPUT_IMAGES, maxBytes: MAX_IMAGE_BYTES }, message: error.message });
   return error;
 }
 
@@ -57,10 +57,12 @@ export function prepare(request, headers = new Headers()) {
   const system = request.system === undefined ? '' : textContent(request.system, false, false);
   const nonce = randomUUID().replaceAll('-', '');
   const session = new Headers(headers).get('x-chatgptweb-conversation');
+  const supplied = request.conversation_id;
+  if (supplied !== undefined && (typeof supplied !== 'string' || !supplied || supplied.length > 512)) throw new BackendError('invalidRequest');
   const prepared = { model: request.model, history, system, tools, toolChoice, choice: toolChoice,
     start: `[MAGPIE_TOOL_${nonce}]`, end: `[/MAGPIE_TOOL_${nonce}]`,
     ...(images.length ? { images } : {}), stream: request.stream !== false,
-    conversationKey: tools.length || toolHistory || !session ? undefined : createHash('sha256').update(session).digest('hex') };
+    conversationKey: tools.length || toolHistory ? undefined : supplied ?? (session ? createHash('sha256').update(session).digest('hex') : undefined) };
   prepared.prompt = compile(prepared);
   return prepared;
 }

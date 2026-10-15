@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepare } from '../src/protocol.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
 import { compile } from '../backend/prompt.mjs';
 
 const request = () => ({ model: 'auto', system: 'Be concise', messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: 'two' }, { role: 'user', content: 'three' }] });

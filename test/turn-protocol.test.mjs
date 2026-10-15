@@ -5,6 +5,21 @@ import { parseSSE } from '../src/wire/sse.mjs';
 import { handoffFrames } from '../integrations/turn-fixture.mjs';
 
 const protocol = await import('../src/protocol.mjs').catch(() => ({}));
+
+test('wire module owns AnswerStream and the legacy shim re-exports it', async () => {
+  const wire = await import('../src/wire/translate.mjs');
+  assert.equal(typeof wire.AnswerStream, 'function');
+  assert.equal(protocol.AnswerStream, wire.AnswerStream);
+});
+
+for (const missing of ['start', 'delta']) test(`reconstruct rejects missing ${missing} usage with a typed protocol error`, async () => {
+  const events = [
+    { type: 'message_start', message: { content: [], ...(missing === 'start' ? {} : { usage: { input_tokens: 0, output_tokens: 0 } }) } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, ...(missing === 'delta' ? {} : { usage: { output_tokens: 0 } }) },
+    { type: 'message_stop' },
+  ];
+  await assert.rejects(reconstruct(events.map(value => `data: ${JSON.stringify(value)}\n\n`)), error => error.name === 'BackendError' && error.code === 'protocol');
+});
 const message = (text = '') => ({ event: 'delta', data: { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, recipient: 'all', channel: 'final', content: { content_type: 'text', parts: [text] }, status: 'in_progress' } } } });
 const append = text => ({ event: 'delta', data: { o: 'patch', v: [{ p: '/message/content/parts/0', o: 'append', v: text }, { p: '/message/metadata/model_dil_v2/constants', o: 'append', v: 'must not escape' }] } });
 
@@ -122,7 +137,7 @@ test('a repeated visible assistant message-add before answer text exists is harm
 test('prepare preserves text history and hashes host conversation identity', () => {
   const request = { model: 'auto', system: [{ type: 'text', text: 'Be concise' }], messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: [{ type: 'text', text: 'two' }] }, { role: 'user', content: 'three' }], conversation_id: 'caller' };
   const prepared = protocol.prepare(request, { 'x-chatgptweb-conversation': 'host-session' });
-  assert.match(prepared.conversationKey, /^[a-f0-9]{64}$/);
+  assert.equal(prepared.conversationKey, 'caller');
   assert.equal(prepared.prompt, '[System]\nBe concise\n\n[Human]\none\n\n[Assistant]\ntwo\n\n[Human]\nthree');
   delete request.conversation_id;
   assert.match(protocol.prepare(request, { 'x-chatgptweb-conversation': 'host-session' }).conversationKey, /^[a-f0-9]{64}$/);

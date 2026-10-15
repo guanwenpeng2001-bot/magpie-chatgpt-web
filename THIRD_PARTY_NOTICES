@@ -1,4 +1,4 @@
-Portions of src/protocol.mjs and src/schema.mjs are adapted from
+Portions of src/protocol.mjs and src/tool-emulation.mjs are adapted from
 magpie-claudeweb2api v0.1.3:
 https://github.com/mu-zi-lee/magpie-claudeweb2api
 Commit: 9fed0935012c2ae2f10871b69fea365126135462
