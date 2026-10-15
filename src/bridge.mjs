@@ -75,7 +75,7 @@ export class Bridge {
             if (Buffer.byteLength(line) > 4 << 20) throw 0;
             const frame = JSON.parse(line);
             if (!ready) {
-              if (frame?.event !== 'ready' || frame.protocol !== 2) throw 0;
+              if (frame?.event !== 'ready' || frame.protocol !== 3) throw 0;
               ready = true; clearTimeout(timer); resolve(); continue;
             }
             if (!frame || typeof frame.id !== 'string' || !['head', 'data', 'done', 'error'].includes(frame.event)) throw 0;

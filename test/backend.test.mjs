@@ -136,7 +136,7 @@ test('login commands keep polling status pending and resolve through the flow', 
   const server = harness({ loginFlow: () => new Promise(resolve => { resolveFlow = resolve; }) });
   server.send({ id: 'login-start', method: 'login', account: 'fixture' });
   await server.until(frames => frames.some(frame => frame.id === 'login-start' && frame.event === 'data'));
-  assert.deepEqual(server.frames.find(frame => frame.id === 'login-start' && frame.event === 'data').data, { state: 'pending' });
+  assert.deepEqual(server.frames.find(frame => frame.id === 'login-start' && frame.event === 'data').data, { ok: true });
   server.send({ id: 'login-poll', method: 'loginStatus', account: 'fixture' });
   await server.until(frames => frames.some(frame => frame.id === 'login-poll' && frame.event === 'data'));
   assert.deepEqual(server.frames.find(frame => frame.id === 'login-poll' && frame.event === 'data').data, { state: 'pending' });

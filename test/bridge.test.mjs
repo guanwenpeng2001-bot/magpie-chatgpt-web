@@ -20,6 +20,12 @@ test('real backend preserves account cooldown across ancillary-cookie changes', 
   assert.equal(count, 1);
 });
 test('real child handshakes and correlates concurrent status calls', async t => {
+  try { await import('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts.');
+    return;
+  }
   assert.equal(typeof module.Bridge, 'function', 'Bridge must launch the backend');
   const bridge = new module.Bridge();
   t.after(() => bridge.dispose());

@@ -23,7 +23,7 @@ function childFixture(onCommand, handshake = true) {
         final(callback) { callback(); queueMicrotask(() => child.emit('exit', 0)); },
       });
       child.kill = () => queueMicrotask(() => child.emit('exit', 1));
-      if (handshake) queueMicrotask(() => child.stdout.write('{"event":"ready","protocol":2}\n'));
+      if (handshake) queueMicrotask(() => child.stdout.write('{"event":"ready","protocol":3}\n'));
       return child;
     },
   };
