@@ -164,7 +164,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
             const decoded = Buffer.from(image.dataBase64, 'base64');
             return decoded.toString('base64') !== image.dataBase64 || decoded.length > maxBytes || image.bytes !== decoded.length;
           });
-          if (invalid) throw new BackendError('attachmentUnsupported', { values: { kind: 'invalid or over-cap images', maxCount, maxBytes } });
+          if (invalid) throw new BackendError('attachmentUnsupported', { values: { kind: 'invalid or over-cap images', maxCount, maxBytes: '10 MiB' } });
         }
         const { client, identity, release } = clientFor(command);
         try {

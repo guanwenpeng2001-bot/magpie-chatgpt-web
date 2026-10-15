@@ -11,8 +11,8 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 function attachmentError(kind) {
   const error = new BackendError('unsupported');
   error.code = 'attachmentUnsupported';
-  error.message = errors.attachmentUnsupported.template.replace('{kind}', kind).replace('{maxCount}', MAX_INPUT_IMAGES).replace('{maxBytes}', MAX_IMAGE_BYTES);
-  error.toJSON = () => ({ status: 400, code: error.code, values: { kind, maxCount: MAX_INPUT_IMAGES, maxBytes: MAX_IMAGE_BYTES }, message: error.message });
+  error.message = errors.attachmentUnsupported.template.replace('{kind}', kind).replace('{maxCount}', MAX_INPUT_IMAGES).replace('{maxBytes}', '10 MiB');
+  error.toJSON = () => ({ status: 400, code: error.code, values: { kind, maxCount: MAX_INPUT_IMAGES, maxBytes: '10 MiB' }, message: error.message });
   return error;
 }
 
