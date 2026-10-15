@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkSchema, validateInput } from '../src/schema.mjs';
+import { checkSchema, validateInput } from '../src/tool-emulation.mjs';
 import { prepare } from '../src/protocol.mjs';
 
 for (const keyword of ['$schema', '$id', 'pattern', 'format', 'multipleOf', 'patternProperties', 'dependentRequired', 'dependentSchemas', 'unevaluatedProperties', 'prefixItems', 'contains', 'minContains', 'maxContains', 'if', 'then', 'else', 'propertyNames', 'contentEncoding']) {

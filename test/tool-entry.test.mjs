@@ -61,3 +61,12 @@ test('inbound workspace and other headers never enter the backend command or pro
   assert.equal(Object.hasOwn(fixture.command, 'headers'), false);
   for (const value of ['private-directory', 'private-repository', 'private-header']) assert.equal(JSON.stringify(fixture.command).includes(value), false);
 });
+
+test('image cap rejects before the loader opens a backend turn', async () => {
+  const fixture = await loaderFor(() => 'never');
+  const content = Array.from({ length: 5 }, () => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGk=' } }));
+  const response = await fixture.loader.fetch('https://chatgpt-web.invalid/v1/messages', { body: JSON.stringify(request({ messages: [{ role: 'user', content }] })) });
+  assert.equal(response.status, 400);
+  assert.equal(fixture.opened, 0);
+  assert.match((await response.json()).error.message, /Images are supported up to 4 files/);
+});
