@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright-core';
 import { selectModel } from '../backend/site-adapter/index.mjs';
 import { siteAdapterHtml } from '../integrations/turn-fixture.mjs';
 
 test('model selection identifies only the requested model', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
+  const { chromium } = await import('playwright-core');
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {
     const cases = [

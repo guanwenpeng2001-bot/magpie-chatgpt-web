@@ -29,6 +29,13 @@ export async function selectModel(page, slug) {
       const entries = visible(page, shape.entries);
       const machine = await choose(visible(page, shape.modelRows));
       if (machine) return machine;
+      const toggle = visible(page, shape.toggle);
+      if (!toggled && await toggle.count()) {
+        await toggle.first().click();
+        toggled = true;
+        await delay(shape.pollInterval);
+        continue;
+      }
       if (await entries.count()) {
         const matches = [];
         for (const entry of await entries.all()) {
@@ -40,8 +47,6 @@ export async function selectModel(page, slug) {
         if (matches.length === 1) { await matches[0].click(); return { ok: true }; }
         return failure('model-not-offered', { slug });
       }
-      const toggle = visible(page, shape.toggle);
-      if (!toggled && await toggle.count()) { await toggle.first().click(); toggled = true; }
       await delay(shape.pollInterval);
     }
     return failure('picker-missing', { component: 'model entries', selector: shape.entries });
@@ -52,14 +57,14 @@ export async function assertTemporaryChat(page) {
   const indicated = async () => {
     if (await visible(page, shape.temporaryIndicator).count()) return true;
     for (const label of shape.temporaryLabels) if (await page.getByText(label, { exact: true }).filter({ visible: true }).count()) return true;
+    for (const label of shape.temporaryButtonLabels) if (await page.getByRole('button', { name: label, exact: true }).filter({ visible: true }).count()) return true;
     return false;
   };
   if (await indicated()) return true;
-  const url = new URL(page.url());
-  if (url.searchParams.get(shape.temporaryParam) === shape.temporaryValue) return true;
+  const url = new URL(new URL(page.url()).origin);
   url.searchParams.set(shape.temporaryParam, shape.temporaryValue);
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
-  if (await indicated() || new URL(page.url()).searchParams.get(shape.temporaryParam) === shape.temporaryValue) return true;
+  if (await indicated()) return true;
   failure('temp-chat-unconfirmed');
   return { ok: false, kind: 'temp-chat-unconfirmed' };
 }

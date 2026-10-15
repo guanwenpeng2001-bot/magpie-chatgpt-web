@@ -21,6 +21,7 @@ export const shape = {
   signIn: '^(log in|sign in|登录)$',
   temporaryIndicator: '[data-testid="temporary-chat-indicator"], [data-temporary-chat="true"]',
   temporaryLabels: ['Temporary chat', '临时聊天', '临时对话'],
+  temporaryButtonLabels: ['Close temporary chat', '关闭临时聊天', '关闭临时对话'],
   temporaryParam: 'temporary-chat',
   temporaryValue: 'true',
   fileInput: 'input[type="file"]',

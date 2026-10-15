@@ -68,7 +68,7 @@ test('picker view transitions in an offline browser', async t => {
         console.log(JSON.stringify({ mode, kind: result.kind, milliseconds: Date.now() - started, ...state }));
         if (mode === 'ambiguous') { assert.equal(result.kind, 'picker-ambiguous'); assert.equal(state.selected, undefined); }
         else { assert.equal(result.ok, true); assert.equal(state.selected, 'GPT-6'); }
-        assert.equal(state.toggleClicks, ['delayed', 'slow-menu'].includes(mode) ? 1 : 0);
+        assert.equal(state.toggleClicks, ['delayed', 'slow-menu', 'already-applied'].includes(mode) ? 1 : 0);
       } finally { await page.close(); }
     });
     await t.test('never-trigger fails bounded with picker-missing', async () => {

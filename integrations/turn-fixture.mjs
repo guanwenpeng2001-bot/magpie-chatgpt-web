@@ -33,8 +33,12 @@ export function siteAdapterHtml({ picker = 'single', rows = [{ slug: 'gpt-6', ti
       const menu = document.querySelector('[role="menu"]');
       const bind = () => { for (const row of menu.children) row.onclick = () => { window.selected = row.getAttribute('data-model-id') || row.textContent; }; };
       const render = () => { menu.innerHTML = entries; bind(); };
-      for (const trigger of document.querySelectorAll('[data-codex-intelligence-trigger]')) trigger.onclick = () => {
-        if (${JSON.stringify(picker)} === 'toggle') {
+      for (const [index, trigger] of [...document.querySelectorAll('[data-codex-intelligence-trigger]')].entries()) trigger.onclick = () => {
+        window.openedTrigger = index;
+        if (['effort', 'effort-unmatched'].includes(${JSON.stringify(picker)})) {
+          menu.innerHTML = '<div role="menuitem" data-model-picker-view-toggle="true">Models</div><div role="menuitemradio">' + (${JSON.stringify(picker)} === 'effort' ? 'GPT-6' : 'Instant') + '</div>';
+          menu.firstChild.onclick = () => { window.toggleClicked = true; menu.replaceChildren(); setTimeout(render, 100); };
+        } else if (${JSON.stringify(picker)} === 'toggle') {
           menu.innerHTML = '<div role="menuitem" data-model-picker-view-toggle="true">Models</div>';
           menu.firstChild.onclick = () => { menu.replaceChildren(); setTimeout(render, 100); };
         } else render();
