@@ -92,6 +92,7 @@ test('idle contexts close at five minutes, with active time excluded', async t =
   context.pages = () => [];
   context.close = async () => { closes++; context.emit('close'); };
   const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  assert.equal(browser.idleMilliseconds, 300_000);
   await browser.run('fixture', async () => { t.mock.timers.tick(300_000); assert.equal(closes, 0); });
   t.mock.timers.tick(299_999);
   assert.equal(closes, 0);
@@ -142,6 +143,28 @@ test('visible turns replace an idle headless context and return to headless afte
     await browser.run('fixture', async () => {}, undefined, { visibleTurns: false });
     assert.deepEqual(modes, [true, false, true]);
     assert.equal(closes, 2);
+  } finally { await browser.close(); }
+});
+
+for (const visibleTurns of [true, false]) test(`active operation rejects a switch to visibleTurns=${visibleTurns} with a local mode conflict`, async () => {
+  const modes = [];
+  const context = new EventEmitter();
+  context.pages = () => [];
+  context.close = async () => context.emit('close');
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async (profile, options) => {
+    modes.push(options.headless);
+    return context;
+  } });
+  try {
+    await browser.run('fixture', async () => {
+      await assert.rejects(browser.run('fixture', () => assert.fail('conflicting operation must not start'), undefined, { visibleTurns }), error => {
+        assert.equal(error.constructor, Error);
+        assert.equal(error.code, undefined);
+        assert.match(error.message, /active operation.*other mode.*wait/i);
+        return true;
+      });
+      assert.deepEqual(modes, [visibleTurns]);
+    }, undefined, { visibleTurns: !visibleTurns });
   } finally { await browser.close(); }
 });
 

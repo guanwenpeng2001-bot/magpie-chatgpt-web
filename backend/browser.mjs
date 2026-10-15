@@ -30,7 +30,7 @@ export class BrowserSupervisor {
     if (this.profile !== undefined ? typeof this.profile !== 'string' || !this.profile : typeof this.profileRoot !== 'string' || !this.profileRoot) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
     if (entry && entry.headless !== headless) {
-      if (entry.users) throw new BackendError('capacity');
+      if (entry.users) throw new Error('An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.');
       await this.closeAccount(account);
       return this.#ensure(account, headless);
     }
@@ -269,9 +269,12 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
       context.once('close', onClose);
       signal?.addEventListener('abort', abort, { once: true });
       signal?.throwIfAborted();
-      for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
-      const page = context.pages()[0] ?? await wait(context.newPage());
-      await wait(page.goto(origin));
+      let page;
+      try {
+        for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
+        page = context.pages()[0] ?? await wait(context.newPage());
+        await wait(page.goto(origin));
+      } catch (error) { throw new Error('The sign-in page could not be loaded. Check the network/proxy and retry sign-in.', { cause: error }); }
       while (!closed && !page.isClosed()) {
         signal?.throwIfAborted();
         if (await wait(probeSignedIn(page))) {
@@ -289,8 +292,8 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
       return { state: 'cancelled' };
     } catch (error) {
       const cause = signal?.aborted ? signal.reason : error;
-      if (cause?.code === 'signinTimeout' || cause?.name === 'TimeoutError') {
-        return { state: 'timeout', reason: cause.code === 'signinTimeout' ? cause.message : 'Sign-in did not finish within 5 minutes. Start sign-in again; the previous attempt was cancelled cleanly.', error: cause };
+      if (cause?.code === 'signinTimeout') {
+        return { state: 'timeout', reason: cause.message, error: cause };
       }
       if (signal?.aborted && cause?.name === 'AbortError') return { state: 'cancelled' };
       if (!signal?.aborted && (closed || owned?.context.pages().every(page => page.isClosed()))) return { state: 'cancelled' };

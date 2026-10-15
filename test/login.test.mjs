@@ -6,7 +6,7 @@ import * as browserModule from '../backend/browser.mjs';
 
 test('ordinary Chrome sign-in launch uses only the four prescribed arguments', () => {
   assert.equal(typeof browserModule.chromeArguments, 'function');
-  const args = browserModule.chromeArguments('C:/fixture/profile', 12345);
+  const args = browserModule.chromeArguments('C:/fixture/profile', 12345, { env: {} });
   assert.deepEqual(args, ['--user-data-dir=C:/fixture/profile', '--remote-debugging-port=12345', '--no-first-run', '--no-default-browser-check']);
   assert.equal(args.some(arg => /no-sandbox|enable-automation|headless/.test(arg)), false);
 });
@@ -164,6 +164,31 @@ test('an elapsed window interrupts a stalled page probe and closes once', async 
   ]);
   assert.equal(result.state, 'timeout');
   assert.equal(closes, 1);
+});
+
+for (const location of ['about:blank', 'http://127.0.0.1/']) test(`navigation TimeoutError from ${location} is a load failure rather than an elapsed sign-in window`, async () => {
+  const fixture = loginFixture();
+  fixture.page.url = () => location;
+  const navigationError = Object.assign(new Error('page.goto: Timeout 30000ms exceeded.'), { name: 'TimeoutError' });
+  fixture.page.goto = async () => { throw navigationError; };
+  const flow = browserModule.createLoginFlow({ launch: async () => fixture });
+  const result = await flow('fixture', new AbortController().signal, '.');
+  assert.equal(result.state, 'failed');
+  assert.match(result.reason, /sign-in page could not be loaded/i);
+  assert.match(result.reason, /network.*proxy/i);
+  assert.doesNotMatch(result.reason, /5 minutes/);
+  const states = new browserModule.LoginStates();
+  assert.equal(states.finish('fixture', result.state, undefined, result.error).reason, result.reason);
+});
+
+test('reasonless abort during sign-in is cancelled', async () => {
+  const controller = new AbortController();
+  const fixture = loginFixture();
+  const flow = browserModule.createLoginFlow({
+    launch: async () => fixture,
+    probeSignedIn: async () => { controller.abort(); return false; },
+  });
+  assert.deepEqual(await flow('fixture', controller.signal, '.'), { state: 'cancelled' });
 });
 
 test('session conversion yields the exact synthetic credential record', () => {
