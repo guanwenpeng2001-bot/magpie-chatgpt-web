@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { BackendError } from '../bridge.mjs';
-import { signinProfileClaim, releaseSigninProfileClaim, signinTimeoutWindow } from '../../backend/browser.mjs';
+import { signinProfileClaim, releaseSigninProfileClaim, unlockSigninProfile, signinTimeoutWindow } from '../../backend/browser.mjs';
 import { makeLoader } from '../loader.mjs';
 import { PROVIDER } from './config.mjs';
 
@@ -23,7 +23,8 @@ export function authHook(env) {
       async authorize() {
         const account = await signinProfileClaim(profileRoot);
         const proxy = process.env.MAGPIE_HTTPS_PROXY || process.env.MAGPIE_HTTP_PROXY || process.env.MAGPIE_ALL_PROXY;
-        await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) });
+        try { await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) }); }
+        catch (error) { await unlockSigninProfile(profileRoot, account); throw error; }
         return {
           url: '', method: 'auto',
           instructions: 'A Chrome window owned by magpie is opening on chatgpt.com. Sign in there — including any verification the site asks for. This finishes by itself when the session is confirmed.',
@@ -32,7 +33,7 @@ export function authHook(env) {
               for (;;) {
                 const result = await bridge.call({ method: 'loginStatus', account });
                 if (result.state === 'signed-in') {
-                  releaseSigninProfileClaim(profileRoot);
+                  await releaseSigninProfileClaim(profileRoot, account);
                   return { ...result.credential, type: 'success' };
                 }
                 if (result.state === 'cancelled') return { type: 'failed', error: 'The sign-in window was closed. Start sign-in again to resume the same profile.' };
@@ -41,7 +42,10 @@ export function authHook(env) {
                 if (result.state !== 'pending') throw new BackendError('protocol');
                 await delay(pollMilliseconds);
               }
-            } finally { await bridge.call({ method: 'logout', account }).catch(() => {}); }
+            } finally {
+              await bridge.call({ method: 'logout', account }).catch(() => {});
+              await unlockSigninProfile(profileRoot, account);
+            }
           },
         };
       },

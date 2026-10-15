@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID, createHash } from 'node:crypto';
+import { readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -15,8 +15,6 @@ export const DEFAULT_SIGNIN_TIMEOUT_MS = 900_000;
 // outlives the backend process so a retry resumes the same Chrome profile.
 export const SIGNIN_TIMEOUT_FILE = 'signin.profile';
 const PROFILE_CLAIM = /^[a-zA-Z0-9_-]{1,64}$/;
-const claims = new Map();
-
 export function signinWindow(milliseconds) {
   const minutes = milliseconds / 60_000;
   return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
@@ -26,25 +24,58 @@ export function signinTimeoutWindow() {
   return signinWindow(DEFAULT_SIGNIN_TIMEOUT_MS);
 }
 
-// Resumes the profile an unfinished sign-in already opened, or mints the next
-// account's own. Only the stored claim is adopted, never an arbitrary existing
-// directory: a directory no claim names may belong to a signed-in account.
-export async function signinProfileClaim(profileRoot) {
-  const known = claims.get(profileRoot);
-  if (known) return known;
-  let stored;
-  try { stored = readFileSync(join(profileRoot, SIGNIN_TIMEOUT_FILE), 'utf8').trim(); } catch { /* no claim yet */ }
-  if (stored && PROFILE_CLAIM.test(stored)) return claims.set(profileRoot, stored).get(profileRoot);
-  const minted = randomUUID();
-  try { writeFileSync(join(profileRoot, SIGNIN_TIMEOUT_FILE), minted); } catch { /* an unusable root is the login flow's failure to report */ }
-  return claims.set(profileRoot, minted).get(profileRoot);
+const claimLocks = new Map();
+
+async function lockSigninProfile(root) {
+  if (!claimLocks.has(root)) {
+    const identity = createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex');
+    const address = process.platform === 'win32' ? '\\\\.\\pipe\\magpie-signin-' + identity : '\0magpie-signin-' + identity;
+    const server = createServer(socket => socket.destroy());
+    const acquisition = new Promise((resolveLock, reject) => {
+      server.once('error', error => {
+        claimLocks.delete(root);
+        if (error.code === 'EADDRINUSE') resolveLock(null);
+        else reject(new BackendError('browserConfiguration'));
+      });
+      server.listen(address, () => { server.unref(); resolveLock(server); });
+    });
+    claimLocks.set(root, acquisition);
+  }
+  return claimLocks.get(root);
 }
 
-// A completed sign-in retires its claim, so the next account mints its own
-// profile instead of inheriting a signed-in one.
-export function releaseSigninProfileClaim(profileRoot) {
-  claims.delete(profileRoot);
-  try { rmSync(join(profileRoot, SIGNIN_TIMEOUT_FILE)); } catch { /* an already-absent claim needs no removal */ }
+export async function signinProfileClaim(profileRoot) {
+  const root = resolve(profileRoot);
+  try {
+    mkdirSync(root, { recursive: true });
+    const lock = await lockSigninProfile(root);
+    if (!lock) return randomUUID();
+    let stored;
+    try { stored = readFileSync(join(root, SIGNIN_TIMEOUT_FILE), 'utf8').trim(); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!stored || !PROFILE_CLAIM.test(stored)) {
+      stored = randomUUID();
+      writeFileSync(join(root, SIGNIN_TIMEOUT_FILE), stored);
+    }
+    lock.account = stored;
+    return stored;
+  } catch { throw new BackendError('browserConfiguration'); }
+}
+
+export async function releaseSigninProfileClaim(profileRoot, account) {
+  const root = resolve(profileRoot);
+  const lock = await claimLocks.get(root);
+  if (!lock || (account && lock.account !== account)) return;
+  try { rmSync(join(root, SIGNIN_TIMEOUT_FILE)); }
+  catch { throw new BackendError('browserConfiguration'); }
+}
+
+export async function unlockSigninProfile(profileRoot, account) {
+  const root = resolve(profileRoot);
+  const lock = await claimLocks.get(root);
+  if (!lock || (account && lock.account !== account)) return;
+  await new Promise((resolveClose, reject) => lock.close(error => error ? reject(new BackendError('browserConfiguration')) : resolveClose()));
+  claimLocks.delete(root);
 }
 
 async function reconcileSessionCookies(context, credential, origin) {

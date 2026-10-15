@@ -1,4 +1,8 @@
 import test from 'node:test';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,6 +18,106 @@ const temporary = async () => mkdtemp(join(tmpdir(), 'magpie-signin-'));
 const methodFor = (bridge, profileRoot) => _internal.createHooks({ bridge, profileRoot, pollMilliseconds: 0 }).auth.methods[0];
 const source = relative => readFile(new URL(relative, import.meta.url), 'utf8');
 const lifecycle = () => import('../backend/browser.mjs');
+
+function claimant(root) {
+  return spawn(process.execPath, ['--input-type=module', '-e', `
+    const { signinProfileClaim } = await import(process.argv[2]);
+    process.stdin.once('data', async () => {
+      try { console.log(JSON.stringify({ account: await signinProfileClaim(process.argv[1]) })); }
+      catch (error) { console.log(JSON.stringify({ error: error.code })); }
+    });
+    process.stdin.resume();
+  `, root, new URL('../backend/browser.mjs', import.meta.url).href], { stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
+async function claimInProcess(root) {
+  const child = claimant(root);
+  const answer = once(child.stdout, 'data');
+  child.stdin.write('go');
+  const result = JSON.parse(String((await answer)[0]));
+  const exit = once(child, 'exit');
+  child.stdin.end();
+  await exit;
+  return result;
+}
+
+test('F1 a retire failure prevents credential delivery', async () => {
+  const root = await temporary();
+  const original = fs.rmSync;
+  try {
+    const method = methodFor({ call: async command => command.method === 'loginStatus'
+      ? { state: 'signed-in', credential: { type: 'oauth', profile: 'fixture' } } : { ok: true } }, root);
+    const flow = await method.authorize();
+    fs.rmSync = (path, options) => {
+      if (String(path) === join(root, CLAIM_FILE)) throw Object.assign(new Error('fixture lock'), { code: 'EBUSY' });
+      return original(path, options);
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(flow.callback(), { code: 'browserConfiguration' }, 'retire failure must prevent success');
+    const pending = await claimBytes(root);
+    fs.rmSync = original;
+    syncBuiltinESMExports();
+    assert.equal((await (await method.authorize()).callback()).type, 'success');
+    await assert.rejects(claimBytes(root), { code: 'ENOENT' });
+    assert.notEqual((await claimInProcess(root)).account, pending, 'after success a restarted host cannot adopt the retired profile');
+  } finally {
+    fs.rmSync = original;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('F3 missing root persists the claim across real process restarts', async () => {
+  const parent = await temporary();
+  const root = join(parent, 'missing', 'profiles');
+  try {
+    const first = await claimInProcess(root);
+    const second = await claimInProcess(root);
+    assert.ok(first.account);
+    assert.equal(second.account, first.account, 'fresh-install retry must resume across processes');
+    assert.equal(await claimBytes(root), first.account);
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+test('F2 two racing processes have exactly one adopter', async () => {
+  const root = await temporary();
+  await writeFile(join(root, CLAIM_FILE), 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+  const children = [claimant(root), claimant(root)];
+  try {
+    const answers = children.map(child => once(child.stdout, 'data'));
+    for (const child of children) child.stdin.write('go');
+    const results = (await Promise.all(answers)).map(chunks => JSON.parse(String(chunks[0])));
+    const persisted = await claimBytes(root);
+    assert.equal(results.filter(result => result.account === persisted).length, 1, 'only one process may adopt a pending profile');
+    assert.equal(new Set(results.map(result => result.account)).size, 2, 'the contender gets a fresh profile');
+  } finally {
+    const exits = children.map(child => once(child, 'exit'));
+    for (const child of children) child.stdin.end();
+    await Promise.all(exits);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('F2 a killed holder releases ownership for a restarted process', async () => {
+  const root = await temporary();
+  const child = claimant(root);
+  try {
+    const answer = once(child.stdout, 'data');
+    child.stdin.write('go');
+    const first = JSON.parse(String((await answer)[0]));
+    const exited = once(child, 'exit');
+    child.kill('SIGKILL');
+    await exited;
+    const resumed = await claimInProcess(root);
+    assert.equal(resumed.account, first.account);
+  } finally { child.kill(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('F4 cleanup identifies credential references and pending claims', async () => {
+  const readme = await source('../README.md');
+  assert.match(readme, /plugin-auth\.json/);
+  assert.match(readme, /`profile`/);
+});
 
 test('a retried sign-in reuses the profile directory left behind by the lapsed attempt', async () => {
   const root = await temporary();
@@ -121,6 +225,7 @@ test('a corrupted or hostile claim name is replaced rather than trusted', async 
       const claimed = await module.signinProfileClaim(root);
       assert.match(claimed, PROFILE_NAME, `planted claim ${JSON.stringify(planted)} must not be trusted`);
       assert.notEqual(claimed, planted);
+      assert.equal((await claimBytes(root)).trim(), claimed, 'every planted value must be replaced on disk');
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
