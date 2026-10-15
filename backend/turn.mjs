@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BackendError } from './guard.mjs';
-import { BrowserSupervisor } from './browser.mjs';
+import { BrowserSupervisor, launchBrowserContext } from './browser.mjs';
 import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
 import * as siteAdapter from './site-adapter/index.mjs';
@@ -19,10 +19,7 @@ export class TurnDriver {
     this.prompter = prompter;
     this.bindings = new Conversations({ now });
     this.browser = new BrowserSupervisor({ profileRoot, profile, launch: launch ?? (async (profile, options) => {
-      let chromium;
-      try { ({ chromium } = await import('playwright-core')); }
-      catch { throw new BackendError('browserDependency'); }
-      return chromium.launchPersistentContext(profile, { ...options, serviceWorkers: 'block' });
+      return launchBrowserContext(profile, { ...options, serviceWorkers: 'block' });
     }) });
     this.installed = new WeakSet();
     this.turns = new Map();
@@ -78,6 +75,7 @@ export class TurnDriver {
           resumeFrom = 0;
           await wait(page.goto(`${this.origin}/?temporary-chat=true`, { waitUntil: 'domcontentloaded', timeout: Math.max(1, deadline - this.now()) }));
         }
+        await wait(this.pageError(page, guard));
         const temporary = await wait(this.adapter.assertTemporaryChat(page));
         await wait(this.pageError(page, guard));
         if (temporary !== true) throw new BackendError('temporary');

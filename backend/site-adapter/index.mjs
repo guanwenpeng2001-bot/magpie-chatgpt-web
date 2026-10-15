@@ -77,6 +77,7 @@ export async function probePageError(page) {
     const dialogs = nodes(s.dialogs).map(node => node.innerText).join('\n');
     let evidence;
     if (matches(s.challengeTitle, document.title)) evidence = 'challenge-title';
+    else if (!nodes(s.composer).length && [...document.scripts].some(script => /\/cdn-cgi\/challenge-platform\//.test(script.src)) && (/__cf_chl_/.test(location.search) || [...document.scripts].some(script => /__cf_chl_/.test(script.textContent)))) evidence = 'challenge-structure';
     else if (nodes(s.frames).some(node => matches(s.challengeFrame, node.title))) evidence = 'challenge-frame';
     else if (nodes(s.challengeCards).some(node => matches(s.challengeCard, node.innerText))) evidence = 'challenge-card';
     else if (matches(s.challengeDialog, dialogs)) evidence = 'challenge-dialog';

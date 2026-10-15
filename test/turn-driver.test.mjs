@@ -81,7 +81,7 @@ test('driver compiles history, attaches images and returns normalized rendered o
   const h = harness();
   try {
     const { frames, result } = await h.complete(command({ images: [image] }));
-    assert.deepEqual(h.calls.filter(value => typeof value === 'string').slice(0, 6), ['navigate', 'temporary', 'probe', 'composer', 'model', 'submit']);
+    assert.deepEqual(h.calls.filter(value => typeof value === 'string').slice(0, 7), ['navigate', 'probe', 'temporary', 'probe', 'composer', 'model', 'submit']);
     assert.deepEqual(h.calls.find(value => value[0] === 'images'), ['images', [image]]);
     assert.deepEqual(h.calls.find(value => value[0] === 'fill'), ['fill', '[Human]\nfirst']);
     assert.deepEqual(frames, [{ type: 'delta', index: 0, text: 'answer' }, { type: 'finish', reason: 'complete' }]);
