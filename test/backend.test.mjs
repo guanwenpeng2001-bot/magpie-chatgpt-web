@@ -277,6 +277,77 @@ for (const profileAlreadyLive of [true, false]) test(`cached stale commands reta
   assert.equal(writes, profileAlreadyLive ? 0 : 1);
 });
 
+for (const arm of ['turn', 'following read']) test(`cached stale turn preserves the live credential: ${arm}`, async t => {
+  const { createServer } = await import('node:http');
+  const { EventEmitter } = await import('node:events');
+  const { ReadClient } = await import('../backend/http.mjs');
+  const { TurnDriver } = await import('../backend/turn.mjs');
+  const name = '__Secure-next-auth.session-token';
+  const live = `${name}=live`;
+  const upstream = createServer((request, response) => {
+    if (request.url === '/api/auth/session') {
+      response.writeHead(200, { 'Set-Cookie': `${live}; Path=/; HttpOnly` });
+      response.end(JSON.stringify({ accessToken: 'access', expires: '2099-01-01T00:00:00Z' }));
+    } else {
+      response.writeHead(request.headers.cookie === live ? 200 : 401);
+      response.end(JSON.stringify({ models: [{ slug: 'auto', title: 'Auto' }] }));
+    }
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => upstream.close(resolve)));
+  const origin = `http://127.0.0.1:${upstream.address().port}`;
+  const context = new EventEmitter();
+  let stored = [{ name, value: 'live', domain: '127.0.0.1', path: '/' }];
+  let writes = 0;
+  const navigated = [];
+  context.pages = () => [];
+  context.close = async () => context.emit('close');
+  context.cookies = async () => structuredClone(stored);
+  context.clearCookies = async () => { stored = []; writes++; };
+  context.addCookies = async cookies => { stored = cookies; writes++; };
+  context.exposeBinding = async () => {};
+  context.addInitScript = async () => {};
+  context.newPage = async () => {
+    let closed = false;
+    const composer = { filter: () => composer, fill: async () => {}, press: async () => {} };
+    return {
+      goto: async () => { navigated.push(stored[0]?.value === 'live'); },
+      isClosed: () => closed, close: async () => { closed = true; },
+      evaluate: async () => {}, locator: () => composer,
+    };
+  };
+  const driver = new TurnDriver({
+    profileRoot: '.', origin, launch: async () => context,
+    adapter: {
+      assertTemporaryChat: async () => true,
+      probePageError: async () => stored[0]?.value === 'live' ? undefined : { kind: 'sign-in' },
+      readComposer: async () => ({ ok: true }), selectModel: async () => ({ ok: true }),
+    },
+    observe: async () => ({ text: 'answer', route: 'dom' }),
+  });
+  let clients = 0;
+  const server = harness({ turnDriver: driver, readClient: options => { clients++; return new ReadClient(options); } });
+  t.after(async () => { server.input.end(); await server.work; });
+  const command = async (id, method) => {
+    server.send({ id, method, origin, profileRoot: '.', auth: { profile: 'fixture', refresh: `${name}=superseded` }, model: 'auto', history: [{ role: 'user', content: 'hello' }] });
+    await server.until(frames => frames.some(frame => frame.id === id && ['done', 'error'].includes(frame.event)));
+    return server.frames.filter(frame => frame.id === id);
+  };
+  assert.equal((await command('rotate', 'session')).at(-1).event, 'done');
+  const turn = await command('stale-turn', 'complete');
+  if (arm === 'following read') {
+    assert.equal((await command('next-read', 'models')).at(-1).event, 'done', 'a stale turn must not poison the shared account guard');
+  } else {
+    assert.equal(turn.at(-1).event, 'done', 'the cached stale turn must succeed');
+    assert.deepEqual(turn.filter(frame => frame.event === 'data').map(frame => frame.data.type), ['delta', 'finish']);
+  }
+  assert.equal(clients, 1);
+  assert.deepEqual(navigated, [true]);
+  assert.equal(stored[0]?.value === 'live', true);
+  assert.equal(writes, 0);
+  assert.equal(JSON.stringify(server.frames.filter(frame => frame.id !== 'rotate')).includes('superseded'), false);
+});
+
 test('session command renews over the read client without starting login', async () => {
   const accessToken = crypto.randomUUID();
   const expires = Date.now() + 10 * 86400000;

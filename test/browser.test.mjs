@@ -235,6 +235,32 @@ test('TurnDriver reconciles the command credential before creating a turn page',
   try {
     await assert.rejects(driver.complete({ auth: { profile: 'fixture', refresh: '__Secure-next-auth.session-token=current' }, model: 'auto', history: [{ role: 'user', content: 'hello' }] }, new AccountGuard(), 'fixture', new AbortController().signal, () => {}), error => error.code === 'expired');
     assert.deepEqual(sent, ['current']);
+    const { PassThrough } = await import('node:stream');
+    const { serve } = await import('../backend/main.mjs');
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let credential = '__Secure-next-auth.session-token=current';
+    const frames = [];
+    let receive;
+    output.on('data', chunk => { frames.push(JSON.parse(chunk.toString())); receive?.(); });
+    const work = serve(input, output, {
+      turnDriver: driver,
+      readClient: ({ guard }) => ({
+        guard, get credential() { return credential; },
+        session: async () => {
+          credential = '__Secure-next-auth.session-token=rotated';
+          return { accessToken: 'access', expires: '2099-01-01T00:00:00Z' };
+        },
+      }),
+    });
+    try {
+      for (const method of ['session', 'complete']) {
+        input.write(JSON.stringify({ id: method, method, auth: { profile: 'fixture', refresh: '__Secure-next-auth.session-token=current' }, model: 'auto', history: [{ role: 'user', content: 'hello' }] }) + '\n');
+        while (!frames.some(frame => frame.id === method && ['done', 'error'].includes(frame.event))) await new Promise(resolve => { receive = resolve; });
+      }
+      assert.deepEqual(sent, ['rotated']);
+      assert.equal(BackendError.fromEnvelope(frames.find(frame => frame.id === 'complete' && frame.event === 'error').error).code, 'expired');
+    } finally { input.end(); await work; }
   } finally { await driver.close(); }
 });
 

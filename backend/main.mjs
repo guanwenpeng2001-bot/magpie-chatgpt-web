@@ -169,7 +169,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         const { client, identity, release } = clientFor(command);
         try {
           turns ??= new TurnDriver({ profileRoot: command.profileRoot });
-          return await turns.complete(command, client.guard, identity, signal, emit);
+          return await turns.complete({ ...command, auth: { ...command.auth, refresh: client.credential } }, client.guard, identity, signal, emit);
         } finally { release(); }
       }
       default: throw new BackendError('protocol');
