@@ -12,11 +12,15 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
   let layout;
   let streamFailed = false;
   let domObserved = false;
+  let domBehind = false;
   let harvestFailure;
   const log = data => emit({ event: 'log', data });
   const publish = async (next, source) => {
     if (source === 'sse' && domObserved) return;
-    if (source === 'dom') domObserved = true;
+    if (source === 'dom') {
+      domObserved = true;
+      domBehind ||= next.length < stream.text.length;
+    }
     carrier = source;
     if (next === text) return;
     const delta = source === 'dom' ? next : next.slice(text.length);
@@ -73,9 +77,9 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
       await log({ kind: 'observationFailure', code: 'harvest', cause: snapshot.failed });
     }
     if (!streamFailed) await publish(stream.text, 'sse');
-    if (snapshot.text || snapshot.nodes > 0 && state.complete) await publish(snapshot.text, 'dom');
+    if (snapshot.text) await publish(snapshot.text, 'dom');
     const domComplete = state.complete && snapshot.nodes > 0;
-    const streamComplete = !streamFailed && !stream.handedOff && !partial && !domObserved && stream.complete;
+    const streamComplete = !streamFailed && !stream.handedOff && !partial && !domBehind && stream.complete;
     if (domComplete || streamComplete) {
       if (!text.trim()) throw new BackendError('empty');
       await emit({ event: '', data: { type: 'message_stream_complete' } });

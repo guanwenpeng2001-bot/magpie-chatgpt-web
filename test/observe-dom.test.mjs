@@ -216,6 +216,46 @@ for (const complete of [true, false]) {
   });
 }
 
+for (const shape of ['matching DOM with lagging turn-state', 'empty complete DOM', 'legacy DOM without status']) {
+  browserTest(`healthy stream completes with ${shape}`, async t => {
+    const html = shape === 'legacy DOM without status' ? '<p data-message-author-role="assistant">Plain answer</p>'
+      : shape === 'empty complete DOM' ? current('') : current('Plain answer', 'in-progress');
+    const { page, options, events, eof } = await fixture(t, { html, conversation: (req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(sse('delta', visibleMessage('Plain answer')) + terminator({ type: 'message_stream_complete' }));
+    } });
+    await page.evaluate(() => fetch('/backend-api/conversation'));
+    await eof;
+    options.budget = 650;
+    assert.deepEqual(await observeTurn(page, options), { text: 'Plain answer', route: shape === 'empty complete DOM' ? 'sse' : 'dom' });
+    assert.equal(events.some(event => event.event === 'dom' && !event.data.text), false);
+    assert.equal(events.filter(event => event.event === '').length, 1);
+  });
+}
+
+browserTest('complete stream waits for a rendered prefix to become the full answer', async t => {
+  const fullText = 'First half and second half';
+  const { page, options, events, eof } = await fixture(t, { html: current('First half', 'in-progress'), conversation: (req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end(sse('delta', visibleMessage(fullText)) + terminator({ type: 'message_stream_complete' }));
+  } });
+  await page.evaluate(() => fetch('/backend-api/conversation'));
+  await eof;
+  options.emit = async event => {
+    events.push(event);
+    if (event.event === 'dom' && event.data.text === 'First half') {
+      await page.evaluate(text => {
+        document.querySelector('article section div').innerText = text;
+        document.querySelector('article').dataset.talvtTurnState = 'complete';
+      }, fullText);
+    }
+  };
+  assert.deepEqual(await observeTurn(page, options), { text: fullText, route: 'dom' });
+  assert.deepEqual(events.filter(event => event.event === 'dom').map(event => event.data.text), ['First half', fullText]);
+  assert.equal(events.filter(event => event.event === '').length, 1);
+  assert.equal(events.at(-1).event, '');
+});
+
 browserTest('abort stops observation without emitting completion', async t => {
   const { page, options, events } = await fixture(t);
   const controller = new AbortController();
