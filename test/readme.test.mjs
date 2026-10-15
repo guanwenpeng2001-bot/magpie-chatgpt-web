@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+const readme = (await readFile(new URL('../README.md', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const prose = readme.replace(/\s+/g, ' ');
 const publicCodes = `expired cooldown upstream requestBudget empty hidden truncated unsupported
 invalidRequest toolDefinition toolChoice toolUnknown toolJSON toolSchema toolChoiceViolation
