@@ -1,111 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TurnDriver } from '../backend/turn.mjs';
+import { chromium } from 'playwright-core';
+import { selectModel } from '../backend/site-adapter/index.mjs';
+import { siteAdapterHtml } from '../integrations/turn-fixture.mjs';
 
-function pickerFixture() {
-  let view = 'effort';
-  let selected;
-  const rows = ['GPT-6', 'GPT-5.6 Sol', 'GPT-5.5\nLeaving on October 14'].map(text => ({
-    getAttribute: async () => null,
-    innerText: async () => text,
-    click: async () => { selected = text.split('\n')[0]; },
-  }));
-  const collection = items => ({ filter: () => collection(items), count: async () => items.length, all: async () => items });
-  const menu = { filter() { return this; }, first() { return this; }, waitFor: async () => {} };
-  const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; }, waitFor: async () => {}, first() { return this; } };
-  const toggle = { click: async () => { view = 'models'; }, count: async () => view === 'effort' ? 1 : 0, filter() { return this; } };
-  return {
-    state: () => ({ view, selected }),
-    page: {
-      locator(selector) {
-        if (selector === '[data-model-id]') return collection([]);
-        if (selector === '[role="menu"]') return menu;
-        if (selector.includes('data-codex-intelligence-trigger') && selector.includes('aria-haspopup')) return trigger;
-        if (selector.includes('data-model-picker-view-toggle')) return toggle;
-        throw new Error('Unrecognized structural selector');
-      },
-      getByRole(role) {
-        if (role === 'button') return collection([]);
-        if (role === 'menuitemradio') return collection(view === 'models' ? rows : []);
-        throw new Error('Unexpected role');
-      },
-      keyboard: { press: async key => { assert.equal(key, 'Escape'); view = 'closed'; } },
-    },
-  };
-}
-
-for (const [slug, label] of [['gpt-6', 'GPT-6'], ['gpt-5-5', 'GPT-5.5']]) {
-  test(`structural picker selects ${slug} without localized trigger text`, async () => {
-    const fixture = pickerFixture();
-    await TurnDriver.prototype.selectModel.call({}, fixture.page, slug);
-    assert.deepEqual(fixture.state(), { view: 'closed', selected: label });
-  });
-}
-
-for (const slug of ['gpt-6-mini', 'gpt-5-6', 'gpt-5-6-mini']) {
-  test(`picker refuses ambiguous or absent mapping for ${slug}`, async () => {
-    const fixture = pickerFixture();
-    await assert.rejects(TurnDriver.prototype.selectModel.call({}, fixture.page, slug), error => error.code === 'pageShape');
-    assert.deepEqual(fixture.state(), { view: 'closed', selected: undefined });
-  });
-}
-
-test('auto preserves the site default without a per-model claim', async () => {
-  const fixture = pickerFixture();
-  await TurnDriver.prototype.selectModel.call({}, fixture.page, 'auto');
-  assert.deepEqual(fixture.state(), { view: 'effort', selected: undefined });
-});
-
-function visibilityFixture(rows) {
-  let view = 'effort';
-  let selected;
-  const entries = rows.map(row => ({
-    getAttribute: async () => null,
-    innerText: async () => row.text,
-    click: async () => { selected = row.text.split('\n')[0]; },
-  }));
-  const collection = items => ({
-    filter: options => collection(options?.visible === true ? items.filter((_, index) => rows[index].visible) : items),
-    count: async () => items.length,
-    all: async () => items,
-  });
-  const menu = { filter() { return this; }, first() { return this; }, waitFor: async () => {} };
-  const trigger = { click: async () => { view = 'effort'; }, count: async () => 1, filter() { return this; }, waitFor: async () => {}, first() { return this; } };
-  const toggle = { click: async () => { view = 'models'; }, count: async () => view === 'effort' ? 1 : 0, filter() { return this; } };
-  return {
-    state: () => ({ view, selected }),
-    page: {
-      locator(selector) {
-        if (selector === '[data-model-id]') return collection([]);
-        if (selector === '[role="menu"]') return menu;
-        if (selector.includes('data-codex-intelligence-trigger') && selector.includes('aria-haspopup')) return trigger;
-        if (selector.includes('data-model-picker-view-toggle')) return toggle;
-        throw new Error('Unrecognized structural selector');
-      },
-      getByRole(role) {
-        if (role === 'button') return collection([]);
-        if (role === 'menuitemradio') return collection(view === 'models' ? entries : []);
-        throw new Error('Unexpected role');
-      },
-      keyboard: { press: async key => { assert.equal(key, 'Escape'); view = 'closed'; } },
-    },
-  };
-}
-
-test('picker refuses two visible entries sharing a first-line title', async () => {
-  const fixture = visibilityFixture([
-    { text: 'GPT-6\nFirst rendering', visible: true },
-    { text: 'GPT-6\nSecond rendering', visible: true },
-  ]);
-  await assert.rejects(TurnDriver.prototype.selectModel.call({}, fixture.page, 'gpt-6'), error => error.code === 'pageShape');
-  assert.deepEqual(fixture.state(), { view: 'closed', selected: undefined });
-});
-
-test('picker ignores entries the visibility filter excludes', async () => {
-  const fixture = visibilityFixture([
-    { text: 'GPT-6', visible: true },
-    { text: 'GPT-6\nHidden duplicate', visible: false },
-  ]);
-  await TurnDriver.prototype.selectModel.call({}, fixture.page, 'gpt-6');
-  assert.deepEqual(fixture.state(), { view: 'closed', selected: 'GPT-6' });
+test('model selection identifies only the requested model', async t => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    const cases = [
+      ['attribute', { rows: [{ slug: 'new-model', title: 'New model' }] }, 'new-model', undefined, 'new-model'],
+      ['title fallback', { rows: [{ title: 'GPT-6' }] }, 'gpt-6', undefined, 'GPT-6'],
+      ['unmapped title', { rows: [{ title: 'Unknown' }] }, 'unknown', 'model-not-offered'],
+      ['own duplicate', { rows: [{ slug: 'gpt-6', title: 'One' }, { slug: 'gpt-6', title: 'Two' }] }, 'gpt-6', 'picker-ambiguous'],
+      ['unrelated duplicate titles', { rows: [{ slug: 'gpt-6', title: 'Shared' }, { slug: 'other', title: 'Shared' }] }, 'gpt-6', undefined, 'gpt-6'],
+      ['attribute beats title', { rows: [{ title: 'GPT-6' }, { slug: 'gpt-6', title: 'Different' }] }, 'gpt-6', undefined, 'gpt-6'],
+      ['hidden duplicate', { rows: [{ slug: 'gpt-6', title: 'One' }, { slug: 'gpt-6', title: 'Two', hidden: true }] }, 'gpt-6', undefined, 'gpt-6'],
+      ['ambiguous fallback', { rows: [{ title: 'GPT-6' }, { title: 'GPT-6' }] }, 'gpt-6', 'picker-ambiguous'],
+      ['auto', { picker: 'missing' }, 'auto', undefined, undefined],
+      ['direct rows', { picker: 'direct' }, 'gpt-6', undefined, 'gpt-6'],
+    ];
+    for (const [name, options, slug, kind, selected] of cases) await t.test(name, async () => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(siteAdapterHtml(options));
+        const result = await selectModel(page, slug);
+        assert.equal(result.kind, kind);
+        assert.equal(result.ok, !kind);
+        assert.equal(await page.evaluate(() => window.selected), selected);
+      } finally { await page.close(); }
+    });
+  } finally { await browser.close(); }
 });

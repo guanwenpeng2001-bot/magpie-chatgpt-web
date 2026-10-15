@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TurnDriver } from '../backend/turn.mjs';
+import { selectModel } from '../backend/site-adapter/index.mjs';
 
 // Captured structural attributes; the delayed replacement models the view transition.
 function pickerHtml(mode) {
@@ -63,25 +63,23 @@ test('picker view transitions in an offline browser', async t => {
       try {
         const started = Date.now();
         await page.setContent(pickerHtml(mode));
-        let failure;
-        try { await TurnDriver.prototype.selectModel(page, 'gpt-6'); } catch (error) { failure = error; }
+        const result = await selectModel(page, 'gpt-6');
         const state = await page.evaluate(() => ({ selected: window.selected, toggleClicks: window.toggleClicks }));
-        console.log(JSON.stringify({ mode, code: failure?.code, milliseconds: Date.now() - started, ...state }));
-        if (mode === 'ambiguous' || mode === 'two-triggers') { assert.equal(failure?.code, 'pageShape'); assert.equal(state.selected, undefined); }
-        else { assert.equal(failure?.code, undefined); assert.equal(state.selected, 'GPT-6'); }
+        console.log(JSON.stringify({ mode, kind: result.kind, milliseconds: Date.now() - started, ...state }));
+        if (mode === 'ambiguous') { assert.equal(result.kind, 'picker-ambiguous'); assert.equal(state.selected, undefined); }
+        else { assert.equal(result.ok, true); assert.equal(state.selected, 'GPT-6'); }
         assert.equal(state.toggleClicks, ['delayed', 'slow-menu'].includes(mode) ? 1 : 0);
       } finally { await page.close(); }
     });
-    await t.test('never-trigger fails bounded with pageShape', async () => {
+    await t.test('never-trigger fails bounded with picker-missing', async () => {
       const page = await context.newPage();
       try {
         const started = Date.now();
         await page.setContent(pickerHtml('never-trigger'));
-        let failure;
-        try { await TurnDriver.prototype.selectModel(page, 'gpt-6'); } catch (error) { failure = error; }
+        const result = await selectModel(page, 'gpt-6');
         const milliseconds = Date.now() - started;
-        console.log(JSON.stringify({ mode: 'never-trigger', code: failure?.code, milliseconds }));
-        assert.equal(failure?.code, 'pageShape');
+        console.log(JSON.stringify({ mode: 'never-trigger', kind: result.kind, milliseconds }));
+        assert.equal(result.kind, 'picker-missing');
         assert.ok(milliseconds >= 7000 && milliseconds < 15000, `bounded wait took ${milliseconds} ms`);
       } finally { await page.close(); }
     });

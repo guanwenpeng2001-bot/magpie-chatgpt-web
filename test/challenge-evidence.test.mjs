@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { installHarvest } from '../backend/harvest.mjs';
-import { TurnDriver } from '../backend/turn.mjs';
-import { AccountGuard } from '../backend/guard.mjs';
+import { chromium } from 'playwright-core';
+import { probePageError } from '../backend/site-adapter/index.mjs';
+import { siteAdapterHtml } from '../integrations/turn-fixture.mjs';
 
 function harvest({ status = 403, headers = {}, body = '', responseType = '' } = {}) {
   const events = [];
@@ -42,17 +43,20 @@ test('XHR ignores responses from a previous turn', async () => {
   fixture.xhr.fire('load'); fixture.xhr.fire('error'); await fixture.flush();
   assert.deepEqual(fixture.events, []);
 });
-function page({ card = false, script = false } = {}) {
-  const document = { title: 'Garden conversation', querySelector: () => null, querySelectorAll(selector) {
-    if (selector === 'script[src]') return script ? [{ src: 'http://127.0.0.1/cdn-cgi/challenge-platform/scripts/jsd/api.js' }] : [];
-    if (selector.includes('data-message-author-role')) return card ? [{ innerText: 'cloudflare_challenge\nRetry' }] : [];
-    return [];
-  } };
-  return { evaluate: callback => runInNewContext(`(${callback.toString()})()`, { document, URL }) };
-}
-test('pageError detects the challenge card independently', async () => {
-  await assert.rejects(TurnDriver.prototype.pageError(page({ card: true, script: true }), new AccountGuard()), { code: 'verification' });
-});
-test('pageError ignores the challenge-platform script on a healthy page', async () => {
-  await TurnDriver.prototype.pageError(page({ script: true }), new AccountGuard());
+test('page probes prioritize challenge and ignore passive scripts', async t => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    for (const challenge of ['iframe', 'title']) await t.test(challenge, async () => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(siteAdapterHtml({ challenge, rate: 'Usage limit', signIn: true }));
+        assert.equal((await probePageError(page)).kind, 'challenge');
+      } finally { await page.close(); }
+    });
+    const page = await browser.newPage();
+    await page.setContent('<textarea></textarea><script src="data:text/javascript,//cdn-cgi/challenge-platform/"></script>');
+    assert.equal(await probePageError(page), null);
+    await page.evaluate(() => { const card = document.createElement('div'); card.setAttribute('role', 'alert'); card.style.whiteSpace = 'pre-wrap'; card.textContent = 'cloudflare_challenge\nRetry'; document.body.append(card); });
+    assert.equal((await probePageError(page)).evidence, 'challenge-card');
+  } finally { await browser.close(); }
 });

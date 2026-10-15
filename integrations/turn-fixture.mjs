@@ -14,7 +14,40 @@ export const handoffFrames = [
   { event: '', data: { type: 'stream_handoff', conversation_id: '6acd141c-6b40-83e9-a915-fbdf180e0a3d', turn_exchange_id: '24373ad2-694f-4cfe-bebb-d25be8bcef56', options: [{ type: 'resume_sse_endpoint', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }, { type: 'subscribe_ws_topic', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }] } },
 ];
 
-export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
+export function siteAdapterHtml({ picker = 'single', rows = [{ slug: 'gpt-6', title: 'GPT-6' }], composer = 'textarea', temporary = true, challenge, rate, signIn = false, images = false, rejectImage = false, layout, complete = false } = {}) {
+  const escape = value => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const trigger = '<button data-codex-intelligence-trigger="true" aria-haspopup="menu" data-composer-navigation-target="reasoning">Choose model</button>';
+  const entries = rows.map(row => `<div role="menuitemradio" ${row.slug ? `data-model-id="${escape(row.slug)}"` : ''} ${row.hidden ? 'hidden' : ''}>${escape(row.title)}</div>`).join('');
+  const answer = layout === 'current' ? `<div data-turn-key="fixture"><div data-talvt-turn-state="${complete ? 'complete' : 'in_progress'}"><div data-content-search-unit-key="fixture:assistant">Answer</div></div></div>`
+    : layout === 'legacy' ? `<article data-message-status="${complete ? 'finished_successfully' : 'in_progress'}"><div data-message-author-role="assistant">Answer</div></article>` : '';
+  return `<!doctype html><html><head><title>${challenge === 'title' ? 'Just a moment' : 'Adapter fixture'}</title></head><body>
+    ${temporary ? '<span data-testid="temporary-chat-indicator">Temporary chat</span>' : ''}
+    ${composer === 'textarea' ? '<textarea aria-label="Message"></textarea>' : composer === 'editable' ? '<div id="prompt-textarea" contenteditable="true" role="textbox"></div>' : ''}
+    ${picker === 'missing' || picker === 'direct' ? '' : (picker === 'hidden-first' ? `<div hidden>${trigger}</div>` : '') + trigger + (picker === 'duplicate' ? trigger : '')}
+    <div role="menu">${picker === 'direct' ? entries : ''}</div>
+    ${challenge === 'iframe' ? '<iframe title="Verification challenge" src="about:blank"></iframe>' : ''}
+    ${rate ? `<div role="dialog">${escape(rate)}</div>` : ''}${signIn ? '<button>Log in</button>' : ''}
+    ${images ? '<input type="file" multiple accept="image/*">' : ''}${answer}
+    <script>
+      const entries = ${JSON.stringify(entries).replaceAll('<', '\\u003c')};
+      const menu = document.querySelector('[role="menu"]');
+      const bind = () => { for (const row of menu.children) row.onclick = () => { window.selected = row.getAttribute('data-model-id') || row.textContent; }; };
+      const render = () => { menu.innerHTML = entries; bind(); };
+      for (const trigger of document.querySelectorAll('[data-codex-intelligence-trigger]')) trigger.onclick = () => {
+        if (${JSON.stringify(picker)} === 'toggle') {
+          menu.innerHTML = '<div role="menuitem" data-model-picker-view-toggle="true">Models</div>';
+          menu.firstChild.onclick = () => { menu.replaceChildren(); setTimeout(render, 100); };
+        } else render();
+      };
+      bind();
+      document.querySelector('input')?.addEventListener('change', () => {
+        window.uploaded = [...document.querySelector('input').files].map(file => ({ name: file.name, type: file.type, size: file.size }));
+        if (${rejectImage}) { const alert = document.createElement('div'); alert.setAttribute('role', 'alert'); alert.textContent = 'Image upload failed'; document.body.append(alert); }
+      });
+    </script></body></html>`;
+}
+
+export async function createTurnFixture({ interval = 450, stall = 0, siteAdapter } = {}) {
   const requests = [];
   let mode = 'normal';
   const batches = ['A floating garden rises above the water. ', 'Its silver leaves collect the morning rain. ', 'A narrow path leads back to the quiet shore.'];
@@ -65,6 +98,7 @@ export async function createTurnFixture({ interval = 450, stall = 0 } = {}) {
     }
     if (url.pathname.startsWith('/cdn-cgi/challenge-platform/')) { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end('// Offline challenge marker; no challenge execution.'); return; }
     response.setHeader('content-type', 'text/html');
+    if (siteAdapter) { response.end(siteAdapterHtml(siteAdapter)); return; }
     response.end(`<!doctype html><html><head><meta charset="utf-8"><title>Local chat fixture</title></head><body>
       <button aria-label="Open profile menu">Fixture account</button><p>Temporary chat</p>
       <main id="messages"></main><textarea aria-label="Message"></textarea>
