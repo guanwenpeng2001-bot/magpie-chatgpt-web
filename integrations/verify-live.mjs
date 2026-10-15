@@ -212,16 +212,16 @@ const turnDriver = new TurnDriver({profileRoot:${JSON.stringify(root)},...${JSON
 }});
 const TURN_ONLY = ${turnOnly};
 const loginFlow = TURN_ONLY ? async (account,signal) => ({state:'signed-in',credential:sessionCredential({accessToken:'seeded-credential-not-used-by-browser-turns',expires:new Date(Date.now()+7*86400000).toISOString(),user:{}},refresh,account)}) : async (account,signal) => {
- const client=productionReadClient({cookie:refresh,browserRoute:async(path,bounded,origin)=>{
-  reserve('browser-read-attempt',path);
-  return turnDriver.browser.run(account,async context=>{
-   const page=await context.newPage();
-   try {await page.goto(origin.href,{waitUntil:'domcontentloaded',timeout:20000});return await browserRead(context,page,path,origin,bounded);}
-   finally {await page.close().catch(()=>{});}
-  },bounded);
- }});
- const session=await client.session(signal);
- return {state:'signed-in',credential:sessionCredential(session,session.refresh??refresh,account)};
+ reserve('browser-read-attempt','/api/auth/session');
+ const session=await turnDriver.browser.run(account,async context=>{
+  const page=await context.newPage();
+  try {
+   const origin=new URL('https://chatgpt.com');
+   await page.goto(origin.href,{waitUntil:'domcontentloaded',timeout:20000});
+   return await browserRead(context,page,'/api/auth/session',origin,signal);
+  } finally {await page.close().catch(()=>{});}
+ },signal,{visibleTurns:true});
+ return {state:'signed-in',credential:sessionCredential(session.value,session.cookies??refresh,account)};
 };
 await serve(process.stdin,process.stdout,{loginFlow,turnDriver,readClient:options=>productionReadClient({...options,browserRoute:async(...args)=>{
  reserve('browser-read-attempt',args[0]);return options.browserRoute(...args);
@@ -285,7 +285,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
 `);
     const hostCopy = join(sandbox, 'live-host.mjs');
     const liveHost = await resolveLiveHost({ liveHome });
-    facts.host = { filename: liveHost.filename, sha256: liveHost.sha256, selection: 'process-table', bun: basename(bun) };
+    facts.host = { path: liveHost.path, filename: liveHost.filename, sha256: liveHost.sha256, selection: 'process-table', bun: basename(bun) };
     await copyFile(liveHost.path, hostCopy);
     const copiedSha256 = createHash('sha256').update(await readFile(hostCopy)).digest('hex');
     if (copiedSha256 !== liveHost.sha256) throw new Error(`The copied live host ${hostCopy} does not match the verified bundle (${copiedSha256} != ${liveHost.sha256}); refusing to spawn unverified bytes.`);
@@ -331,6 +331,7 @@ export default {id:'chatgpt-web',server:async()=>hooks};
       return 'unknown';
     };
     const authorization = await rpc('authorize', { provider: 'chatgpt-web', method: 0 });
+    if (authorization.url !== '' || authorization.method !== 'auto' || !authorization.instructions) throw new Error('Host authorize did not return the browser sign-in instructions');
     console.log(turnOnly ? 'turn-only attempt: no-network credential exchange; no sign-in or session read; host catalogue reads remain accounted' : 'existing session exchange started; no interactive sign-in or retained profile');
     const login = await rpc('callback', { session: authorization.session });
     if (!login.ok) throw new Error('Seeded credential exchange failed; no live turn submitted');

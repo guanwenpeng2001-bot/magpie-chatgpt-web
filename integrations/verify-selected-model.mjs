@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { TurnDriver } from '../backend/turn.mjs';
 import { launchSignInBrowser } from '../backend/browser.mjs';
 import { AccountGuard } from '../backend/guard.mjs';
-import { prepare } from '../src/protocol.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
 import { observeAnswer } from './observe-answer.mjs';
 
 if (!process.argv.includes('--authorized-single-turn') || !process.env.CHATGPT_WEB_SMOKE_PROFILE || !process.env.CHATGPT_WEB_SMOKE_OUTPUT) throw new Error('Explicit single-turn authorization, profile and evidence path required');

@@ -124,6 +124,6 @@ export async function completionState(page) {
     const state = s.legacyAttributes.map(attribute => stateNode?.getAttribute(attribute)).find(Boolean);
     return { complete: !!answer && s.legacyComplete.includes(state) && !stop, layout: 'legacy', signal: state ?? 'pending' };
   }, shape);
-  console.debug(JSON.stringify({ event: 'site-adapter-completion', adapterVersion: ADAPTER_VERSION, ...result }));
+  console.error(JSON.stringify({ event: 'site-adapter-completion', adapterVersion: ADAPTER_VERSION, ...result }));
   return result;
 }

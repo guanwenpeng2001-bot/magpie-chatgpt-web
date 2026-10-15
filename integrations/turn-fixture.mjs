@@ -187,7 +187,7 @@ export async function createTurnFixture({ interval = 450, stall = 0, siteAdapter
             const item = JSON.parse(data);
             if (Array.isArray(item.v)) for (const operation of item.v) {
               if (operation.p === '/message/content/parts/0') answer.textContent += operation.v;
-              if (operation.p === '/message/status') completed = true;
+              if (operation.p === '/message/status') { completed = true; if (mode !== 'hidden') article.setAttribute('data-message-status', 'finished_successfully'); }
             }
           }
         }
