@@ -102,12 +102,15 @@ export class TurnDriver {
       this.bindings.finish(binding, command, result.text);
       return result;
     } catch (error) {
+      let failure = error;
+      if (!(failure instanceof BackendError)) {
+        if (activeSignal.aborted) failure = activeSignal.reason instanceof BackendError ? activeSignal.reason : new BackendError('upstream');
+        else if (error?.message === 'An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.') failure = new BackendError('invalidRequest');
+        else failure = new BackendError('upstream');
+      }
       await closePage();
       if (binding) await this.bindings.failed(binding);
-      if (activeSignal.aborted) throw activeSignal.reason instanceof BackendError ? activeSignal.reason : new BackendError('upstream');
-      if (error instanceof BackendError) throw error;
-      if (error?.message === 'An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.') throw new BackendError('invalidRequest');
-      throw new BackendError('upstream');
+      throw failure;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', forwardAbort);

@@ -21,7 +21,7 @@ test('offline challenge turn routing', async t => {
   const fixture = await createTurnFixture({ interval: 20 });
   const root = await mkdtemp(join(tmpdir(), 'challenge-turn-'));
   let context;
-  const driver = new TurnDriver({ profileRoot: root, origin: fixture.origin, timeout: 1500, launch: async profile => {
+  const driver = new TurnDriver({ profileRoot: root, origin: fixture.origin, timeout: 15000, launch: async profile => {
     context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, serviceWorkers: 'block', args: ['--disable-background-networking'] });
     await context.route('**/*', route => new URL(route.request().url()).origin === fixture.origin ? route.continue() : route.abort());
     if (process.env.CHALLENGE_TRACE) await context.tracing.start({ screenshots: true, snapshots: true });

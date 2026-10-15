@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { TurnDriver } from '../backend/turn.mjs';
-import { AccountGuard } from '../backend/guard.mjs';
+import { AccountGuard, BackendError } from '../backend/guard.mjs';
+import { translate } from '../src/wire/translate.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { AnswerStream } from '../src/wire/translate.mjs';
 import { siteAdapterHtml } from '../integrations/turn-fixture.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -125,6 +127,48 @@ for (const [kind, code] of [['challenge', 'verification'], ['rate-limit', 'coold
     if (kind === 'sign-in') await assert.rejects(accountGuard.begin(), { code: 'expired' });
     if (kind === 'rate-limit') await assert.rejects(accountGuard.begin(), { code: 'cooldown' });
   } finally { await h.driver.close(); }
+});
+
+for (const [kind, code] of [['challenge', 'verification'], ['rate-limit', 'cooldown'], ['sign-in', 'expired']]) test(`page ${kind} classification survives deadline during slow teardown`, async () => {
+  const h = harness({ timeout: 120, adapter: { probePageError: async page => {
+    const close = page.close.bind(page);
+    page.close = async () => { await delay(200); await close(); };
+    return { kind };
+  } } });
+  try {
+    await assert.rejects(h.complete(command({ conversationKey: 'classified' })), { code });
+    assert.equal(h.pages[0].isClosed(), true);
+    assert.equal(h.driver.bindings.entries.size, 0);
+    assert.equal(h.calls.includes('submit'), false);
+  } finally { await h.driver.close(); }
+});
+
+test('cooldown retryAfter survives slow teardown through bridge and translation', async () => {
+  const h = harness({ timeout: 120, observe: async page => {
+    const close = page.close.bind(page);
+    page.close = async () => { await delay(200); await close(); };
+    throw new BackendError('cooldown', { retryAfter: 120 });
+  } });
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill() { this.stdin.end(); } });
+  let server;
+  const bridge = new Bridge({ spawnProcess: () => {
+    server = serve(child.stdin, child.stdout, { handlers: { complete: (request, signal, emit) => h.driver.complete(request, guard(), 'fixture', signal, emit) } });
+    server.finally(() => child.emit('exit', 0));
+    return child;
+  } });
+  try {
+    const source = await bridge.open({ ...command(), method: 'complete' });
+    await assert.rejects(async () => {
+      for await (const event of translate(source, command())) {}
+    }, error => {
+      assert.ok(error instanceof BackendError);
+      assert.equal(error.code, 'cooldown');
+      assert.equal(error.retryAfter, '120');
+      assert.equal(error.toJSON().retryAfter, '120');
+      assert.equal(error.headers['retry-after'], '120');
+      return true;
+    });
+  } finally { await bridge.dispose(); await server; await h.driver.close(); }
 });
 
 test('unconfirmed temporary chat prevents submission', async () => {
