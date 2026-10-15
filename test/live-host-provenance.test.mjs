@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { Bridge } from '../src/bridge.mjs';
 import { resolveLiveHost, hostBundlesFromCommandLines } from '../integrations/verify-live.mjs';
 
 const pluginHostDir = root => join(root, '.cache', 'magpie', 'plugin-host');
@@ -78,6 +79,32 @@ test('several distinct running hosts are refused as ambiguous', async t => {
       `magpie-bun.exe run C:\\x\\.cache\\magpie\\plugin-host\\${second.filename}`,
     ],
   }), /[Aa]mbiguous live host/);
+});
+
+test('real child completion diagnostics preserve the protocol channel', async t => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'completion-protocol-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const child = join(root, 'backend.mjs');
+  const main = new URL('../backend/main.mjs', import.meta.url).href;
+  const adapter = new URL('../backend/site-adapter/index.mjs', import.meta.url).href;
+  await fs.writeFile(child, `import { serve } from ${JSON.stringify(main)};
+import { completionState } from ${JSON.stringify(adapter)};
+await serve(process.stdin, process.stdout, { turnDriver: {
+  async complete(command, guard, identity, signal, emit) {
+    await completionState({ evaluate: async () => ({ complete: true, layout: 'legacy', signal: 'finished_successfully' }) });
+    await emit({ type: 'delta', index: 0, text: 'verified' });
+    await emit({ type: 'finish', reason: 'complete' });
+    return { route: 'dom' };
+  }, async close() {}
+} });`);
+  const bridge = new Bridge({ backend: child });
+  try {
+    const stream = await bridge.open({ method: 'complete', origin: 'http://127.0.0.1', model: 'auto', history: [{ role: 'user', content: 'fixture' }], auth: { profile: 'fixture', refresh: '__Secure-next-auth.session-token=fixture' } });
+    const frames = [];
+    for await (const frame of stream) frames.push(frame);
+    assert.deepEqual(frames.map(frame => frame.type), ['delta', 'finish']);
+    assert.equal(frames[0].text, 'verified');
+  } finally { await bridge.dispose(); }
 });
 
 test('the live path carries no hardcoded host bundle name', async () => {

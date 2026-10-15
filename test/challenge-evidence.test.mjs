@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { installHarvest } from '../backend/harvest.mjs';
 import { probePageError } from '../backend/site-adapter/index.mjs';
+import { observeTurn } from '../backend/observe.mjs';
+import { AccountGuard } from '../backend/guard.mjs';
 import { siteAdapterHtml } from '../integrations/turn-fixture.mjs';
 
 function harvest({ status = 403, headers = {}, body = '', responseType = '' } = {}) {
@@ -42,6 +44,19 @@ test('XHR ignores responses from a previous turn', async () => {
   fixture.xhr.fire('load'); fixture.xhr.fire('error'); await fixture.flush();
   assert.deepEqual(fixture.events, []);
 });
+for (const responseType of ['', 'json']) test('harvested XHR challenge reaches observeTurn as verification: ' + responseType, async () => {
+  const fixture = harvest({ headers: { 'cf-mitigated': 'challenge' }, responseType });
+  fixture.xhr.fire('load');
+  await fixture.flush();
+  const guard = new AccountGuard();
+  await assert.rejects(observeTurn({ isClosed: () => false }, {
+    run: { id: 'first', queue: fixture.events },
+    adapter: { probePageError: async () => null },
+    guard, budget: 1000, signal: new AbortController().signal, emit: async () => {},
+  }), error => error.code === 'verification' && error.status === 502);
+  (await guard.begin())();
+});
+
 test('page probes prioritize challenge and ignore passive scripts', async t => {
   let chromium;
   try { ({ chromium } = await import('playwright-core')); }

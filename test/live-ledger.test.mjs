@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CONVERSATION_SUBMIT_PATTERN, LiveLedger } from '../integrations/verify-live.mjs';
+import { readFile } from 'node:fs/promises';
+
+test('live sign-in uses the browser session contract and auto authorize instructions', async () => {
+  const source = await readFile(new URL('../integrations/verify-live.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /interactive\s*:\s*true/);
+  assert.match(source, /sessionCredential\(session\.value,session\.cookies\?\?refresh,account\)/);
+  assert.match(source, /authorization\.method !== 'auto'/);
+  assert.match(source, /!authorization\.instructions/);
+});
 
 test('conversation submit paths are classified exactly, preparation paths are not', () => {
   assert.equal(CONVERSATION_SUBMIT_PATTERN.test('/backend-api/conversation'), true);
