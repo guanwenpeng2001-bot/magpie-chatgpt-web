@@ -132,7 +132,7 @@ for (const network of [false, true]) test(`present DOM ${network ? 'handoff' : '
   const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: 'User instruction must not escape' }] });
   const frames = [];
   try {
-    await assert.doesNotReject(driver.complete({ ...prepared, auth: { profile: 'fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame)));
+    await assert.doesNotReject(driver.complete({ ...prepared, auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame)));
     assert.deepEqual(frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
     assert.equal(frames.at(-1).type, 'finish');
     const chunks = [];

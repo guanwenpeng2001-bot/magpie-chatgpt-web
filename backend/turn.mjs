@@ -94,7 +94,7 @@ export class TurnDriver {
         activeSignal.throwIfAborted();
         await wait(composer.press('Enter'));
         return await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: async () => {} }));
-      }, activeSignal, { visibleTurns: command.visibleTurns }));
+      }, activeSignal, { visibleTurns: command.visibleTurns, auth: command.auth, origin: this.origin }));
       activeSignal.throwIfAborted();
       await wait(emit({ type: 'delta', index: 0, text: result.text }));
       await wait(emit({ type: 'finish', reason: 'complete' }));

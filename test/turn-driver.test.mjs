@@ -14,13 +14,14 @@ import { PassThrough } from 'node:stream';
 import { Bridge } from '../src/bridge.mjs';
 import { serve } from '../backend/main.mjs';
 
-const command = (extra = {}) => ({ auth: { profile: 'fixture' }, model: 'auto', history: [{ role: 'user', content: 'first' }], ...extra });
+const command = (extra = {}) => ({ auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' }, model: 'auto', history: [{ role: 'user', content: 'first' }], ...extra });
 const guard = () => new AccountGuard({ sleep: async () => {} });
 function harness(options = {}) {
   const calls = [];
   const pages = [];
   const context = Object.assign(new EventEmitter(), {
     pages: () => pages,
+    cookies: async () => [{ name: 'next-auth.session-token', value: 'fixture' }],
     exposeBinding: async () => {}, addInitScript: async () => {},
     async newPage() {
       const page = {
