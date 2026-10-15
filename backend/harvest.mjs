@@ -23,16 +23,17 @@ export function installHarvest() {
       active = undefined;
       for (const reader of run?.readers ?? []) reader.cancel().catch(() => {});
     },
-    snapshot() {
-      const present = [...document.querySelectorAll(assistantSelector)].filter(node => !active?.baseline.has(node));
-      const nodes = present.length ? present : [...document.querySelectorAll(legacySelector)].filter(node => !active?.baseline.has(node));
+    snapshot(layout) {
+      const present = layout === 'legacy' ? [] : [...document.querySelectorAll(assistantSelector)].filter(node => !active?.baseline.has(node));
+      const current = layout === 'current' || (layout === undefined && present.length > 0);
+      const nodes = current ? present : [...document.querySelectorAll(legacySelector)].filter(node => !active?.baseline.has(node));
       const node = nodes.at(-1);
       const stop = !!document.querySelector('main button[aria-label="停止"]') || [...document.querySelectorAll('button')].some(button => /stop (generating|streaming)|停止生成|停止流式传输/i.test(button.getAttribute('aria-label') ?? button.textContent));
-      const answer = present.length ? node.querySelector(':scope > [data-conversation-role="assistant"] + div') : node;
-      const finished = present.length
+      const answer = current ? node?.querySelector(':scope > [data-conversation-role="assistant"] + div') : node;
+      const finished = current
         ? !!answer && node.closest('[data-talvt-turn-state]')?.getAttribute('data-talvt-turn-state') === 'complete' && !stop
         : !!node && [...(node.closest('article') ?? node.parentElement ?? node).querySelectorAll('button')].some(button => /copy|复制|read aloud|朗读/i.test(button.getAttribute('aria-label') ?? button.textContent));
-      return { text: answer?.innerText ?? '', stop, finished, failed: active?.failed ?? false, nodes: nodes.length };
+      return { text: answer?.innerText ?? '', stop, finished, failed: active?.failed ?? false, nodes: nodes.length, layout: current ? 'current' : 'legacy' };
     },
   };
   const conversation = input => {
@@ -64,7 +65,7 @@ export function installHarvest() {
           if (data.length) send({ kind: 'frame', frame: { event, data: data.join('\n') } });
         }
         if (buffer.length > 4 * 1024 * 1024) { send({ kind: 'failure', code: 'protocol' }); break; }
-        if (done) { send({ kind: 'eof', partial: !!buffer.trim() }); break; }
+        if (done) { send({ kind: 'eof', partial: buffer.length > 0 }); break; }
         await run.pending;
       }
     } catch (error) { if (active === run) send({ kind: 'failure', code: 'harvest', cause: describeCause(error) }); }
