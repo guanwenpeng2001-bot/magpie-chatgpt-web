@@ -42,7 +42,7 @@ export class ReadClient {
     this.timeout = timeout;
     this.browserRoute = browserRoute;
   }
-  async #read(path, signal, receiveCookies = () => {}) {
+  async #read(path, signal, receiveCookies = () => {}, { browserFallback = true } = {}) {
     const transport = this.origin.protocol === 'https:' ? https : http;
     const budget = AbortSignal.timeout(this.timeout);
     const bounded = AbortSignal.any([budget, ...(signal ? [signal] : [])]);
@@ -86,7 +86,7 @@ export class ReadClient {
         request.on('error', () => reject(new BackendError('upstream')));
       });
     } catch (error) {
-      if (error instanceof BackendError && error.code === 'verification' && this.browserRoute && !bounded.aborted) {
+      if (error instanceof BackendError && error.code === 'verification' && browserFallback && this.browserRoute && !bounded.aborted) {
         const fallbackBudget = AbortSignal.timeout(this.timeout);
         const fallbackSignal = AbortSignal.any([fallbackBudget, ...(signal ? [signal] : [])]);
         let abort;
@@ -128,11 +128,14 @@ export class ReadClient {
       return structuredClone(value);
     } finally { release(); }
   }
-  async session(signal) {
-    const release = await this.guard.begin(signal);
+  async session(signal, { interactive = false } = {}) {
+    const budget = interactive ? undefined : AbortSignal.timeout(Math.min(this.timeout, 10_000));
+    const bounded = budget ? AbortSignal.any([budget, ...(signal ? [signal] : [])]) : signal;
+    let release;
     try {
+      release = await this.guard.begin(bounded);
       let rotations = [];
-      const value = await this.#read('/api/auth/session', signal, cookies => { rotations = cookies; });
+      const value = await this.#read('/api/auth/session', bounded, cookies => { rotations = cookies; }, { browserFallback: interactive });
       if (typeof value?.accessToken !== 'string' || !value.accessToken.trim()) {
         this.guard.observe(401);
         throw new BackendError('expired');
@@ -162,6 +165,9 @@ export class ReadClient {
       if (changed) this.#cookie = refresh;
       delete value.refresh;
       return { ...value, ...(this.#cookie !== this.#storedCookie ? { refresh: this.#cookie } : {}) };
-    } finally { release(); }
+    } catch (error) {
+      if (budget?.aborted && !signal?.aborted) throw new BackendError('requestBudget');
+      throw error instanceof BackendError ? error : new BackendError('upstream');
+    } finally { release?.(); }
   }
 }
