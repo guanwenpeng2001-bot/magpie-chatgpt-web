@@ -6,6 +6,31 @@ import { randomUUID } from 'node:crypto';
 
 const module = await import('../backend/http.mjs');
 
+test('refresh challenge is transient and never opens the browser route', async t => {
+  let challenged = true;
+  let fallbacks = 0;
+  const evidence = { user: { email: 'fixture@example.invalid' }, account: { planType: 'plus' } };
+  const server = createServer((request, response) => {
+    if (challenged) {
+      response.writeHead(403, { 'cf-mitigated': 'challenge' });
+      response.end();
+    } else response.end(JSON.stringify({ accessToken: 'fixture-token', ...evidence }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const { AccountGuard } = await import('../backend/guard.mjs');
+  const client = new module.ReadClient({
+    origin: 'http://127.0.0.1:' + server.address().port, cookie: 'fixture=value',
+    guard: new AccountGuard({ sleep: async () => {} }),
+    browserRoute: async () => { fallbacks++; return { value: { accessToken: 'fallback' }, cookies: 'next-auth.session-token=fallback' }; },
+  });
+  await assert.rejects(client.session(), error => error.code === 'verification' && error.signIn === undefined);
+  assert.equal(fallbacks, 0);
+  challenged = false;
+  assert.deepEqual(await client.session(), { accessToken: 'fixture-token', ...evidence });
+});
+
 test('external origins are rejected before opening any socket', () => {
   assert.throws(() => new module.ReadClient({ origin: 'https://chatgpt.com', cookie: randomUUID() }), error => error.status === 502);
 });
@@ -107,7 +132,7 @@ test('classification keys on the interstitial evidence, not the status code alon
       t.after(() => server.close());
       const guard = new AccountGuard({ sleep: async () => {} });
       const client = new module.ReadClient({ origin: `http://127.0.0.1:${server.address().port}`, cookie: `fixture=${randomUUID()}`, guard });
-      await assert.rejects(client.models(), error => {
+      await assert.rejects(client.session(), error => {
         assert.ok(error instanceof BackendError);
         assert.equal(error.code, expected, `expected ${expected}, got ${error.code} (${error.message})`);
         if (expected === 'verification') {
@@ -215,14 +240,14 @@ test('a browser-routed session read folds rotated session-token chunks and nothi
     origin: `http://127.0.0.1:${server.address().port}`, cookie: `next-auth.session-token.0=${stale}; next-auth.session-token.1=${stale}; keep=${retained}`,
     browserRoute: route,
   });
-  const session = await client.session();
+  const session = await client.session(undefined, { interactive: true });
   assert.equal(session.accessToken, accessToken);
   assert.equal(session.refresh, `keep=${retained}; next-auth.session-token.0=${fresh}`);
   const unchanged = new module.ReadClient({
     origin: `http://127.0.0.1:${server.address().port}`, cookie: `next-auth.session-token.0=${fresh}`,
     browserRoute: async () => ({ value: { accessToken }, cookies: `next-auth.session-token.0=${fresh}` }),
   });
-  assert.equal((await unchanged.session()).refresh, undefined, 'no rotation means no refresh field');
+  assert.equal((await unchanged.session(undefined, { interactive: true })).refresh, undefined, 'no rotation means no refresh field');
 });
 
 test('a truncated unmarked 403 cannot evade the persistent credential block', async t => {
