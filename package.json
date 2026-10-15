@@ -1,7 +1,7 @@
 {
   "name": "magpie-chatgpt-web",
-  "version": "0.1.0",
-  "description": "Use a ChatGPT web session as a magpie text provider: visible-Chrome sign-in, temporary chats and batched reply streaming.",
+  "version": "0.2.0",
+  "description": "ChatGPT web sessions for magpie: browser sign-in, account-derived models, temporary chats and whole-block replies over an emulated Anthropic wire protocol.",
   "type": "module",
   "main": "./src/index.mjs",
   "exports": "./src/index.mjs",

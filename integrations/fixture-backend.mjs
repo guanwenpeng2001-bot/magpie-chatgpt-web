@@ -43,7 +43,7 @@ const fixture = createServer((request, response) => {
   if (request.url === '/api/auth/session' && reads.browserSessions >= 2) assert.ok(reads.nodeModels > 0 && reads.browserModels > 0 && reads.nodeSessions > 0, 'Node attempts precede browser fallbacks');
   response.setHeader('content-type', 'application/json');
   response.end(JSON.stringify(request.url === '/api/auth/session'
-    ? { accessToken, expires: new Date(Date.now() + 10 * 86400000).toISOString(), user: { email: 'fixture@example.invalid' } }
+    ? { accessToken, expires: new Date(Date.now() + 10 * 86400000).toISOString(), user: { email: 'fixture@localhost' } }
     : { models, default_model_slug: 'auto' }));
 });
 fixture.listen(0, '127.0.0.1');
