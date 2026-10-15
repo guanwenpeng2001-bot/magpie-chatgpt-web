@@ -37,21 +37,20 @@ test('browser launch gate drives launch, idle close and crash relaunch in real C
         assert.equal(context.pages()[0].url(), 'about:blank');
       });
       let crashedContext;
-      let launchesAtCrash;
-      await assert.rejects(supervisor.run('fixture', async context => {
-        crashedContext = context;
-        launchesAtCrash = launches;
-        const session = await context.newCDPSession(context.pages()[0]);
-        await session.send('Browser.crash').catch(() => {});
-        await new Promise(() => {});
-      }));
+      const launchesAtCrash = launches;
+      let attempts = 0;
       await supervisor.run('fixture', async context => {
+        if (++attempts === 1) {
+          crashedContext = context;
+          const session = await context.newCDPSession(context.pages()[0]);
+          await session.send('Browser.crash').catch(() => {});
+          await new Promise(() => {});
+        }
         assert.notEqual(context, crashedContext);
-        assert.ok(launches > launchesAtCrash);
         assert.equal(await context.pages()[0].evaluate(() => location.href), 'about:blank');
       });
-      row.crashRelaunch = launches >= 3;
-    } catch { row.failure = 'Launch or lifecycle assertion failed'; }
+      row.crashRelaunch = attempts === 2 && launches === launchesAtCrash + 1;
+    } catch (error) { row.failure = error.message; }
     finally {
       await supervisor.close();
       await rm(profileRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

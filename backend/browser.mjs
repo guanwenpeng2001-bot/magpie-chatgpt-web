@@ -9,7 +9,7 @@ import { BackendError } from './guard.mjs';
 export class BrowserSupervisor {
   #accounts = new Map();
   #closed = false;
-  constructor({ profileRoot, profile, launch, idleMilliseconds = 900_000, headless = true, channel = 'chrome' } = {}) {
+  constructor({ profileRoot, profile, launch, idleMilliseconds = 300_000, headless = true, channel = 'chrome' } = {}) {
     this.profileRoot = profileRoot;
     this.profile = profile;
     this.idleMilliseconds = idleMilliseconds;
@@ -24,17 +24,24 @@ export class BrowserSupervisor {
       });
     });
   }
-  async #ensure(account) {
+  async #ensure(account, headless) {
     if (this.#closed) throw new BackendError('browserClosed');
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
     if (this.profile !== undefined ? typeof this.profile !== 'string' || !this.profile : typeof this.profileRoot !== 'string' || !this.profileRoot) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
+    if (entry && entry.headless !== headless) {
+      if (entry.users) throw new Error('An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.');
+      await this.closeAccount(account);
+      return this.#ensure(account, headless);
+    }
     if (!entry) {
-      entry = { users: 0, context: null, timer: null, crashed: new Set() };
+      entry = { users: 0, context: null, timer: null, crashed: new Set(), closed: false, stopping: false, headless };
       this.#accounts.set(account, entry);
-      entry.starting = this.launch(this.profile ?? resolve(this.profileRoot, account), this.options).then(async context => {
+      entry.starting = Promise.resolve().then(() => this.launch(this.profile ?? resolve(this.profileRoot, account), { ...this.options, headless })).then(async context => {
         entry.context = context;
+        entry.closed = false;
         context.once('close', () => {
+          entry.closed = true;
           clearTimeout(entry.timer);
           if (this.#accounts.get(account) === entry) this.#accounts.delete(account);
           for (const reject of entry.crashed) reject(new BackendError('browserClosed'));
@@ -55,36 +62,42 @@ export class BrowserSupervisor {
     clearTimeout(entry.timer);
     return entry;
   }
-  async run(account, operation, signal) {
-    signal?.throwIfAborted();
-    const entry = await this.#ensure(account);
-    entry.users++;
-    let rejectCrash;
-    let onAbort;
-    try {
-      const context = await entry.starting;
+  async run(account, operation, signal, { visibleTurns } = {}) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
-      return await Promise.race([
-        new Promise((resolve, reject) => {
-          rejectCrash = reject;
-          entry.crashed.add(reject);
-          onAbort = () => reject(new BackendError('upstream'));
-          signal?.addEventListener('abort', onAbort, { once: true });
-        }),
-        Promise.resolve().then(() => operation(context, signal)),
-      ]);
-    } finally {
-      entry.users--;
-      entry.crashed.delete(rejectCrash);
-      signal?.removeEventListener('abort', onAbort);
-      if (!entry.users && this.#accounts.get(account) === entry && !this.#closed) {
-        entry.timer = setTimeout(() => { this.closeAccount(account).catch(() => {}); }, this.idleMilliseconds);
+      const entry = await this.#ensure(account, visibleTurns === undefined ? this.options.headless : !visibleTurns);
+      entry.users++;
+      let rejectCrash;
+      let onAbort;
+      try {
+        const context = await entry.starting;
+        signal?.throwIfAborted();
+        if (entry.closed) throw new BackendError('browserClosed');
+        return await Promise.race([
+          new Promise((resolve, reject) => {
+            rejectCrash = reject;
+            entry.crashed.add(reject);
+            onAbort = () => reject(signal.reason ?? new BackendError('upstream'));
+            signal?.addEventListener('abort', onAbort, { once: true });
+          }),
+          Promise.resolve().then(() => operation(context, signal)),
+        ]);
+      } catch (error) {
+        if (attempt || !entry.closed || entry.stopping || this.#closed || signal?.aborted) throw error;
+      } finally {
+        entry.users--;
+        entry.crashed.delete(rejectCrash);
+        signal?.removeEventListener('abort', onAbort);
+        if (!entry.users && this.#accounts.get(account) === entry && !this.#closed) {
+          entry.timer = setTimeout(() => { this.closeAccount(account).catch(() => {}); }, this.idleMilliseconds);
+        }
       }
     }
   }
   async closeAccount(account) {
     const entry = this.#accounts.get(account);
     if (!entry) return;
+    entry.stopping = true;
     this.#accounts.delete(account);
     clearTimeout(entry.timer);
     const context = await entry.starting.catch(() => null);
@@ -102,15 +115,30 @@ export class LoginStates {
   finish(account, state, credential, error) {
     if (state === 'signed-in') this.#states.set(account, { state, credential });
     else if (state === 'cancelled') this.#states.set(account, { state });
-    else this.#states.set(account, { state: 'failed', reason: error instanceof BackendError ? error.toJSON().message : new BackendError('backendDown').message });
+    else this.#states.set(account, { state: state === 'timeout' ? 'timeout' : 'failed', reason: error instanceof BackendError ? error.toJSON().message : error?.message || (typeof error === 'string' && error) || (state === 'timeout' ? 'Sign-in did not finish within 5 minutes. Start sign-in again; the previous attempt was cancelled cleanly.' : 'Sign-in failed. Start sign-in again.') });
     return this.status(account);
   }
   status(account) { return structuredClone(this.#states.get(account) ?? { state: 'cancelled' }); }
   clear(account) { this.#states.delete(account); }
 }
 
-export function chromeArguments(profile, port) {
-  return [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--no-first-run', '--no-default-browser-check'];
+export function chromeArguments(profile, port, { proxy, env = process.env } = {}) {
+  proxy ??= env.MAGPIE_HTTPS_PROXY || env.MAGPIE_HTTP_PROXY || env.MAGPIE_ALL_PROXY;
+  const args = [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--no-first-run', '--no-default-browser-check'];
+  if (proxy) args.push(`--proxy-server=${proxy}`);
+  return args;
+}
+
+class BrowserComponentError extends BackendError {
+  constructor() {
+    super('missingComponent');
+    this.code = 'missingComponent';
+    this.status = 503;
+    this.component = 'Google Chrome';
+    this.remedy = 'Install Google Chrome and retry sign-in.';
+    this.message = `${this.component} was not found. ${this.remedy}`;
+  }
+  toJSON() { return { status: this.status, message: this.message }; }
 }
 
 export function sessionCredential(session, refresh, profile) {
@@ -119,18 +147,19 @@ export function sessionCredential(session, refresh, profile) {
   return { type: 'oauth', refresh, access: session.accessToken, expires, accountId: typeof session.user?.email === 'string' ? session.user.email : 'chatgpt-web', profile, persona: 'chatgpt-paid' };
 }
 
-export async function launchSignInBrowser(profile, signal) {
-  let chromium;
-  try { ({ chromium } = await import('playwright-core')); }
-  catch { throw new BackendError('browserDependency'); }
-  const candidates = process.platform === 'win32'
+export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates } = {}) {
+  if (!chromium) {
+    try { ({ chromium } = await import('playwright-core')); }
+    catch { throw new BackendError('browserDependency'); }
+  }
+  candidates ??= process.platform === 'win32'
     ? ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', resolve(process.env.LOCALAPPDATA ?? '.', 'Google/Chrome/Application/chrome.exe')]
     : process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'];
   let executable;
   for (const candidate of candidates) {
     try { await access(candidate); executable = candidate; break; } catch {}
   }
-  if (!executable) throw new BackendError('backendDown');
+  if (!executable) throw new BrowserComponentError();
   await mkdir(profile, { recursive: true });
   const listener = createServer();
   const port = await new Promise((resolvePort, reject) => {
@@ -141,7 +170,7 @@ export async function launchSignInBrowser(profile, signal) {
     });
   });
   signal?.throwIfAborted();
-  const child = spawn(executable, chromeArguments(profile, port), { stdio: ['ignore', 'ignore', 'ignore'] });
+  const child = spawnBrowser(executable, chromeArguments(profile, port, { proxy, env }), { stdio: ['ignore', 'ignore', 'ignore'] });
   let ended = false;
   const exited = new Promise(resolveExit => {
     child.once('error', () => { ended = true; resolveExit(); });
@@ -215,38 +244,64 @@ export async function browserRead(context, page, path, origin, signal) {
   } catch (error) { throw error instanceof BackendError ? error : new BackendError('upstream'); }
 }
 
-export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https://chatgpt.com', pollMilliseconds = 2000 } = {}) {
-  return async (account, signal, profileRoot) => {
-    if (typeof profileRoot !== 'string' || !profileRoot) throw new BackendError('browserConfiguration');
-    const owned = await launch(resolve(profileRoot, account), signal);
-    const context = owned.context;
+export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https://chatgpt.com', pollMilliseconds = 2000,
+  probeSignedIn = async page => {
+    const button = page.getByRole('button', { name: /open profile menu|打开个人资料菜单|打开个人信息菜单/i });
+    return await button.count() > 0 && await button.first().isVisible();
+  },
+} = {}) {
+  return async (account, signal, profileRoot, { proxy } = {}) => {
+    let owned;
     let closed = false;
-    context.once('close', () => { closed = true; });
-    const abort = () => { owned.close().catch(() => {}); };
-    signal.addEventListener('abort', abort, { once: true });
+    let closePromise;
+    const close = () => closePromise ??= Promise.resolve().then(() => owned?.close());
+    let interrupt;
+    const interrupted = new Promise((resolve, reject) => { interrupt = reject; });
+    interrupted.catch(() => {});
+    const wait = work => Promise.race([interrupted, work]);
+    const onClose = () => { closed = true; interrupt(new BackendError('browserClosed')); };
+    const abort = () => { interrupt(signal.reason); close().catch(() => {}); };
     try {
-      signal.throwIfAborted();
-      for (const restored of context.pages()) if (restored.url() !== 'about:blank') await restored.goto('about:blank');
-      const page = context.pages()[0] ?? await context.newPage();
-      await page.goto(origin);
-      while (!signal.aborted && !closed && !page.isClosed()) {
-        const profileButton = page.getByRole('button', { name: /open profile menu|打开个人资料菜单|打开个人信息菜单/i });
-        if (await profileButton.count() && await profileButton.first().isVisible()) {
-          const cookies = await context.cookies(origin);
-          if (cookies.some(cookie => /^__Secure-next-auth\.session-token(?:\.\d+)?$/.test(cookie.name))) {
-            const result = await browserRead(context, page, '/api/auth/session', origin, signal);
+      if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account) || typeof profileRoot !== 'string' || !profileRoot) throw new BackendError('browserConfiguration');
+      signal?.throwIfAborted();
+      owned = await launch(resolve(profileRoot, account), signal, { proxy });
+      const context = owned.context;
+      context.once('close', onClose);
+      signal?.addEventListener('abort', abort, { once: true });
+      signal?.throwIfAborted();
+      let page;
+      try {
+        for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
+        page = context.pages()[0] ?? await wait(context.newPage());
+        await wait(page.goto(origin));
+      } catch (error) { throw new Error('The sign-in page could not be loaded. Check the network/proxy and retry sign-in.', { cause: error }); }
+      while (!closed && !page.isClosed()) {
+        signal?.throwIfAborted();
+        if (await wait(probeSignedIn(page))) {
+          const cookies = await wait(context.cookies(origin));
+          if (cookies.some(cookie => /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/.test(cookie.name))) {
+            const result = await wait(browserRead(context, page, '/api/auth/session', origin, signal));
+            signal?.throwIfAborted();
+            if (closed || page.isClosed()) return { state: 'cancelled' };
             return { state: 'signed-in', credential: sessionCredential(result.value, result.cookies, account) };
           }
         }
-        await delay(pollMilliseconds, undefined, { signal });
+        if (!closed && !page.isClosed()) await wait(delay(pollMilliseconds, undefined, { signal }));
       }
+      signal?.throwIfAborted();
       return { state: 'cancelled' };
     } catch (error) {
-      if (closed || context.pages().every(page => page.isClosed())) return { state: 'cancelled' };
-      throw error instanceof BackendError ? error : new BackendError('upstream');
+      const cause = signal?.aborted ? signal.reason : error;
+      if (cause?.code === 'signinTimeout') {
+        return { state: 'timeout', reason: cause.message, error: cause };
+      }
+      if (signal?.aborted && cause?.name === 'AbortError') return { state: 'cancelled' };
+      if (!signal?.aborted && (closed || owned?.context.pages().every(page => page.isClosed()))) return { state: 'cancelled' };
+      return { state: 'failed', reason: cause instanceof BackendError ? cause.toJSON().message : cause?.message || 'Sign-in failed. Start sign-in again.', error: cause };
     } finally {
-      signal.removeEventListener('abort', abort);
-      await owned.close();
+      signal?.removeEventListener('abort', abort);
+      owned?.context.removeListener('close', onClose);
+      await close();
     }
   };
 }

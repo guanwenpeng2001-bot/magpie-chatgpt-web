@@ -25,7 +25,7 @@ test('supervisor lazily launches, closes idle contexts and relaunches after a cr
     context.emit('close');
     await new Promise(() => {});
   }), error => error.status === 503);
-  await browser.run('fixture', async context => assert.equal(context, contexts[2]));
+  await browser.run('fixture', async context => assert.equal(context, contexts[3]));
   await browser.close();
 });
 
@@ -83,6 +83,106 @@ test('TurnDriver forwards an explicit profile directory to its supervisor withou
   await driver.browser.run('fixture', async () => {});
   assert.deepEqual(launched, ['C:/signed-in-profile']);
   await driver.close();
+});
+
+test('idle contexts close at five minutes, with active time excluded', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let closes = 0;
+  const context = new EventEmitter();
+  context.pages = () => [];
+  context.close = async () => { closes++; context.emit('close'); };
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  assert.equal(browser.idleMilliseconds, 300_000);
+  await browser.run('fixture', async () => { t.mock.timers.tick(300_000); assert.equal(closes, 0); });
+  t.mock.timers.tick(299_999);
+  assert.equal(closes, 0);
+  t.mock.timers.tick(1);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(closes, 1);
+  await browser.close();
+});
+
+test('one crash retries the operation and a second crash exhausts that turn only', async () => {
+  let launches = 0;
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => {
+    launches++;
+    const context = new EventEmitter();
+    context.pages = () => [];
+    context.close = async () => context.emit('close');
+    return context;
+  } });
+  try {
+    let attempts = 0;
+    assert.equal(await browser.run('fixture', async context => {
+      if (++attempts === 1) { context.emit('close'); await new Promise(() => {}); }
+      return 'recovered';
+    }), 'recovered');
+    assert.equal(attempts, 2);
+    await assert.rejects(browser.run('fixture', async context => {
+      context.emit('close'); await new Promise(() => {});
+    }), error => error.code === 'browserClosed');
+    assert.equal(launches, 3);
+    assert.equal(await browser.run('fixture', async () => 'next turn'), 'next turn');
+  } finally { await browser.close(); }
+});
+
+test('visible turns replace an idle headless context and return to headless afterwards', async () => {
+  const modes = [];
+  let closes = 0;
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async (profile, options) => {
+    modes.push(options.headless);
+    const context = new EventEmitter();
+    context.pages = () => [];
+    context.close = async () => { closes++; context.emit('close'); };
+    return context;
+  } });
+  try {
+    await browser.run('fixture', async () => {});
+    await browser.run('fixture', async () => {}, undefined, { visibleTurns: true });
+    await browser.run('fixture', async () => {}, undefined, { visibleTurns: false });
+    assert.deepEqual(modes, [true, false, true]);
+    assert.equal(closes, 2);
+  } finally { await browser.close(); }
+});
+
+for (const visibleTurns of [true, false]) test(`active operation rejects a switch to visibleTurns=${visibleTurns} with a local mode conflict`, async () => {
+  const modes = [];
+  const context = new EventEmitter();
+  context.pages = () => [];
+  context.close = async () => context.emit('close');
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async (profile, options) => {
+    modes.push(options.headless);
+    return context;
+  } });
+  try {
+    await browser.run('fixture', async () => {
+      await assert.rejects(browser.run('fixture', () => assert.fail('conflicting operation must not start'), undefined, { visibleTurns }), error => {
+        assert.equal(error.constructor, Error);
+        assert.equal(error.code, undefined);
+        assert.match(error.message, /active operation.*other mode.*wait/i);
+        return true;
+      });
+      assert.deepEqual(modes, [visibleTurns]);
+    }, undefined, { visibleTurns: !visibleTurns });
+  } finally { await browser.close(); }
+});
+
+test('intentional account close never restarts an active operation', async () => {
+  let launches = 0;
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => {
+    launches++;
+    const context = new EventEmitter();
+    context.pages = () => [];
+    context.close = async () => context.emit('close');
+    return context;
+  } });
+  await assert.rejects(browser.run('fixture', async () => {
+    await browser.closeAccount('fixture');
+    await new Promise(() => {});
+  }), error => error.code === 'browserClosed');
+  assert.equal(launches, 1);
+  await browser.close();
 });
 
 test('closed supervisor reports lifecycle failure', async () => {
