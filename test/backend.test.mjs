@@ -218,7 +218,7 @@ for (const profileAlreadyLive of [true, false]) test(`cached stale commands reta
   const { EventEmitter } = await import('node:events');
   const { ReadClient } = await import('../backend/http.mjs');
   const { BrowserSupervisor } = await import('../backend/browser.mjs');
-  const name = '__Secure-next-auth.session-token';
+  const name = 'next-auth.session-token';
   const stale = `${name}=superseded`;
   const live = `${name}=live`;
   const upstream = createServer((request, response) => {

@@ -24,7 +24,7 @@ export async function verifyTurns(dependency) {
   });
   const guard = new AccountGuard();
   const history = [{ role: 'user', content: 'Describe a fictional garden.' }];
-  const command = (key, messages = history) => ({ ...prepare({ model: 'auto', messages, conversation_id: key }), auth: { profile: 'fixture' } });
+  const command = (key, messages = history) => ({ ...prepare({ model: 'auto', messages, conversation_id: key }), auth: { profile: 'fixture', refresh: '__Secure-next-auth.session-token=fixture' } });
   const collect = async (request, targetGuard = guard, signal = new AbortController().signal) => {
     const frames = [];
     const result = await driver.complete(request, targetGuard, 'fixture-account', signal, async frame => { frames.push(frame); });
