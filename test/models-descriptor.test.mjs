@@ -32,6 +32,8 @@ test('published source has no placeholder domain and declares emulated wire hone
   }
   await inspect(new URL('../src/', import.meta.url));
   await inspect(new URL('../backend/', import.meta.url));
+  for (const name of ['integrations/fixture-backend.mjs', 'integrations/turn-fixture.mjs', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES', 'package.json'])
+    assert.equal((await readFile(new URL('../' + name, import.meta.url), 'utf8')).includes('.invalid'), false, name);
   const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
   assert.match(readme, /emulat/i);
   const config = {};
