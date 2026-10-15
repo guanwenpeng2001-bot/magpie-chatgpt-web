@@ -8,7 +8,9 @@ import { BackendError } from './guard.mjs';
 
 async function reconcileSessionCookies(context, credential, origin) {
   if (typeof credential !== 'string' || /[\r\n\0]/.test(credential)) throw new BackendError('expired');
-  const sessionName = /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/;
+  const sessionName = new URL(origin).protocol === 'https:'
+    ? /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/
+    : /^(?:__Secure-|__Host-)?next-auth\.session-token(?:\.\d+)?$/;
   const desired = credential.split(';').map(pair => {
     const at = pair.indexOf('=');
     return { name: pair.slice(0, at).trim(), value: pair.slice(at + 1).trim() };
@@ -17,6 +19,10 @@ async function reconcileSessionCookies(context, credential, origin) {
   try {
     const current = (await context.cookies(String(origin))).filter(cookie => sessionName.test(cookie.name));
     if (current.length === desired.length && current.every(cookie => desired.some(next => next.name === cookie.name && next.value === cookie.value))) return;
+    if (new URL(origin).protocol !== 'https:' && desired.some(cookie => /^(?:__Secure-|__Host-)/.test(cookie.name))) {
+      console.error(JSON.stringify({ event: 'session-cookie-reconcile-skipped', origin: new URL(origin).origin }));
+      return;
+    }
     for (const cookie of current) await context.clearCookies({ name: cookie.name, domain: cookie.domain, path: cookie.path });
     await context.addCookies(desired.map(cookie => ({ ...cookie, url: new URL('/', origin).href, httpOnly: true, secure: new URL(origin).protocol === 'https:', sameSite: 'Lax' })));
   } catch { throw new BackendError('upstream'); }
