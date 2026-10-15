@@ -81,7 +81,7 @@ test('login states retain actionable timeout and failure reasons and restart cle
 });
 
 test('masked Chrome discovery names the missing component and remedy', async () => {
-  await assert.rejects(browserModule.launchSignInBrowser('.', undefined, { candidates: [] }), error => {
+  await assert.rejects(browserModule.launchSignInBrowser('.', undefined, { candidates: [], chromium: {} }), error => {
     assert.equal(error.code, 'missingComponent');
     assert.equal(error.component, 'Google Chrome');
     assert.match(error.toJSON().message, /Google Chrome.*not found.*Install/);
