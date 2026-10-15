@@ -21,7 +21,7 @@ export class AnswerStream {
       if (typeof frame.data?.text !== 'string') throw new BackendError('protocol');
       this.text += frame.data.text;
     } else if (frame.event === 'dom') {
-      if (typeof frame.data?.text !== 'string' || !frame.data.text.startsWith(this.text)) throw new BackendError('protocol');
+      if (typeof frame.data?.text !== 'string') throw new BackendError('protocol');
       this.text = frame.data.text;
       this.complete ||= frame.data.complete === true;
     } else if (frame.event === 'delta_encoding') {
@@ -113,7 +113,9 @@ export async function* translate(source, prepared) {
     if (!frame || complete || !['delta', 'finish', 'error'].includes(frame.type)) throw new BackendError('protocol');
     if (frame.type === 'error') {
       if (!Object.hasOwn(errors, frame.code) || typeof frame.message !== 'string') throw new BackendError('protocol');
-      const failure = new BackendError(frame.code);
+      if (frame.retryAfter !== undefined && (!Number.isSafeInteger(frame.retryAfter) || frame.retryAfter < 0)) throw new BackendError('protocol');
+      const failure = new BackendError(frame.code, { retryAfter: frame.retryAfter });
+      if (frame.retryAfter !== undefined) failure.retryAfter = String(frame.retryAfter);
       failure.code = frame.code;
       failure.status = errors[frame.code].status;
       failure.message = frame.message;

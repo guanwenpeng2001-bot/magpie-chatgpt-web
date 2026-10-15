@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { installHarvest } from '../backend/harvest.mjs';
-import { chromium } from 'playwright-core';
 import { probePageError } from '../backend/site-adapter/index.mjs';
 import { siteAdapterHtml } from '../integrations/turn-fixture.mjs';
 
@@ -44,6 +43,13 @@ test('XHR ignores responses from a previous turn', async () => {
   assert.deepEqual(fixture.events, []);
 });
 test('page probes prioritize challenge and ignore passive scripts', async t => {
+  let chromium;
+  try { ({ chromium } = await import('playwright-core')); }
+  catch (error) {
+    if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+    t.skip('playwright-core is not installed; run npm ci --ignore-scripts (requires Chrome).');
+    return;
+  }
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {
     for (const challenge of ['iframe', 'title']) await t.test(challenge, async () => {

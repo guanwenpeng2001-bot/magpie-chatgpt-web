@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { BackendError } from './guard.mjs';
 import { responseFailure } from './http.mjs';
-import { AnswerStream } from '../src/protocol.mjs';
+import { AnswerStream } from '../src/wire/translate.mjs';
 
 export async function observeTurn(page, { run, adapter, guard, budget = 180000, signal, emit }) {
   const deadline = Date.now() + budget;

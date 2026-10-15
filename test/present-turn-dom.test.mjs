@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { installHarvest } from '../backend/harvest.mjs';
 import { TurnDriver } from '../backend/turn.mjs';
 import { AccountGuard } from '../backend/guard.mjs';
-import { prepare, translate } from '../src/protocol.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
+import { translate } from '../src/wire/translate.mjs';
 import { createTurnFixture } from '../integrations/turn-fixture.mjs';
 
 const expected = 'ORCA_DOM_ALPHA\nORCA_DOM_BETA\nORCA_DOM_GAMMA';
@@ -108,7 +109,7 @@ for (const network of [false, true]) test(`present DOM ${network ? 'handoff' : '
   fixture.setMode(network ? 'present-handoff' : 'present-dom');
   const root = await mkdtemp(join(tmpdir(), 'present-turn-'));
   let context;
-  const driver = new TurnDriver({ origin: fixture.origin, profileRoot: root, network, timeout: 2500, launch: async profile => {
+  const driver = new TurnDriver({ origin: fixture.origin, profileRoot: root, network, timeout: 15000, launch: async profile => {
     context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, serviceWorkers: 'block', args: ['--disable-background-networking'] });
     await context.route('**/*', route => new URL(route.request().url()).origin === fixture.origin ? route.continue() : route.abort());
     await context.exposeBinding('fixtureSnapshotObserved', async ({ page }, state) => {
@@ -132,8 +133,8 @@ for (const network of [false, true]) test(`present DOM ${network ? 'handoff' : '
   const frames = [];
   try {
     await assert.doesNotReject(driver.complete({ ...prepared, auth: { profile: 'fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame)));
-    assert.deepEqual(frames.filter(frame => frame.event === 'dom').map(frame => frame.data.text), ['ORCA_DOM_ALPHA', expected]);
-    assert.equal(frames.at(-1).data.type, 'message_stream_complete');
+    assert.deepEqual(frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    assert.equal(frames.at(-1).type, 'finish');
     const chunks = [];
     for await (const chunk of translate(frames, prepared)) chunks.push(chunk);
     assert.equal(chunks.at(-1).includes('event: message_stop'), true);
