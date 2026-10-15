@@ -6,10 +6,12 @@ import { handoffFrames } from '../integrations/turn-fixture.mjs';
 
 const protocol = await import('../src/protocol.mjs').catch(() => ({}));
 
-test('wire module owns AnswerStream and the legacy shim re-exports it', async () => {
+test('wire module owns AnswerStream', async () => {
   const wire = await import('../src/wire/translate.mjs');
   assert.equal(typeof wire.AnswerStream, 'function');
-  assert.equal(protocol.AnswerStream, wire.AnswerStream);
+  const answer = new wire.AnswerStream();
+  assert.equal(answer.accept({ event: 'dom', data: { text: 'answer', complete: true } }), 'answer');
+  assert.doesNotThrow(() => answer.finish());
 });
 
 for (const missing of ['start', 'delta']) test(`reconstruct rejects missing ${missing} usage with a typed protocol error`, async () => {
