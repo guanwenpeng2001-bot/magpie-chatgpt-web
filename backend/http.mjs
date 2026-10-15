@@ -42,6 +42,7 @@ export class ReadClient {
     this.timeout = timeout;
     this.browserRoute = browserRoute;
   }
+  get credential() { return this.#cookie; }
   async #read(path, signal, receiveCookies = () => {}, { browserFallback = true } = {}) {
     const transport = this.origin.protocol === 'https:' ? https : http;
     const budget = AbortSignal.timeout(this.timeout);

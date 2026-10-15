@@ -198,7 +198,7 @@ for (const rejected of [false, true]) test(`browser fallback reconciles rotated 
   const browser = new BrowserSupervisor({ profileRoot: '.', launch: async () => context });
   const server = harness({
     turnDriver: { browser, close: () => browser.close() },
-    readClient: ({ browserRoute, guard }) => ({ guard, models: signal => browserRoute('/backend-api/models', signal, new URL('https://chatgpt.com')) }),
+    readClient: ({ browserRoute, guard, cookie }) => ({ guard, get credential() { return cookie; }, models: signal => browserRoute('/backend-api/models', signal, new URL('https://chatgpt.com')) }),
   });
   try {
     for (const [id, refresh] of [['prior', '__Secure-next-auth.session-token=prior'], ['rotated', '__Secure-next-auth.session-token=rotated-secret'], ['unchanged', '__Secure-next-auth.session-token=rotated-secret']]) {
@@ -211,6 +211,70 @@ for (const rejected of [false, true]) test(`browser fallback reconciles rotated 
     if (rejected) for (const frame of server.frames.filter(frame => frame.event === 'error')) assert.equal(BackendError.fromEnvelope(frame.error).code, 'expired');
     assert.equal(JSON.stringify(server.frames).includes('rotated-secret'), false);
   } finally { server.input.end(); await server.work; }
+});
+
+for (const profileAlreadyLive of [true, false]) test(`cached stale commands retain the live credential (profileAlreadyLive=${profileAlreadyLive})`, async t => {
+  const { createServer } = await import('node:http');
+  const { EventEmitter } = await import('node:events');
+  const { ReadClient } = await import('../backend/http.mjs');
+  const { BrowserSupervisor } = await import('../backend/browser.mjs');
+  const name = '__Secure-next-auth.session-token';
+  const stale = `${name}=superseded`;
+  const live = `${name}=live`;
+  const upstream = createServer((request, response) => {
+    if (request.url === '/api/auth/session') {
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `${live}; Path=/; HttpOnly` });
+      response.end(JSON.stringify({ accessToken: 'access', expires: '2099-01-01T00:00:00Z' }));
+    } else {
+      response.writeHead(403, { 'cf-mitigated': 'challenge' });
+      response.end();
+    }
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => upstream.close(resolve)));
+  const origin = `http://127.0.0.1:${upstream.address().port}`;
+  const context = new EventEmitter();
+  let stored = [{ name, value: profileAlreadyLive ? 'live' : 'superseded', domain: '127.0.0.1', path: '/' }];
+  let writes = 0;
+  const navigated = [];
+  context.pages = () => [];
+  context.close = async () => context.emit('close');
+  context.cookies = async () => structuredClone(stored);
+  context.clearCookies = async () => { stored = []; };
+  context.addCookies = async cookies => { stored = cookies; writes++; };
+  context.newPage = async () => ({
+    goto: async () => { navigated.push(stored[0]?.value === 'live'); },
+    url: () => origin, close: async () => {},
+    evaluate: async () => ({ status: stored[0]?.value === 'live' ? 200 : 401, headers: {}, body: JSON.stringify({ models: [{ slug: 'auto', title: 'Auto' }] }) }),
+  });
+  const browser = new BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  let clients = 0;
+  const server = harness({
+    turnDriver: { browser, close: () => browser.close() },
+    readClient: options => { clients++; return new ReadClient(options); },
+  });
+  t.after(async () => { server.input.end(); await server.work; });
+  const command = async (id, method) => {
+    server.send({ id, method, origin, profileRoot: '.', auth: { profile: 'fixture', refresh: stale } });
+    await server.until(frames => frames.some(frame => frame.id === id && ['done', 'error'].includes(frame.event)));
+    return server.frames.filter(frame => frame.id === id);
+  };
+  const session = await command('rotate', 'session');
+  assert.equal(session.at(-1).event, 'done');
+  assert.equal(session.find(frame => frame.event === 'data').data.refresh === live, true);
+  const now = Date.now();
+  let elapsed = 0;
+  t.mock.method(Date, 'now', () => now + elapsed);
+  for (const id of ['stale-read', 'stale-read-again']) {
+    elapsed += 61_000;
+    const frames = await command(id, 'models');
+    assert.equal(frames.at(-1).event, 'done', 'a superseded command must still read successfully');
+    assert.equal(stored[0]?.value === 'live', true, 'the profile must retain the live credential');
+    assert.equal(JSON.stringify(frames).includes('superseded'), false);
+  }
+  assert.equal(clients, 1);
+  assert.deepEqual(navigated, [true, true]);
+  assert.equal(writes, profileAlreadyLive ? 0 : 1);
 });
 
 test('session command renews over the read client without starting login', async () => {
