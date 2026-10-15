@@ -1,8 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { translate, reconstruct } from '../src/wire/translate.mjs';
+import { parseSSE } from '../src/wire/sse.mjs';
 import { handoffFrames } from '../integrations/turn-fixture.mjs';
 
 const protocol = await import('../src/protocol.mjs').catch(() => ({}));
+
+test('wire module owns AnswerStream', async () => {
+  const wire = await import('../src/wire/translate.mjs');
+  assert.equal(typeof wire.AnswerStream, 'function');
+  const answer = new wire.AnswerStream();
+  assert.equal(answer.accept({ event: 'dom', data: { text: 'answer', complete: true } }), 'answer');
+  assert.doesNotThrow(() => answer.finish());
+});
+
+for (const missing of ['start', 'delta']) test(`reconstruct rejects missing ${missing} usage with a typed protocol error`, async () => {
+  const events = [
+    { type: 'message_start', message: { content: [], ...(missing === 'start' ? {} : { usage: { input_tokens: 0, output_tokens: 0 } }) } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, ...(missing === 'delta' ? {} : { usage: { output_tokens: 0 } }) },
+    { type: 'message_stop' },
+  ];
+  await assert.rejects(reconstruct(events.map(value => `data: ${JSON.stringify(value)}\n\n`)), error => error.name === 'BackendError' && error.code === 'protocol');
+});
 const message = (text = '') => ({ event: 'delta', data: { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, recipient: 'all', channel: 'final', content: { content_type: 'text', parts: [text] }, status: 'in_progress' } } } });
 const append = text => ({ event: 'delta', data: { o: 'patch', v: [{ p: '/message/content/parts/0', o: 'append', v: text }, { p: '/message/metadata/model_dil_v2/constants', o: 'append', v: 'must not escape' }] } });
 
@@ -27,7 +46,7 @@ test('translation releases each answer batch before the next upstream batch exis
     }
   } finally { release(); }
   for await (const chunk of output) chunks.push(chunk);
-  const events = chunks.map(chunk => JSON.parse(chunk.split('\ndata: ')[1]));
+  const events = chunks.map(chunk => JSON.parse(parseSSE(chunk).events[0].data));
   assert.deepEqual(events.filter(event => event.type === 'content_block_delta').map(event => event.delta.text), ['First batch. ', 'Second batch.']);
   assert.deepEqual(events.map(event => event.type), ['message_start', 'content_block_start', 'content_block_delta', 'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop']);
   assert.equal(chunks.join('').includes('must not escape'), false);
@@ -89,7 +108,7 @@ for (const [label, intruder] of [['tool call', toolCall], ['tool result', toolRe
   const frames = [message(), append('First half. '), midAdd(intruder), append('Second half.'), ...finishAnswer];
   const chunks = [];
   for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) chunks.push(chunk);
-  const deltas = chunks.map(chunk => JSON.parse(chunk.split('\ndata: ')[1])).filter(event => event.type === 'content_block_delta').map(event => event.delta.text);
+  const deltas = chunks.map(chunk => JSON.parse(parseSSE(chunk).events[0].data)).filter(event => event.type === 'content_block_delta').map(event => event.delta.text);
   assert.deepEqual(deltas, ['First half. ', 'Second half.']);
   assert.equal(chunks.join('').includes('event: message_stop'), true);
 });
@@ -112,12 +131,12 @@ test('a repeated visible assistant message-add before answer text exists is harm
   const frames = [message(), message(), append('Only half.'), ...finishAnswer];
   const chunks = [];
   for await (const chunk of protocol.translate(frames, { model: 'auto', prompt: '' })) chunks.push(chunk);
-  const deltas = chunks.map(chunk => JSON.parse(chunk.split('\ndata: ')[1])).filter(event => event.type === 'content_block_delta').map(event => event.delta.text);
+  const deltas = chunks.map(chunk => JSON.parse(parseSSE(chunk).events[0].data)).filter(event => event.type === 'content_block_delta').map(event => event.delta.text);
   assert.deepEqual(deltas, ['Only half.']);
   assert.equal(chunks.join('').includes('event: message_stop'), true);
 });
 
-test('prepare preserves text history and prefers caller conversation identity', () => {
+test('prepare preserves text history and hashes host conversation identity', () => {
   const request = { model: 'auto', system: [{ type: 'text', text: 'Be concise' }], messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: [{ type: 'text', text: 'two' }] }, { role: 'user', content: 'three' }], conversation_id: 'caller' };
   const prepared = protocol.prepare(request, { 'x-chatgptweb-conversation': 'host-session' });
   assert.equal(prepared.conversationKey, 'caller');
@@ -126,4 +145,35 @@ test('prepare preserves text history and prefers caller conversation identity', 
   assert.match(protocol.prepare(request, { 'x-chatgptweb-conversation': 'host-session' }).conversationKey, /^[a-f0-9]{64}$/);
   assert.equal(protocol.prepare(request).conversationKey, undefined);
   assert.throws(() => protocol.prepare({ ...request, tools: [{}] }), error => error.code === 'toolDefinition');
+});
+
+for (const batches of [['whole answer'], ['whole ', 'answer']]) test(`normalized translation reconstructs ${batches.length} answer batches`, async () => {
+  const frames = [...batches.map(text => ({ type: 'delta', index: 0, text })), { type: 'finish', reason: 'complete' }];
+  const chunks = [];
+  for await (const chunk of translate(frames, { model: 'auto' })) chunks.push(chunk);
+  const message = await reconstruct(chunks.join('').split(''));
+  assert.deepEqual(message.content, [{ type: 'text', text: 'whole answer' }]);
+  assert.equal(message.stop_reason, 'end_turn');
+});
+
+for (const type of ['status', 'failure', 'fallback', 'eof', 'answer']) test(`normalized translation rejects ${type} frame`, async () => {
+  await assert.rejects(async () => { for await (const chunk of translate([{ type }], { model: 'auto' })) void chunk; }, { code: 'protocol' });
+});
+
+test('normalized EOF requires explicit finish and reconstruction rejects trailing bytes', async () => {
+  const delta = { type: 'delta', index: 0, text: 'answer' };
+  await assert.rejects(reconstruct(translate([delta], { model: 'auto' })), { code: 'truncated' });
+  const chunks = [];
+  for await (const chunk of translate([delta, { type: 'finish', reason: 'complete' }], { model: 'auto' })) chunks.push(chunk);
+  await assert.rejects(reconstruct([...chunks, 'data: tail']), { code: 'truncated' });
+  assert.equal(parseSSE(chunks.at(-1)).events[0].event, 'message_stop');
+});
+
+test('normalized errors preserve new taxonomy status and actionable message', async () => {
+  const message = 'ChatGPT refused the image upload (unsupported format). Retry; if it persists, send the message without the image.';
+  await assert.rejects(reconstruct(translate([{ type: 'error', code: 'imageRejected', message }], { model: 'auto' })), error => error.code === 'imageRejected' && error.status === 502 && error.toJSON().message === message);
+});
+
+test('whitespace-only normalized answer is empty and never completes successfully', async () => {
+  await assert.rejects(reconstruct(translate([{ type: 'delta', index: 0, text: '  ' }, { type: 'finish', reason: 'complete' }], { model: 'auto' })), { code: 'empty' });
 });

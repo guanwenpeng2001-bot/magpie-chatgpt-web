@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as protocol from '../src/protocol.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
+import { translate } from '../src/wire/translate.mjs';
+import { ToolParser } from '../src/tool-emulation.mjs';
+import { parseSSE } from '../src/wire/sse.mjs';
+const protocol = { prepare, translate, ToolParser };
 
 const tool = { name: 'lookup', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false } };
 const request = extra => ({ model: 'auto', messages: [{ role: 'user', content: 'Look up a fictional garden.' }], tools: [tool], ...extra });
 const call = (prepared, input = { query: 'garden' }, name = 'lookup') => prepared.start + JSON.stringify({ name, input }) + prepared.end;
-const frames = texts => [...texts.map(text => ({ event: 'answer', data: { text } })), { event: '', data: '[DONE]' }];
-const parseEvent = chunk => JSON.parse(chunk.split('\ndata: ')[1]);
+const frames = texts => [...texts.map(text => ({ type: 'delta', index: 0, text })), { type: 'finish', reason: 'complete' }];
+const parseEvent = chunk => JSON.parse(parseSSE(chunk).events[0].data);
 const collect = async (source, prepared) => { const events = []; for await (const chunk of protocol.translate(source, prepared)) events.push(parseEvent(chunk)); return events; };
 
 test('prepare accepts client tools and injects a fresh prompt-level protocol', () => {
@@ -78,12 +82,12 @@ test('prose before and after a call arrives before the next upstream batch is re
   const endGate = new Promise(resolve => { releaseEnd = resolve; });
   let callReleased = false, endReleased = false;
   async function* source() {
-    yield { event: 'answer', data: { text: 'Before the call. ' } };
+    yield { type: 'delta', index: 0, text: 'Before the call. ' };
     await callGate;
-    yield { event: 'answer', data: { text: call(prepared) } };
-    yield { event: 'answer', data: { text: 'After the call.' } };
+    yield { type: 'delta', index: 0, text: call(prepared) };
+    yield { type: 'delta', index: 0, text: 'After the call.' };
     await endGate;
-    yield { event: '', data: '[DONE]' };
+    yield { type: 'finish', reason: 'complete' };
   }
   const output = protocol.translate(source(), prepared);
   const started = performance.now();
