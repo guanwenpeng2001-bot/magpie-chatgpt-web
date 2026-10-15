@@ -23,10 +23,29 @@ function childFixture(onCommand, handshake = true) {
         final(callback) { callback(); queueMicrotask(() => child.emit('exit', 0)); },
       });
       child.kill = () => queueMicrotask(() => child.emit('exit', 1));
-      if (handshake) queueMicrotask(() => child.stdout.write('{"event":"ready","protocol":3}\n'));
+      if (handshake) queueMicrotask(() => child.stdout.write(JSON.stringify(handshake === true ? { event: 'ready', protocol: 3 } : handshake) + '\n'));
       return child;
     },
   };
+}
+
+test('pre-ready prerequisite failure preserves component and remedy', async () => {
+  const bridge = new Bridge(childFixture(null, { event: 'error', code: 'missingComponent', component: 'plugin dependency', remedy: 'Reinstall the plugin.', detail: 'missing' }));
+  await assert.rejects(bridge.start(), error => error.code === 'missingComponent' && error.toJSON().values.component === 'plugin dependency' && error.message === 'plugin dependency was not found. Reinstall the plugin.');
+  await bridge.dispose();
+});
+
+for (const type of ['status', 'failure', 'fallback', 'eof']) {
+  test('complete rejects harvest-only ' + type + ' frames', async t => {
+    const bridge = new Bridge(childFixture((command, child) => {
+      child.stdout.write(JSON.stringify({ id: command.id, event: 'head', status: 200 }) + '\n');
+      child.stdout.write(JSON.stringify({ id: command.id, event: 'data', data: { type } }) + '\n');
+      child.stdout.write(JSON.stringify({ id: command.id, event: 'done' }) + '\n');
+    }));
+    t.after(() => bridge.dispose());
+    const stream = await bridge.open({ method: 'complete' });
+    await assert.rejects(stream.next(), error => error.code === 'protocol');
+  });
 }
 
 test('a frame split across chunks is decoded including multibyte text', async t => {
@@ -79,7 +98,7 @@ test('a slow consumer is aborted when its bounded queue fills', async t => {
   const fixture = childFixture((command, child) => {
     if (command.method === 'abort') return;
     child.stdout.write(JSON.stringify({ id: command.id, event: 'head', status: 200 }) + '\n');
-    child.stdout.write(JSON.stringify({ id: command.id, event: 'data', data: 'x'.repeat(300) }) + '\n');
+    child.stdout.write(JSON.stringify({ id: command.id, event: 'data', data: { type: 'delta', index: 0, text: 'x'.repeat(300) } }) + '\n');
   });
   const bridge = new Bridge({ ...fixture, queueBytes: 100 });
   t.after(() => bridge.dispose());

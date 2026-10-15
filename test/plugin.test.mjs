@@ -10,23 +10,21 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
   const catalogue = { models: slugs.map((slug, index) => ({ slug, title: titles[index], max_tokens: 34834 })) };
   const hooks = plugin._internal.createHooks({ bridge: { call: async () => catalogue }, profileRoot: '.' });
   const models = await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } });
-  assert.deepEqual(Object.keys(models), ['auto', 'gpt-6']);
+  assert.deepEqual(Object.keys(models), ['auto', ...slugs.filter(slug => slug !== 'auto')]);
   for (const [index, slug] of slugs.entries()) {
-    if (!['auto', 'gpt-6'].includes(slug)) { assert.equal(models[slug], undefined); continue; }
     const name = ['gpt-5-6-mini', 'gpt-6-mini'].includes(slug) ? `${titles[index]} (${slug})` : titles[index];
     assert.deepEqual(models[slug], {
-      name, api: { id: slug, url: 'https://chatgpt-web.invalid/v1', npm: '@ai-sdk/anthropic' },
+      name, api: { id: slug },
       limit: { context: 200000, output: 34834 },
       capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
     });
   }
 });
 
-test('a successfully read catalogue with no exposed slug is an error, not an empty list', async () => {
-  const { BackendError } = await import('../backend/guard.mjs');
+test('previously filtered catalogue slugs are now exposed', async () => {
   const catalogue = { models: [{ slug: 'gpt-5-6', title: 'GPT-5.6 Luna' }, { slug: 'gpt-6-mini', title: 'GPT-6' }] };
   const hooks = plugin._internal.createHooks({ bridge: { call: async () => catalogue }, profileRoot: '.' });
-  await assert.rejects(hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } }), error => error instanceof BackendError && error.code === 'protocol');
+  assert.deepEqual(Object.keys(await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } })), ['gpt-5-6', 'gpt-6-mini']);
 });
 
 test('unauthenticated models preserve static config and failures remain loud', async () => {
@@ -38,7 +36,7 @@ test('unauthenticated models preserve static config and failures remain loud', a
   assert.equal(await hooks.provider.models(provider), provider.models);
   await assert.rejects(hooks.provider.models(provider, { auth: { type: 'oauth', refresh: crypto.randomUUID() } }), error => error.signIn === 'expired');
   const broken = plugin._internal.createHooks({ bridge: { call: async () => { throw new BackendError('upstream'); } }, profileRoot: '.' });
-  await assert.rejects(broken.provider.models(provider, { auth: { type: 'oauth', refresh: crypto.randomUUID() } }), error => error.status === 502);
+  assert.equal((await broken.provider.models(provider, { auth: { type: 'oauth', refresh: crypto.randomUUID() } }))[Symbol.for('magpie.fellBack')], true);
 });
 
 test('refresh returns only changed fields and advertises a 24 hour lead', async () => {

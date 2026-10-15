@@ -23,6 +23,8 @@ import { randomUUID } from 'node:crypto';
 import { BackendError } from '../backend/guard.mjs';
 export { BackendError } from '../backend/guard.mjs';
 
+const ANSWER_FRAME_TYPES = new Set(['delta', 'finish', 'error']);
+
 export class Bridge {
   #child;
   #starting;
@@ -75,6 +77,10 @@ export class Bridge {
             if (Buffer.byteLength(line) > 4 << 20) throw 0;
             const frame = JSON.parse(line);
             if (!ready) {
+              if (frame?.event === 'error' && frame.code === 'missingComponent' && typeof frame.component === 'string' && typeof frame.remedy === 'string') {
+                fail(new BackendError('missingComponent', { values: { component: frame.component, remedy: frame.remedy } }));
+                return;
+              }
               if (frame?.event !== 'ready' || frame.protocol !== 3) throw 0;
               ready = true; clearTimeout(timer); resolve(); continue;
             }
@@ -82,12 +88,19 @@ export class Bridge {
             const item = this.#pending.get(frame.id);
             if (!item) continue;
             if (frame.event === 'error') item.end(BackendError.fromEnvelope(frame.error));
-            else if (frame.event === 'done') item.end();
+            else if (frame.event === 'done') {
+              if (frame.route !== undefined && !['dom', 'sse'].includes(frame.route)) throw 0;
+              if (frame.degraded !== undefined && !['clone-unavailable', 'xhr-submit', 'network-disabled'].includes(frame.degraded)) throw 0;
+              if (frame.route) item.metadata.route = frame.route;
+              if (frame.degraded) item.metadata.degraded = frame.degraded;
+              item.end();
+            }
             else if (frame.event === 'head') {
               if (item.head || frame.status !== 200) throw 0;
               item.head = true;
             } else {
               if (!item.head || !Object.hasOwn(frame, 'data')) throw 0;
+              if (item.method === 'complete' && !ANSWER_FRAME_TYPES.has(frame.data?.type)) throw 0;
               const bytes = Buffer.byteLength(line);
               if (item.bytes + bytes > this.queueBytes) {
                 item.end(new BackendError('protocol'));
@@ -116,7 +129,7 @@ export class Bridge {
     if (this.#pending.size >= 64) throw new BackendError('cooldown', { retryAfter: 1 });
     const frame = { ...command, id };
     if (Buffer.byteLength(JSON.stringify(frame)) >= 16 << 20) throw new BackendError('protocol');
-    const item = { queue: [], bytes: 0, ended: false, head: false };
+    const item = { queue: [], bytes: 0, ended: false, head: false, method: command.method, metadata: {} };
     const abort = () => {
       this.#send(child, { id, method: 'abort' }).catch(() => {});
       item.end(new BackendError('upstream'));
@@ -134,6 +147,7 @@ export class Bridge {
     try { await this.#send(child, frame); } catch (error) { item.end(error); throw error; }
     if (signal?.aborted) abort();
     return {
+      metadata: item.metadata,
       async next() {
         while (!item.queue.length && !item.ended) await new Promise(resolve => { item.wake = resolve; });
         if (item.error) throw item.error;

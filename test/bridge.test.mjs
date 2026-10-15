@@ -34,6 +34,8 @@ test('real child handshakes and correlates concurrent status calls', async t => 
 });
 
 test('production child rejects fixture origins before contacting a local server', async t => {
+  try { import.meta.resolve('playwright-core'); }
+  catch { t.skip('playwright-core is not installed; run npm ci --ignore-scripts.'); return; }
   let hits = 0;
   const server = createServer((request, response) => { hits++; response.end('{}'); });
   server.listen(0, '127.0.0.1');
