@@ -11,13 +11,16 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
   let degraded;
   let layout;
   let streamFailed = false;
+  let domObserved = false;
+  let harvestFailure;
   const log = data => emit({ event: 'log', data });
   const publish = async (next, source) => {
-    if (next === text || text.startsWith(next)) return;
-    if (!next.startsWith(text)) throw new BackendError('protocol');
-    const delta = next.slice(text.length);
-    text = next;
+    if (source === 'sse' && domObserved) return;
+    if (source === 'dom') domObserved = true;
     carrier = source;
+    if (next === text) return;
+    const delta = source === 'dom' ? next : next.slice(text.length);
+    text = next;
     await emit(source === 'dom' ? { event: 'dom', data: { text } } : { event: 'answer', data: { text: delta } });
   };
   const route = () => streamFailed || stream.handedOff ? 'dom' : carrier;
@@ -30,10 +33,11 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
     if (error?.kind === 'sign-in') { guard.observe(401); throw new BackendError('expired'); }
     if (run.failure) throw run.failure;
     let eof = false;
+    let partial = false;
     for (const item of run.queue.splice(0)) {
       if (item.kind === 'status' && (item.status < 200 || item.status >= 300)) throw responseFailure(item.status, item, guard, item.retryAfter);
       if (item.kind === 'eof') {
-        if (item.partial) throw new BackendError('truncated');
+        partial ||= item.partial;
         eof = true;
       }
       if (item.kind === 'fallback') {
@@ -63,16 +67,22 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
       layout = state.layout;
       await log({ kind: 'observationLayout', layout });
     }
-    if (snapshot.failed) throw Object.assign(new BackendError('harvest'), { cause: snapshot.failed });
+    if (snapshot.failed && !harvestFailure) {
+      harvestFailure = Object.assign(new BackendError('harvest'), { cause: snapshot.failed });
+      streamFailed = true;
+      await log({ kind: 'observationFailure', code: 'harvest', cause: snapshot.failed });
+    }
     if (!streamFailed) await publish(stream.text, 'sse');
-    await publish(snapshot.text, 'dom');
-    if (state.complete && snapshot.nodes > 0 || !streamFailed && stream.complete) {
+    if (snapshot.text || snapshot.nodes > 0 && state.complete) await publish(snapshot.text, 'dom');
+    const domComplete = state.complete && snapshot.nodes > 0;
+    const streamComplete = !streamFailed && !stream.handedOff && !partial && !domObserved && stream.complete;
+    if (domComplete || streamComplete) {
       if (!text.trim()) throw new BackendError('empty');
       await emit({ event: '', data: { type: 'message_stream_complete' } });
       return { text, route: route(), ...(degraded ? { degraded } : {}) };
     }
-    if (eof && !streamFailed && !stream.handedOff) throw new BackendError('truncated');
+    if (eof && !streamFailed && !stream.handedOff && !domObserved) throw new BackendError('truncated');
     await delay(Math.min(500, Math.max(0, deadline - Date.now())), undefined, { signal });
   }
-  throw new BackendError('truncated');
+  throw harvestFailure ?? new BackendError('truncated');
 }
