@@ -33,7 +33,7 @@ test('answer observer captures exact fixture text, terminal and timed deltas; re
     });
     return context;
   } });
-  const command = () => ({ ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }), auth: { profile: 'fixture' } });
+  const command = () => ({ ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }), auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } });
   try {
     fixture.setMode('truncated');
     const bad = await observeAnswer(driver, command(), new AccountGuard(), 'fixture', new AbortController().signal);

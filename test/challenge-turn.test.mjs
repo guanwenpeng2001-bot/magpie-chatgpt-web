@@ -27,7 +27,7 @@ test('offline challenge turn routing', async t => {
     if (process.env.CHALLENGE_TRACE) await context.tracing.start({ screenshots: true, snapshots: true });
     return context;
   } });
-  const command = () => ({ ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }), auth: { profile: 'fixture' } });
+  const command = () => ({ ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }), auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } });
   try {
     for (const [mode, expected] of [
       ['app-shell-challenge', 'verification'], ['app-shell-card', 'verification'], ['app-shell-script', null],

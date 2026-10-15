@@ -6,6 +6,22 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { challengeEvidence, responseFailure } from './http.mjs';
 import { BackendError } from './guard.mjs';
 
+async function reconcileSessionCookies(context, credential, origin) {
+  if (typeof credential !== 'string' || /[\r\n\0]/.test(credential)) throw new BackendError('expired');
+  const sessionName = /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/;
+  const desired = credential.split(';').map(pair => {
+    const at = pair.indexOf('=');
+    return { name: pair.slice(0, at).trim(), value: pair.slice(at + 1).trim() };
+  }).filter(cookie => sessionName.test(cookie.name));
+  if (!desired.length || desired.some(cookie => !cookie.value)) throw new BackendError('expired');
+  try {
+    const current = (await context.cookies(String(origin))).filter(cookie => sessionName.test(cookie.name));
+    if (current.length === desired.length && current.every(cookie => desired.some(next => next.name === cookie.name && next.value === cookie.value))) return;
+    for (const cookie of current) await context.clearCookies({ name: cookie.name, domain: cookie.domain, path: cookie.path });
+    await context.addCookies(desired.map(cookie => ({ ...cookie, url: new URL('/', origin).href, httpOnly: true, secure: new URL(origin).protocol === 'https:', sameSite: 'Lax' })));
+  } catch { throw new BackendError('upstream'); }
+}
+
 export class BrowserSupervisor {
   #accounts = new Map();
   #closed = false;
@@ -62,7 +78,7 @@ export class BrowserSupervisor {
     clearTimeout(entry.timer);
     return entry;
   }
-  async run(account, operation, signal, { visibleTurns } = {}) {
+  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com' } = {}) {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
       const entry = await this.#ensure(account, visibleTurns === undefined ? this.options.headless : !visibleTurns);
@@ -80,7 +96,11 @@ export class BrowserSupervisor {
             onAbort = () => reject(signal.reason ?? new BackendError('upstream'));
             signal?.addEventListener('abort', onAbort, { once: true });
           }),
-          Promise.resolve().then(() => operation(context, signal)),
+          Promise.resolve().then(async () => {
+            if (auth !== undefined) await reconcileSessionCookies(context, auth.refresh, origin);
+            signal?.throwIfAborted();
+            return operation(context, signal);
+          }),
         ]);
       } catch (error) {
         if (attempt || !entry.closed || entry.stopping || this.#closed || signal?.aborted) throw error;

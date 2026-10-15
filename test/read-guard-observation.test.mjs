@@ -23,6 +23,7 @@ for (const status of [401, 429]) test(`typed ${status} remains observed across s
   const origin = `http://127.0.0.1:${server.address().port}`;
   const context = new EventEmitter();
   context.pages = () => [];
+  context.cookies = async () => [{ name: 'next-auth.session-token', value: 'fixture' }];
   context.close = async () => context.emit('close');
   context.newPage = async () => {
     pages++;
@@ -54,7 +55,7 @@ for (const status of [401, 429]) test(`typed ${status} remains observed across s
   t.after(async () => { input.end(); await work; await Promise.all(closes); server.closeAllConnections(); server.close(); });
   const request = id => new Promise(resolve => {
     replies.set(id, resolve);
-    input.write(JSON.stringify({ id, method: 'models', origin, profileRoot: '.', auth: { profile: 'fixture', refresh: 'fixture' } }) + '\n');
+    input.write(JSON.stringify({ id, method: 'models', origin, profileRoot: '.', auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } }) + '\n');
   });
   const first = await request('first');
   assert.equal(first.error.status, 504);

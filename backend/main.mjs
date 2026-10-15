@@ -71,7 +71,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
               throw error;
             }
             finally { signal.removeEventListener('abort', abort); if (!verification) await page.close().catch(() => {}); }
-          }, signal);
+          }, signal, { auth: command.auth, origin });
         },
       });
       const idle = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used);

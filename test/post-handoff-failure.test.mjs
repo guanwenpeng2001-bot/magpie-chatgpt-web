@@ -59,7 +59,7 @@ async function runFixtureTurn({ mode, answerDelayMs = 0, timeout = 20000, render
   let failure;
   const startedAt = Date.now();
   try {
-    await driver.complete({ ...prepared, auth: { profile: 'fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame));
+    await driver.complete({ ...prepared, auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame));
   } catch (error) { failure = error; }
   return {
     frames, failure, harvestEvents, elapsedMs: Date.now() - startedAt,

@@ -178,6 +178,41 @@ test('login state polling represents all four states without arbitrary error tex
   assert.equal(states.finish('fixture', 'cancelled').state, 'cancelled');
 });
 
+for (const rejected of [false, true]) test(`browser fallback reconciles rotated credentials before navigation (expired=${rejected})`, async () => {
+  const { EventEmitter } = await import('node:events');
+  const { BrowserSupervisor } = await import('../backend/browser.mjs');
+  const context = new EventEmitter();
+  let stored = [{ name: '__Secure-next-auth.session-token', value: 'prior', domain: 'chatgpt.com', path: '/' }];
+  let writes = 0;
+  const sent = [];
+  context.pages = () => [];
+  context.close = async () => context.emit('close');
+  context.cookies = async () => stored;
+  context.clearCookies = async () => { stored = []; };
+  context.addCookies = async cookies => { stored = cookies; writes++; };
+  context.newPage = async () => ({
+    goto: async () => { sent.push(stored.map(cookie => cookie.value).join('')); },
+    url: () => 'https://chatgpt.com/', close: async () => {},
+    evaluate: async () => ({ status: rejected ? 401 : 200, headers: {}, body: JSON.stringify({ models: [{ slug: 'auto', title: 'Auto' }] }) }),
+  });
+  const browser = new BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  const server = harness({
+    turnDriver: { browser, close: () => browser.close() },
+    readClient: ({ browserRoute, guard }) => ({ guard, models: signal => browserRoute('/backend-api/models', signal, new URL('https://chatgpt.com')) }),
+  });
+  try {
+    for (const [id, refresh] of [['prior', '__Secure-next-auth.session-token=prior'], ['rotated', '__Secure-next-auth.session-token=rotated-secret'], ['unchanged', '__Secure-next-auth.session-token=rotated-secret']]) {
+      server.send({ id, method: 'models', profileRoot: '.', auth: { profile: 'fixture', refresh } });
+      await server.until(frames => frames.some(frame => frame.id === id && ['done', 'error'].includes(frame.event)));
+    }
+    assert.deepEqual(sent, ['prior', 'rotated-secret', 'rotated-secret']);
+    assert.equal(writes, 1);
+    assert.equal(server.frames.filter(frame => frame.event === 'error').length, rejected ? 3 : 0);
+    if (rejected) for (const frame of server.frames.filter(frame => frame.event === 'error')) assert.equal(BackendError.fromEnvelope(frame.error).code, 'expired');
+    assert.equal(JSON.stringify(server.frames).includes('rotated-secret'), false);
+  } finally { server.input.end(); await server.work; }
+});
+
 test('session command renews over the read client without starting login', async () => {
   const accessToken = crypto.randomUUID();
   const expires = Date.now() + 10 * 86400000;

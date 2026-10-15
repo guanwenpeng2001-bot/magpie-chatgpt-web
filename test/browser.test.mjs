@@ -185,6 +185,94 @@ test('intentional account close never restarts an active operation', async () =>
   await browser.close();
 });
 
+function cookieContext(initial) {
+  const context = new EventEmitter();
+  let cookies = structuredClone(initial);
+  context.writes = [];
+  context.pages = () => [];
+  context.close = async () => context.emit('close');
+  context.cookies = async () => structuredClone(cookies);
+  context.clearCookies = async filter => { cookies = cookies.filter(cookie => !(cookie.name === filter.name && cookie.domain === filter.domain && cookie.path === filter.path)); };
+  context.addCookies = async additions => {
+    context.writes.push(additions);
+    for (const cookie of additions) {
+      cookies = cookies.filter(existing => existing.name !== cookie.name);
+      cookies.push(cookie);
+    }
+  };
+  return context;
+}
+
+for (const [label, initial, refresh] of [
+  ['rotation', [{ name: '__Secure-next-auth.session-token', value: 'prior' }], '__Secure-next-auth.session-token=current'],
+  ['chunk contraction', [{ name: '__Secure-next-auth.session-token.0', value: 'prior' }, { name: '__Secure-next-auth.session-token.1', value: 'tail' }], '__Secure-next-auth.session-token=current'],
+  ['chunk expansion', [{ name: '__Secure-next-auth.session-token', value: 'prior' }], '__Secure-next-auth.session-token.0=current; __Secure-next-auth.session-token.1=tail'],
+]) test(`credential reconciliation ${label} sends current session and preserves other cookies`, async () => {
+  const other = { name: 'preference', value: 'dark', domain: 'chatgpt.com', path: '/' };
+  const context = cookieContext([...initial.map(cookie => ({ ...cookie, domain: '.chatgpt.com', path: '/' })), other]);
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  try {
+    await browser.run('fixture', async context => {
+      const actual = await context.cookies();
+      assert.deepEqual(actual.filter(cookie => cookie.name !== 'preference').map(cookie => `${cookie.name}=${cookie.value}`).sort(), refresh.split('; ').sort());
+      assert.deepEqual(actual.find(cookie => cookie.name === 'preference'), other);
+    }, undefined, { auth: { refresh }, origin: 'https://chatgpt.com' });
+  } finally { await browser.close(); }
+});
+
+test('TurnDriver reconciles the command credential before creating a turn page', async () => {
+  const { TurnDriver } = await import('../backend/turn.mjs');
+  const { AccountGuard } = await import('../backend/guard.mjs');
+  const context = cookieContext([{ name: '__Secure-next-auth.session-token', value: 'prior', domain: 'chatgpt.com', path: '/' }]);
+  context.exposeBinding = async () => {};
+  context.addInitScript = async () => {};
+  let sent;
+  context.newPage = async () => {
+    sent = (await context.cookies()).map(cookie => cookie.value);
+    throw new BackendError('expired');
+  };
+  const driver = new TurnDriver({ profileRoot: '.', launch: async () => context });
+  try {
+    await assert.rejects(driver.complete({ auth: { profile: 'fixture', refresh: '__Secure-next-auth.session-token=current' }, model: 'auto', history: [{ role: 'user', content: 'hello' }] }, new AccountGuard(), 'fixture', new AbortController().signal, () => {}), error => error.code === 'expired');
+    assert.deepEqual(sent, ['current']);
+  } finally { await driver.close(); }
+});
+
+test('cookie write failures suppress credential-bearing browser diagnostics', async () => {
+  const context = cookieContext([]);
+  context.addCookies = async () => { throw new Error('private-session-marker'); };
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  try {
+    await assert.rejects(browser.run('fixture', () => assert.fail('must not use failed reconciliation'), undefined, { auth: { refresh: '__Secure-next-auth.session-token=private-session-marker' } }), error => {
+      assert.equal(error.code, 'upstream');
+      assert.equal(JSON.stringify(error.toJSON()).includes('private-session-marker'), false);
+      assert.equal(error.stack.includes('private-session-marker'), false);
+      return true;
+    });
+  } finally { await browser.close(); }
+});
+
+test('unchanged credential reconciliation performs zero cookie writes', async () => {
+  const context = cookieContext([{ name: '__Secure-next-auth.session-token', value: 'current', domain: '.chatgpt.com', path: '/' }]);
+  context.clearCookies = async () => assert.fail('unchanged cookies must not be cleared');
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  try {
+    await browser.run('fixture', async () => {}, undefined, { auth: { refresh: '__Secure-next-auth.session-token=current' }, origin: 'https://chatgpt.com' });
+    assert.equal(context.writes.length, 0);
+  } finally { await browser.close(); }
+});
+
+for (const refresh of [undefined, '', 'preference=dark', '__Secure-next-auth.session-token=']) test(`absent session credential (${String(refresh)}) cannot reuse a live profile`, async () => {
+  const context = cookieContext([{ name: '__Secure-next-auth.session-token', value: 'live', domain: '.chatgpt.com', path: '/' }]);
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  let used = false;
+  try {
+    await assert.rejects(browser.run('fixture', async () => { used = true; }, undefined, { auth: { refresh }, origin: 'https://chatgpt.com' }), error => error instanceof BackendError && error.code === 'expired');
+    assert.equal(used, false);
+    assert.equal(context.writes.length, 0);
+  } finally { await browser.close(); }
+});
+
 test('closed supervisor reports lifecycle failure', async () => {
   const browser = new module.BrowserSupervisor({ profileRoot: '.' });
   await browser.close();
