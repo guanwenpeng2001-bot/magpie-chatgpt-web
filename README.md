@@ -102,7 +102,7 @@ Each row names a public error code, its condition and an action the user can tak
 | `empty` | No answer text was returned. | Retry the message; report persistent empty replies. |
 | `hidden` | ChatGPT hid the reply from the conversation. | Review the request and retry with a revised message. |
 | `truncated` | The reply ended without confirmed completion. | Retry or request a shorter answer; do not treat partial text as complete. |
-| `unsupported` | The request contains unsupported content. | Remove unsupported blocks and resend supported text or image input. |
+| `unsupported` | The request carries malformed content that is neither a text string nor a content-block array. | Correct the malformed content and resend supported content: text, valid tool blocks, or acceptable images. |
 | `invalidRequest` | The request shape is invalid. | Correct the client request and retry. |
 | `toolDefinition` | Tool definitions are invalid or use unsupported schema keywords. | Correct the definitions to the supported subset below. |
 | `toolChoice` | Tool choice is invalid or names an undefined tool. | Choose a defined tool or correct the choice value. |

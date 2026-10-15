@@ -131,7 +131,7 @@ export class TurnDriver {
       case 'picker-missing': throw new BackendError('pickerMissing', { values: detail });
       case 'picker-ambiguous': throw new BackendError('pickerAmbiguous', { values: { slug, count: detail.count } });
       case 'model-not-offered': throw new BackendError('modelNotOffered', { values: { slug } });
-      case 'attach-unavailable': throw new BackendError('attachmentUnsupported', { values: { kind: 'images without an upload control', maxCount: 4, maxBytes: 10 * 1024 * 1024 } });
+      case 'attach-unavailable': throw new BackendError('attachmentUnsupported', { values: { kind: 'images without an upload control', maxCount: 4, maxBytes: '10 MiB' } });
       case 'image-rejected': throw new BackendError('imageRejected', { values: { detail: detail.reason } });
       default: throw new BackendError('protocol');
     }
