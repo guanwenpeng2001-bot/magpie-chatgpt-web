@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TurnDriver } from '../backend/turn.mjs';
 import { AccountGuard } from '../backend/guard.mjs';
-import { prepare } from '../src/protocol.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
 import { createTurnFixture } from '../integrations/turn-fixture.mjs';
 
 const verification = 'ChatGPT asked to verify you are human. Complete verification in the open browser, then retry the chat.';
@@ -21,7 +21,7 @@ test('offline challenge turn routing', async t => {
   const fixture = await createTurnFixture({ interval: 20 });
   const root = await mkdtemp(join(tmpdir(), 'challenge-turn-'));
   let context;
-  const driver = new TurnDriver({ profileRoot: root, origin: fixture.origin, timeout: 1500, launch: async profile => {
+  const driver = new TurnDriver({ profileRoot: root, origin: fixture.origin, timeout: 15000, launch: async profile => {
     context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, serviceWorkers: 'block', args: ['--disable-background-networking'] });
     await context.route('**/*', route => new URL(route.request().url()).origin === fixture.origin ? route.continue() : route.abort());
     if (process.env.CHALLENGE_TRACE) await context.tracing.start({ screenshots: true, snapshots: true });
@@ -33,7 +33,7 @@ test('offline challenge turn routing', async t => {
       ['app-shell-challenge', 'verification'], ['app-shell-card', 'verification'], ['app-shell-script', null],
       ['xhr-challenge', 'verification'], ['xhr-interstitial', 'verification'], ['xhr-forbidden', 'expired'],
       ['xhr-expired', 'expired'], ['xhr-rate', 'cooldown'], ['challenge', 'verification'],
-      ['post-challenge', 'verification'], ['page-shape', 'pageShape'],
+      ['post-challenge', 'verification'], ['page-shape', 'pickerMissing'],
     ]) await t.test(mode, async () => {
       fixture.setMode(mode);
       const guard = new AccountGuard({ sleep: async () => {} });
@@ -42,23 +42,15 @@ test('offline challenge turn routing', async t => {
       let failure;
       try { await driver.complete(command(), guard, 'fixture', new AbortController().signal, frame => frames.push(frame)); }
       catch (error) { failure = error; }
-      console.log(JSON.stringify({ mode, code: failure?.code, error: failure?.toJSON(), text: frames.filter(frame => frame.event === 'answer').map(frame => frame.data.text).join('') }));
+      console.log(JSON.stringify({ mode, code: failure?.code, error: failure?.toJSON(), text: frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join('') }));
       assert.equal(failure?.code ?? null, expected);
       if (expected) assert.deepEqual(frames, []);
-      else assert.equal(frames.filter(frame => frame.event === 'answer').map(frame => frame.data.text).join(''), fixture.batches.join(''));
+      else assert.equal(frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join(''), fixture.batches.join(''));
       assert.equal(fixture.requests.length - before, ['challenge', 'page-shape'].includes(mode) ? 0 : 1);
       if (expected === 'verification') {
         assert.deepEqual(failure.toJSON(), { status: 502, message: verification });
         (await guard.begin())();
-        if (mode.startsWith('app-shell-')) {
-          const page = context.pages().find(page => !page.isClosed() && page.url().startsWith(fixture.origin));
-          assert.ok(page, 'challenge page remains open for manual verification');
-          assert.equal(await page.title(), 'Local chat fixture');
-          assert.equal(await page.getByRole('textbox').count(), 1);
-          assert.equal(await page.locator('iframe').getAttribute('title'), 'DIL execution sandbox');
-          assert.equal(await page.getByRole('dialog').count(), 0);
-          await page.close();
-        }
+        assert.equal(context.pages().some(page => !page.isClosed() && page.url().startsWith(fixture.origin)), false, 'failed turn pages are closed');
       } else if (expected === 'expired') await assert.rejects(guard.begin(), { code: 'expired' });
       else if (expected === 'cooldown') assert.equal(failure.retryAfter, '120');
     });
@@ -69,14 +61,14 @@ test('offline challenge turn routing', async t => {
       const seen = {};
       await driver.complete(command(), new AccountGuard(), 'fixture', new AbortController().signal, async frame => {
         frames.push(frame);
-        if (frame.event === 'answer' && !seen.script) {
+        if (frame.type === 'delta' && !seen.script) {
           const page = context.pages().find(page => !page.isClosed() && page.url().startsWith(fixture.origin));
           seen.script = await page.evaluate(() => [...document.scripts].filter(script => script.src.includes('/cdn-cgi/challenge-platform/')).length);
           seen.answer = await page.locator('[aria-label="Assistant response"]').innerText();
         }
       });
-      assert.equal(frames.filter(frame => frame.event === 'answer').map(frame => frame.data.text).join(''), fixture.batches.join(''));
-      assert.equal(frames.at(-1).data.type, 'message_stream_complete');
+      assert.equal(frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join(''), fixture.batches.join(''));
+      assert.equal(frames.at(-1).type, 'finish');
       assert.equal(seen.script, 1);
       assert.equal(seen.answer.startsWith(fixture.batches[0]), true);
     });

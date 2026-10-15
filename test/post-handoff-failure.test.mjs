@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { installHarvest } from '../backend/harvest.mjs';
 import { TurnDriver } from '../backend/turn.mjs';
 import { AccountGuard } from '../backend/guard.mjs';
-import { prepare } from '../src/protocol.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
 import { createTurnFixture } from '../integrations/turn-fixture.mjs';
 
 const expected = 'ORCA_DOM_ALPHA\nORCA_DOM_BETA\nORCA_DOM_GAMMA';
@@ -78,8 +78,8 @@ test('a post-handoff reader failure does not abort a turn the DOM route complete
   const turn = await runFixtureTurn({ mode: 'present-handoff-failure' });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
-    assert.deepEqual(turn.frames.filter(frame => frame.event === 'dom').map(frame => frame.data.text), ['ORCA_DOM_ALPHA', expected]);
-    assert.equal(turn.frames.at(-1).data.type, 'message_stream_complete');
+    assert.deepEqual(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    assert.equal(turn.frames.at(-1).type, 'finish');
     const failure = turn.harvestEvents.find(item => item.kind === 'failure');
     assert.equal(failure?.code, 'harvest', 'the reader must have reported its own failure');
     assert.match(failure?.cause ?? '', new RegExp(readerCrash), 'the failure must carry its cause');
@@ -98,8 +98,8 @@ test('a post-handoff reader failure survives a DOM answer that arrives only afte
   const turn = await runFixtureTurn({ mode: 'present-handoff-failure', answerDelayMs: 2500 });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
-    assert.deepEqual(turn.frames.filter(frame => frame.event === 'dom').map(frame => frame.data.text), ['ORCA_DOM_ALPHA', expected]);
-    assert.equal(turn.frames.at(-1).data.type, 'message_stream_complete');
+    assert.deepEqual(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    assert.equal(turn.frames.at(-1).type, 'finish');
     const failure = turn.harvestEvents.find(item => item.kind === 'failure');
     assert.equal(failure?.code, 'harvest');
   } finally { await turn.close(); }
@@ -116,8 +116,8 @@ test('a stream completion frame after the handoff does not end the turn before t
   const turn = await runFixtureTurn({ mode: 'present-handoff-done', answerDelayMs: 1000 });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
-    assert.deepEqual(turn.frames.filter(frame => frame.event === 'dom').map(frame => frame.data.text), ['ORCA_DOM_ALPHA', expected]);
-    assert.equal(turn.frames.at(-1).data.type, 'message_stream_complete');
+    assert.deepEqual(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    assert.equal(turn.frames.at(-1).type, 'finish');
   } finally { await turn.close(); }
 });
 

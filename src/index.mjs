@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Bridge, BackendError } from './bridge.mjs';
-import { prepare, translate, errorEvent } from './protocol.mjs';
+import { prepare } from './wire/prepare.mjs';
+import { translate, errorEvent } from './wire/translate.mjs';
 
 const PROVIDER = 'chatgpt-web';
 const API = 'https://chatgpt-web.invalid/v1';

@@ -9,8 +9,8 @@ async function loaderFor(reply) {
   const bridge = { async open(prepared) {
     opened++; command = prepared;
     const source = (async function* () {
-      yield { event: 'answer', data: { text: reply(prepared) } };
-      yield { event: '', data: '[DONE]' };
+      yield { type: 'delta', index: 0, text: reply(prepared) };
+      yield { type: 'finish', reason: 'complete' };
     })();
     source.close = () => { closed++; };
     return source;
