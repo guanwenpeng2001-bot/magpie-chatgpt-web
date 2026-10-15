@@ -128,7 +128,7 @@ export class Bridge {
     if (this.#closed || !child) throw new BackendError('backendDown');
     if (this.#pending.size >= 64) throw new BackendError('cooldown', { retryAfter: 1 });
     const frame = { ...command, id };
-    if (Buffer.byteLength(JSON.stringify(frame)) >= 16 << 20) throw new BackendError('protocol');
+    if (Buffer.byteLength(JSON.stringify(frame)) >= 64 << 20) throw new BackendError('protocol');
     const item = { queue: [], bytes: 0, ended: false, head: false, method: command.method, metadata: {} };
     const abort = () => {
       this.#send(child, { id, method: 'abort' }).catch(() => {});

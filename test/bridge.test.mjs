@@ -5,6 +5,23 @@ import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const module = await import('../src/bridge.mjs');
+import { spawn } from 'node:child_process';
+import { prepare } from '../src/wire/prepare.mjs';
+
+test('maximum legal images cross bridge and backend command limits', async t => {
+  const backendURL = new URL('../backend/main.mjs', import.meta.url).href;
+  const script = `import { serve } from ${JSON.stringify(backendURL)}; await serve(process.stdin, process.stdout, { handlers: { complete: async (command, signal, emit) => { await emit({ type: 'delta', index: 0, text: String(command.images.reduce((sum, image) => sum + image.bytes, 0)) }); await emit({ type: 'finish', reason: 'complete' }); return { route: 'dom' }; } } });`;
+  const bridge = new module.Bridge({ spawnProcess: (executable, args, options) => spawn(executable, ['--input-type=module', '-e', script], options) });
+  t.after(() => bridge.dispose());
+  const data = Buffer.alloc(10 << 20).toString('base64');
+  const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: Array.from({ length: 4 }, () => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data } })) }] });
+  const stream = await bridge.open({ method: 'complete', ...prepared });
+  const frames = [];
+  for await (const frame of stream) frames.push(frame);
+  assert.equal(frames[0].text, String(40 << 20));
+  assert.equal(stream.metadata.route, 'dom');
+  await assert.rejects(bridge.open({ method: 'complete', padding: 'x'.repeat(64 << 20) }), error => error.code === 'protocol');
+});
 
 test('real backend preserves account cooldown across ancillary-cookie changes', async t => {
   let count = 0;

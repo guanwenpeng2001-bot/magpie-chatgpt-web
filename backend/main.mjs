@@ -232,12 +232,12 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       while ((newline = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
-        if (Buffer.byteLength(line) >= 16 << 20) throw new BackendError('protocol');
+        if (Buffer.byteLength(line) >= 64 << 20) throw new BackendError('protocol');
         let command;
         try { command = JSON.parse(line); } catch { continue; }
         accept(command);
       }
-      if (Buffer.byteLength(buffer) >= 16 << 20) throw new BackendError('protocol');
+      if (Buffer.byteLength(buffer) >= 64 << 20) throw new BackendError('protocol');
     }
   } catch { shutdown(); }
   finally {
