@@ -5,7 +5,7 @@ import { ReadClient, productionReadClient } from './http.mjs';
 import { LoginStates, createLoginFlow, sessionCredential, browserRead } from './browser.mjs';
 import { TurnDriver } from './turn.mjs';
 
-export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
+export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
   let turns = turnDriver;
   const pending = new Map();
   const clients = new Map();
@@ -103,20 +103,24 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     return { client: entry.client, identity, release: () => { entry.refs--; entry.used = ++clientClock; } };
   };
   const loginPromises = new Map();
-  const startLogin = (account, profileRoot) => {
+  const startLogin = (account, profileRoot, proxy) => {
     if (loginPromises.has(account)) return;
     if (loginPromises.size >= 64) throw new BackendError('backendDown');
     login.start(account);
     const controller = new AbortController();
     const entry = { controller };
     loginPromises.set(account, entry);
-    const timer = setTimeout(() => controller.abort(), 300_000);
+    const timer = setTimeout(() => controller.abort(new BackendError('signinTimeout', { values: { windowMinutes: signinTimeout / 60_000 } })), signinTimeout);
     const settle = outcome => {
       if (loginPromises.get(account) !== entry || stopping) return;
-      login.finish(account, controller.signal.aborted ? 'failed' : outcome?.state, controller.signal.aborted ? undefined : outcome?.credential, outcome?.error);
+      const reason = controller.signal.aborted ? controller.signal.reason : outcome?.error ?? outcome?.reason;
+      const state = controller.signal.aborted
+        ? reason?.code === 'signinTimeout' ? 'timeout' : reason?.name === 'AbortError' ? 'cancelled' : 'failed'
+        : outcome?.state;
+      login.finish(account, state, controller.signal.aborted ? undefined : outcome?.credential, reason);
     };
-    controller.signal.addEventListener('abort', () => settle({ state: 'failed' }), { once: true });
-    entry.work = Promise.resolve().then(() => loginFlow(account, controller.signal, profileRoot)).then(settle, error => settle({ state: 'failed', error })).finally(() => {
+    controller.signal.addEventListener('abort', () => settle(), { once: true });
+    entry.work = Promise.resolve().then(() => loginFlow(account, controller.signal, profileRoot, { proxy })).then(settle, error => settle({ state: 'failed', error })).finally(() => {
       clearTimeout(timer);
       if (loginPromises.get(account) === entry) loginPromises.delete(account);
     });
@@ -134,29 +138,39 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       case 'session': {
         const { client, release } = clientFor(command);
         try {
-          const session = await client.session(signal);
+          const session = await client.session(signal, { interactive: false });
           const credential = sessionCredential(session, session.refresh ?? command.auth.refresh, command.auth.profile);
           return { access: credential.access, expires: credential.expires, ...(session.refresh ? { refresh: session.refresh } : {}) };
         } finally { release(); }
       }
       case 'loginStatus': return login.status(account);
       case 'login': {
-        startLogin(account, command.profileRoot);
-        return { state: 'pending' };
+        startLogin(account, command.profileRoot, command.proxy);
+        return { ok: true };
       }
-      case 'logout': loginPromises.get(account)?.cancel(); loginPromises.delete(account); login.clear(account); return true;
+      case 'logout': loginPromises.get(account)?.cancel(); loginPromises.delete(account); login.clear(account); return { ok: true };
       case 'discard': {
-        const { identity, release } = clientFor(command);
-        try { await turns?.bindings.discard(command.conversationKey, identity); return true; } finally { release(); }
+        if (typeof command.conversationKey !== 'string' || !command.conversationKey) throw new BackendError('invalidRequest');
+        await turns?.bindings.discard(command.conversationKey);
+        return { ok: true };
       }
       case 'complete': {
-        if (typeof command.prompt !== 'string' || !Array.isArray(command.history) || typeof command.model !== 'string' || typeof command.auth?.profile !== 'string') throw new BackendError('protocol');
+        if (!Array.isArray(command.history) || typeof command.model !== 'string' || typeof command.auth?.profile !== 'string') throw new BackendError('invalidRequest');
+        if (command.images !== undefined) {
+          const maxCount = 4;
+          const maxBytes = 10 * 1024 * 1024;
+          const invalid = !Array.isArray(command.images) || command.images.length > maxCount || command.images.some(image => {
+            if (!image || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(image.mediaType) || typeof image.dataBase64 !== 'string' || !image.dataBase64.length || image.dataBase64.length > Math.ceil(maxBytes / 3) * 4) return true;
+            const decoded = Buffer.from(image.dataBase64, 'base64');
+            return decoded.toString('base64') !== image.dataBase64 || decoded.length > maxBytes || image.bytes !== decoded.length;
+          });
+          if (invalid) throw new BackendError('attachmentUnsupported', { values: { kind: 'invalid or over-cap images', maxCount, maxBytes } });
+        }
         const { client, identity, release } = clientFor(command);
         try {
           turns ??= new TurnDriver({ profileRoot: command.profileRoot });
-          await turns.complete(command, client.guard, identity, signal, emit);
+          return await turns.complete(command, client.guard, identity, signal, emit);
         } finally { release(); }
-        return;
       }
       default: throw new BackendError('protocol');
     }
@@ -168,7 +182,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
     let budgetExpired = false;
-    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, timeout);
+    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, command.method === 'session' ? Math.min(timeout, 10_000) : timeout);
     const entry = { controller };
     pending.set(command.id, entry);
     entry.work = (async () => {
@@ -190,8 +204,13 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         controller.signal.throwIfAborted();
         const result = await Promise.race([dispatch(command, controller.signal, emit), aborted]);
         controller.signal.throwIfAborted();
-        if (result !== undefined) await emit(result);
-        await send({ id: command.id, event: 'done' });
+        if (command.method !== 'complete' && result !== undefined) await emit(result);
+        const metadata = {};
+        if (command.method === 'complete' && ['dom', 'sse'].includes(result?.route)) {
+          metadata.route = result.route;
+          if (['clone-unavailable', 'xhr-submit', 'network-disabled'].includes(result.degraded)) metadata.degraded = result.degraded;
+        }
+        await send({ id: command.id, event: 'done', ...metadata });
       } catch (error) {
         if (!stopping) await send({ id: command.id, event: 'error', error: publicError(budgetExpired ? new BackendError('requestBudget') : error) }).catch(() => {});
       } finally {
@@ -203,7 +222,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     })();
   };
   output.on('error', shutdown);
-  await send({ event: 'ready', protocol: 2 });
+  await send({ event: 'ready', protocol: 3 });
   input.setEncoding('utf8');
   let buffer = '';
   try {
@@ -238,6 +257,19 @@ export async function serve(input, output, { handlers = {}, close = async () => 
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.stdin.destroy());
-  serve(process.stdin, process.stdout, { readClient: productionReadClient, loginFlow: createLoginFlow() }).catch(() => { process.exitCode = 1; });
+  let missing;
+  if (Number(process.versions.node.split('.')[0]) < 20) {
+    missing = { component: 'Node.js >= 20', remedy: 'Install Node.js 20 or newer and retry.' };
+  } else {
+    try { await import('playwright-core'); }
+    catch { missing = { component: 'plugin dependency', remedy: 'Reinstall the plugin to restore playwright-core, then retry.' }; }
+  }
+  if (missing) {
+    const error = new BackendError('missingComponent', { values: missing });
+    process.stdout.write(JSON.stringify({ event: 'error', code: error.code, ...missing, detail: error.message }) + '\n');
+    process.exitCode = 1;
+  } else {
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.stdin.destroy());
+    serve(process.stdin, process.stdout, { readClient: productionReadClient, loginFlow: createLoginFlow() }).catch(() => { process.exitCode = 1; });
+  }
 }
