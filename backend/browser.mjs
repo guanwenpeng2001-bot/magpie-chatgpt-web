@@ -1,10 +1,51 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { challengeEvidence, responseFailure } from './http.mjs';
 import { BackendError } from './guard.mjs';
+
+// The sign-in window's single source of truth: one bounded default that the
+// backend arms its abort from and the sign-in message renders from.
+export const DEFAULT_SIGNIN_TIMEOUT_MS = 900_000;
+// One unfinished sign-in's profile choice, stored in the profile root that
+// outlives the backend process so a retry resumes the same Chrome profile.
+export const SIGNIN_TIMEOUT_FILE = 'signin.profile';
+const PROFILE_CLAIM = /^[a-zA-Z0-9_-]{1,64}$/;
+const claims = new Map();
+
+export function signinWindow(milliseconds) {
+  const minutes = milliseconds / 60_000;
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+export function signinTimeoutWindow() {
+  return signinWindow(DEFAULT_SIGNIN_TIMEOUT_MS);
+}
+
+// Resumes the profile an unfinished sign-in already opened, or mints the next
+// account's own. Only the stored claim is adopted, never an arbitrary existing
+// directory: a directory no claim names may belong to a signed-in account.
+export async function signinProfileClaim(profileRoot) {
+  const known = claims.get(profileRoot);
+  if (known) return known;
+  let stored;
+  try { stored = readFileSync(join(profileRoot, SIGNIN_TIMEOUT_FILE), 'utf8').trim(); } catch { /* no claim yet */ }
+  if (stored && PROFILE_CLAIM.test(stored)) return claims.set(profileRoot, stored).get(profileRoot);
+  const minted = randomUUID();
+  try { writeFileSync(join(profileRoot, SIGNIN_TIMEOUT_FILE), minted); } catch { /* an unusable root is the login flow's failure to report */ }
+  return claims.set(profileRoot, minted).get(profileRoot);
+}
+
+// A completed sign-in retires its claim, so the next account mints its own
+// profile instead of inheriting a signed-in one.
+export function releaseSigninProfileClaim(profileRoot) {
+  claims.delete(profileRoot);
+  try { rmSync(join(profileRoot, SIGNIN_TIMEOUT_FILE)); } catch { /* an already-absent claim needs no removal */ }
+}
 
 async function reconcileSessionCookies(context, credential, origin) {
   if (typeof credential !== 'string' || /[\r\n\0]/.test(credential)) throw new BackendError('expired');
@@ -152,7 +193,7 @@ export class LoginStates {
   finish(account, state, credential, error) {
     if (state === 'signed-in') this.#states.set(account, { state, credential });
     else if (state === 'cancelled') this.#states.set(account, { state });
-    else this.#states.set(account, { state: state === 'timeout' ? 'timeout' : 'failed', reason: error instanceof BackendError ? error.toJSON().message : error?.message || (typeof error === 'string' && error) || (state === 'timeout' ? 'Sign-in did not finish within 5 minutes. Start sign-in again; the previous attempt was cancelled cleanly.' : 'Sign-in failed. Start sign-in again.') });
+    else this.#states.set(account, { state: state === 'timeout' ? 'timeout' : 'failed', reason: error instanceof BackendError ? error.toJSON().message : error?.message || (typeof error === 'string' && error) || (state === 'timeout' ? new BackendError('signinTimeout', { values: { windowMinutes: signinTimeoutWindow() } }).message : 'Sign-in failed. Start sign-in again.') });
     return this.status(account);
   }
   status(account) { return structuredClone(this.#states.get(account) ?? { state: 'cancelled' }); }

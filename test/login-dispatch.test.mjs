@@ -78,14 +78,14 @@ test('login window abort carries signinTimeout and preserves timeout reason', as
     return { state: 'timeout', error: current.reason };
   } });
   await server.request('login');
-  t.mock.timers.tick(299_999);
+  t.mock.timers.tick(899_999);
   assert.equal(signal.aborted, false);
   t.mock.timers.tick(1);
   assert.equal(signal.reason.code, 'signinTimeout');
   const frames = await server.request('loginStatus');
   const status = frames.find(frame => frame.event === 'data').data;
   assert.equal(status.state, 'timeout');
-  assert.match(status.reason, /within 5 minutes.*Start sign-in again/);
+  assert.match(status.reason, /window timed out after 15 minutes\. Retry to resume/);
 });
 
 test('a rejected login abort preserves the reason as failed', async t => {
@@ -98,7 +98,7 @@ test('a rejected login abort preserves the reason as failed', async t => {
 });
 
 test('flow timeout passes through without being rewritten to failed', async t => {
-  const error = new BackendError('signinTimeout', { values: { windowMinutes: 5 } });
+  const error = new BackendError('signinTimeout', { values: { windowMinutes: '15 minutes' } });
   const server = harness(t, { loginFlow: async () => ({ state: 'timeout', error }) });
   await server.request('login');
   const frames = await server.request('loginStatus');
@@ -244,5 +244,5 @@ test('shortened sign-in window names its actual duration', async t => {
   t.mock.timers.tick(60_000);
   const frames = await server.request('loginStatus');
   assert.equal(frames.find(frame => frame.event === 'data').data.state, 'timeout');
-  assert.match(frames.find(frame => frame.event === 'data').data.reason, /within 1 minutes.*Start sign-in again/);
+  assert.match(frames.find(frame => frame.event === 'data').data.reason, /window timed out after 1 minute\. Retry to resume/);
 });

@@ -2,10 +2,10 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { BackendError, AccountGuard, publicError } from './guard.mjs';
 import { ReadClient, productionReadClient } from './http.mjs';
-import { LoginStates, createLoginFlow, sessionCredential, browserRead } from './browser.mjs';
+import { LoginStates, createLoginFlow, sessionCredential, browserRead, DEFAULT_SIGNIN_TIMEOUT_MS, signinWindow } from './browser.mjs';
 import { TurnDriver } from './turn.mjs';
 
-export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = 300_000, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
+export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
   let turns = turnDriver;
   const pending = new Map();
   const clients = new Map();
@@ -110,7 +110,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const controller = new AbortController();
     const entry = { controller };
     loginPromises.set(account, entry);
-    const timer = setTimeout(() => controller.abort(new BackendError('signinTimeout', { values: { windowMinutes: signinTimeout / 60_000 } })), signinTimeout);
+    const timer = setTimeout(() => controller.abort(new BackendError('signinTimeout', { values: { windowMinutes: signinWindow(signinTimeout) } })), signinTimeout);
     const settle = outcome => {
       if (loginPromises.get(account) !== entry || stopping) return;
       const reason = controller.signal.aborted ? controller.signal.reason : outcome?.error ?? outcome?.reason;

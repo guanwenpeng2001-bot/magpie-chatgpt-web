@@ -35,7 +35,7 @@ export const errors = Object.freeze({
   browserConfiguration: { status: 502, template: 'Browser account or profile root configuration is invalid.' },
   browserClosed: { status: 503, template: 'The browser context closed or its supervisor stopped.' },
   backendDown: { status: 503, template: 'Backend unavailable; install Node 20 or newer and Chrome.' },
-  signinTimeout: { status: 504, template: 'Sign-in did not finish within {windowMinutes} minutes. Start sign-in again; the previous attempt was cancelled cleanly.' },
+  signinTimeout: { status: 504, template: 'The sign-in window timed out after {windowMinutes}. Retry to resume where you left off; the previous attempt was cancelled cleanly.' },
   missingComponent: { status: 503, template: '{component} was not found. {remedy}' },
   pickerMissing: { status: 502, template: 'The ChatGPT page changed: {component} was not found (selector {selector}, adapter {adapterVersion}). Update the plugin; if it is already latest, report this adapter version.' },
   pickerAmbiguous: { status: 502, template: 'The model picker shows {count} entries for {slug}; the plugin cannot choose safely. Retry, or select the model once by hand in a visible browser (enable \'visible-turns\').' },
