@@ -22,12 +22,47 @@ test('README failure table covers every pinned public code with condition and re
   }
 });
 
-test('README reserves exactly three release measurement markers with TBD values', () => {
-  const markers = [...readme.matchAll(/<!-- VERIFY:([^>]+) -->\r?\n([^\r\n]+)/g)];
-  assert.deepEqual(markers.map(match => [match[1], match[2]]), [
-    ['turn-budget', 'TBD'], ['delivery-cadence', 'TBD'], ['host-identity', 'TBD'],
-  ]);
-  assert.equal((readme.match(/<!-- VERIFY:/g) ?? []).length, 3);
+test('README states the plugin release and host version verified against', () => {
+  assert.match(prose, /Plugin version: `0\.2\.0`\. Host verified against: magpie `0\.1\.1247`/);
+});
+
+test('README records the exact verified host identity with its evidence citation', () => {
+  const section = readme.split('### Running host identity and bundle SHA-256\n')[1]?.split('\n## ')[0];
+  assert.ok(section, 'host identity section exists');
+  for (const value of [
+    'magpie `0.1.1247`', '`host-79c61aeda399.js`', '91 864 bytes',
+    '`79c61aeda399c1baa3edbe0b41af0403013ec95224724e5a92126e9f69ba2646`',
+    'verification/verify-live-acceptance.md:148-156',
+    '`…/home/.cache/magpie/plugin-host/host-79c61aeda399.js`',
+    'verification/verify-live-acceptance-r3.md:283-286',
+  ]) assert.ok(section.includes(value), `host identity needs ${value}`);
+});
+
+test('README distinguishes live sign-in verification from unmeasured turns', () => {
+  const opening = readme.split('\n')[2];
+  assert.match(opening, /Sign-in lifecycle is live-verified/);
+  assert.match(opening, /turn path remains blocked by a durable verification challenge/);
+  assert.match(opening, /handled by design.*\[failure table\]\(#failure-messages\)/);
+  assert.match(opening, /Turn budget and delivery cadence remain unmeasured/);
+});
+
+test('README explains blocked measurements without inventing live delivery results', () => {
+  for (const heading of ['Turn-budget measurement', 'Delivery-cadence measurement']) {
+    const section = readme.split(`### ${heading}\n`)[1]?.split('\n### ')[0];
+    assert.ok(section, `${heading} section exists`);
+    assert.match(section, /Unmeasured: live turn measurement was blocked by the durable verification challenge/);
+    assert.match(section, /verification\/verify-live-acceptance-r3\.md/);
+    assert.match(section, /`verification` row in the \[failure table\]\(#failure-messages\)/);
+  }
+  const cadence = readme.split('### Delivery-cadence measurement\n')[1]?.split('\n### ')[0];
+  assert.match(cadence, /whole-block.*one content delta.*by construction/);
+  assert.match(cadence, /500 ms DOM poll is an implementation setting, not measured delivery cadence/);
+  assert.match(cadence, /verification\/verify-live-acceptance\.md:183-201/);
+});
+
+test('README ships verification status without open release-gate scaffolding', () => {
+  assert.match(readme, /## Release verification status/);
+  assert.doesNotMatch(prose, /TBD|<!--\s*VERIFY|intentionally unfilled|release verification is incomplete|must be replaced.*before release/i);
 });
 
 test('README makes no unmeasured progressive delivery claim', () => {
