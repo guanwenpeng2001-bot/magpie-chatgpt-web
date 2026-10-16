@@ -21,10 +21,11 @@ export function authHook(env) {
     methods: [{
       type: 'oauth', label: 'Sign in with ChatGPT (browser)',
       async authorize() {
-        const account = await signinProfileClaim(profileRoot);
+        const owner = Symbol('sign-in');
+        const account = await signinProfileClaim(profileRoot, owner);
         const proxy = process.env.MAGPIE_HTTPS_PROXY || process.env.MAGPIE_HTTP_PROXY || process.env.MAGPIE_ALL_PROXY;
         try { await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) }); }
-        catch (error) { await unlockSigninProfile(profileRoot, account); throw error; }
+        catch (error) { await unlockSigninProfile(profileRoot, owner); throw error; }
         return {
           url: '', method: 'auto',
           instructions: 'A Chrome window owned by magpie is opening on chatgpt.com. Sign in there — including any verification the site asks for. This finishes by itself when the session is confirmed.',
@@ -33,7 +34,7 @@ export function authHook(env) {
               for (;;) {
                 const result = await bridge.call({ method: 'loginStatus', account });
                 if (result.state === 'signed-in') {
-                  await releaseSigninProfileClaim(profileRoot, account);
+                  await releaseSigninProfileClaim(profileRoot, owner);
                   return { ...result.credential, type: 'success' };
                 }
                 if (result.state === 'cancelled') return { type: 'failed', error: 'The sign-in window was closed. Start sign-in again to resume the same profile.' };
@@ -44,7 +45,7 @@ export function authHook(env) {
               }
             } finally {
               await bridge.call({ method: 'logout', account }).catch(() => {});
-              await unlockSigninProfile(profileRoot, account);
+              await unlockSigninProfile(profileRoot, owner);
             }
           },
         };

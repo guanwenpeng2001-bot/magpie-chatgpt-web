@@ -44,7 +44,7 @@ async function lockSigninProfile(root) {
   return claimLocks.get(root);
 }
 
-export async function signinProfileClaim(profileRoot) {
+export async function signinProfileClaim(profileRoot, owner) {
   const root = resolve(profileRoot);
   try {
     mkdirSync(root, { recursive: true });
@@ -57,25 +57,31 @@ export async function signinProfileClaim(profileRoot) {
       stored = randomUUID();
       writeFileSync(join(root, SIGNIN_TIMEOUT_FILE), stored);
     }
-    lock.account = stored;
+    lock.owners ??= new Map();
+    lock.owners.set(owner ?? stored, stored);
     return stored;
   } catch { throw new BackendError('browserConfiguration'); }
 }
 
-export async function releaseSigninProfileClaim(profileRoot, account) {
+export async function releaseSigninProfileClaim(profileRoot, owner) {
   const root = resolve(profileRoot);
   const lock = await claimLocks.get(root);
-  if (!lock || (account && lock.account !== account)) return;
-  try { rmSync(join(root, SIGNIN_TIMEOUT_FILE)); }
-  catch { throw new BackendError('browserConfiguration'); }
+  if (!lock || (owner && !lock.owners.has(owner))) return;
+  try {
+    const pending = readFileSync(join(root, SIGNIN_TIMEOUT_FILE), 'utf8').trim();
+    if (!owner || pending === lock.owners.get(owner)) rmSync(join(root, SIGNIN_TIMEOUT_FILE), { force: true });
+  }
+  catch (error) { if (error.code !== 'ENOENT') throw new BackendError('browserConfiguration'); }
 }
 
-export async function unlockSigninProfile(profileRoot, account) {
+export async function unlockSigninProfile(profileRoot, owner) {
   const root = resolve(profileRoot);
   const lock = await claimLocks.get(root);
-  if (!lock || (account && lock.account !== account)) return;
-  await new Promise((resolveClose, reject) => lock.close(error => error ? reject(new BackendError('browserConfiguration')) : resolveClose()));
+  if (!lock || !lock.owners.has(owner)) return;
+  lock.owners.delete(owner);
+  if (lock.owners.size) return;
   claimLocks.delete(root);
+  await new Promise((resolveClose, reject) => lock.close(error => error ? reject(new BackendError('browserConfiguration')) : resolveClose()));
 }
 
 async function reconcileSessionCookies(context, credential, origin) {

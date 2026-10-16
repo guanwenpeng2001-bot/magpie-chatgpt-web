@@ -41,6 +41,88 @@ async function claimInProcess(root) {
   return result;
 }
 
+async function foreignBind(root) {
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { createServer } from 'node:net';
+    import { createHash } from 'node:crypto';
+    import { resolve } from 'node:path';
+    const root = resolve(process.argv[1]);
+    const identity = createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex');
+    const slash = String.fromCharCode(92);
+    const address = process.platform === 'win32'
+      ? slash + slash + '.' + slash + 'pipe' + slash + 'magpie-signin-' + identity
+      : String.fromCharCode(0) + 'magpie-signin-' + identity;
+    const server = createServer();
+    server.once('error', error => console.log(error.code));
+    server.listen(address, () => server.close(() => console.log('released')));
+  `, root], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  assert.equal((await once(child, 'exit'))[0], 0);
+  return output.trim();
+}
+
+for (const check of ['ownership', 'retirement']) test('N1 overlapping sign-ins preserve ' + check, async () => {
+  const root = await temporary();
+  const first = methodFor({ call: async command => command.method === 'loginStatus' ? { state: 'timeout' } : { ok: true } }, root);
+  const second = methodFor({ call: async command => command.method === 'loginStatus' ? { state: 'signed-in', credential: { profile: command.account } } : { ok: true } }, root);
+  let later;
+  try {
+    const earlier = await first.authorize();
+    later = await second.authorize();
+    const pending = await claimBytes(root);
+    assert.equal((await earlier.callback()).type, 'failed');
+    if (check === 'ownership') {
+      assert.equal(await foreignBind(root), 'EADDRINUSE', 'second sign-in must retain the OS lock');
+      assert.notEqual((await claimInProcess(root)).account, pending, 'foreign process must not adopt the second sign-in profile');
+    }
+    assert.equal((await later.callback()).type, 'success');
+    later = undefined;
+    await assert.rejects(claimBytes(root), { code: 'ENOENT' }, 'second success must retire the pending claim');
+    assert.equal(await foreignBind(root), 'released', 'last release closes the OS lock');
+    assert.ok((await claimInProcess(root)).account, 'last release permits a new claimant');
+  } finally {
+    if (later) await later.callback().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('N1 overlapping successes cannot retire a newer pending profile', async () => {
+  const root = await temporary();
+  const method = methodFor({ call: async command => command.method === 'loginStatus'
+    ? { state: 'signed-in', credential: { profile: command.account } } : { ok: true } }, root);
+  try {
+    const first = await method.authorize();
+    const second = await method.authorize();
+    const original = await claimBytes(root);
+    assert.equal((await first.callback()).type, 'success');
+    const third = await method.authorize();
+    const newer = await claimBytes(root);
+    assert.notEqual(newer, original);
+    assert.equal((await second.callback()).type, 'success');
+    assert.equal(await claimBytes(root), newer);
+    await first.callback();
+    assert.equal(await claimBytes(root), newer);
+    assert.equal(await foreignBind(root), 'EADDRINUSE');
+    assert.equal((await third.callback()).type, 'success');
+    await assert.rejects(claimBytes(root), { code: 'ENOENT' });
+    assert.equal(await foreignBind(root), 'released');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('N2 absent pending claim still delivers the successful credential', async () => {
+  const root = await temporary();
+  try {
+    const method = methodFor({ call: async command => command.method === 'loginStatus'
+      ? { state: 'signed-in', credential: { profile: command.account } } : { ok: true } }, root);
+    const flow = await method.authorize();
+    await rm(join(root, CLAIM_FILE));
+    let result;
+    await assert.doesNotReject(async () => { result = await flow.callback(); }, 'an absent claim is already retired');
+    assert.equal(result.type, 'success');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('F1 a retire failure prevents credential delivery', async () => {
   const root = await temporary();
   const original = fs.rmSync;
