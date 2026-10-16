@@ -29,6 +29,35 @@ for (const result of [{ models: [] }, { models: [{ title: 'No slug' }] }, new Ba
   });
 }
 
+for (const [code, status, message, headers] of [
+  ['verification', 502, 'ChatGPT asked to verify you are human. Complete verification in the open browser, then retry the chat.', {}],
+  ['expired', 401, 'Sign in again to refresh the ChatGPT session.', { 'x-magpie-sign-in': 'expired' }],
+  ['cooldown', 429, 'The account is cooling down after a rate limit.', { 'retry-after': '120' }],
+  ['browserDependency', 503, 'The playwright-core dependency is unavailable; install the packaged dependency.', {}],
+]) {
+  test(`models hook exposes ${code} unchanged to its host caller`, async () => {
+    const failure = BackendError.fromEnvelope(new BackendError(code, { retryAfter: 120 }).toJSON());
+    const envelope = JSON.stringify(failure.toJSON());
+    const hooks = hooksFor({ call: async () => { throw failure; } });
+    await assert.rejects(hooks.provider.models({ models: { saved: {} } }, { auth }), error => {
+      assert.equal(error, failure);
+      assert.equal(error.status, status);
+      assert.equal(error.message, message);
+      assert.deepEqual(error.headers, headers);
+      assert.equal(JSON.stringify(error.toJSON()), envelope);
+      return true;
+    });
+  });
+}
+
+test('untyped model-list failure keeps the marked fallback', async () => {
+  const prior = { saved: { name: 'Saved' } };
+  const hooks = hooksFor({ call: async () => { throw new Error('network unavailable'); } });
+  const models = await hooks.provider.models({ models: prior }, { auth });
+  assert.deepEqual(models, prior);
+  assert.equal(models[Symbol.for('magpie.fellBack')], true);
+});
+
 for (const state of ['signed-in', 'cancelled', 'failed', 'timeout']) {
   test(`authorize maps ${state} and always cleans up`, async () => {
     const commands = [];
