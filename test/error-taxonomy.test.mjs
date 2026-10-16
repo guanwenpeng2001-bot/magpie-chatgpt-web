@@ -37,7 +37,7 @@ const taxonomy = {
   browserConfiguration: [502, 'Browser account or profile root configuration is invalid.'],
   browserClosed: [503, 'The browser context closed or its supervisor stopped.'],
   backendDown: [503, 'Backend unavailable; install Node 20 or newer and Chrome.'],
-  signinTimeout: [504, 'Sign-in did not finish within {windowMinutes} minutes. Start sign-in again; the previous attempt was cancelled cleanly.'],
+  signinTimeout: [504, 'The sign-in window timed out after {windowMinutes}. Retry to resume where you left off; the previous attempt was cancelled cleanly.'],
   missingComponent: [503, '{component} was not found. {remedy}'],
   pickerMissing: [502, 'The ChatGPT page changed: {component} was not found (selector {selector}, adapter {adapterVersion}). Update the plugin; if it is already latest, report this adapter version.'],
   pickerAmbiguous: [502, "The model picker shows {count} entries for {slug}; the plugin cannot choose safely. Retry, or select the model once by hand in a visible browser (enable 'visible-turns')."],
@@ -47,7 +47,7 @@ const taxonomy = {
 };
 
 const slotValues = {
-  signinTimeout: { windowMinutes: 5 },
+  signinTimeout: { windowMinutes: '15 minutes' },
   missingComponent: { component: 'Google Chrome', remedy: 'Install Google Chrome and try again.' },
   pickerMissing: { component: 'composer', selector: '[id="prompt-textarea"]', adapterVersion: '2026-10-15.1' },
   pickerAmbiguous: { count: 3, slug: 'gpt-5.2' },
@@ -73,7 +73,7 @@ test('kept codes keep their 0.1.0 message as the constructed message', () => {
 test('new codes interpolate their pinned message templates', () => {
   assert.equal(
     new BackendError('signinTimeout', { values: slotValues.signinTimeout }).message,
-    'Sign-in did not finish within 5 minutes. Start sign-in again; the previous attempt was cancelled cleanly.',
+    'The sign-in window timed out after 15 minutes. Retry to resume where you left off; the previous attempt was cancelled cleanly.',
   );
   assert.equal(
     new BackendError('missingComponent', { values: slotValues.missingComponent }).message,

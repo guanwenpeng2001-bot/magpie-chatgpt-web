@@ -42,7 +42,7 @@ for (const state of ['signed-in', 'cancelled', 'failed', 'timeout']) {
     assert.match(flow.instructions, /including any verification/);
     const result = await flow.callback();
     assert.equal(result.type, state === 'signed-in' ? 'success' : 'failed');
-    if (state === 'timeout') { assert.ok(result.error instanceof Error); assert.equal(result.error.toJSON().values.windowMinutes, '5'); assert.equal(result.error.code, 'signinTimeout'); assert.match(result.error.message, /within 5 minutes.*Start sign-in again/); }
+    if (state === 'timeout') { assert.ok(result.error instanceof Error); assert.equal(result.error.toJSON().values.windowMinutes, '15 minutes'); assert.equal(result.error.code, 'signinTimeout'); assert.match(result.error.message, /window timed out after 15 minutes.*Retry to resume/); }
     if (state === 'failed') assert.equal(result.error, 'Fixture failure');
     if (state === 'cancelled') assert.match(result.error, /window was closed/);
     assert.deepEqual(commands.map(command => command.method), ['login', 'loginStatus', 'logout']);

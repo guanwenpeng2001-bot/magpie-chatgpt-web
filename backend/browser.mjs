@@ -1,10 +1,88 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { randomUUID, createHash } from 'node:crypto';
+import { readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { challengeEvidence, responseFailure } from './http.mjs';
 import { BackendError } from './guard.mjs';
+
+// The sign-in window's single source of truth: one bounded default that the
+// backend arms its abort from and the sign-in message renders from.
+export const DEFAULT_SIGNIN_TIMEOUT_MS = 900_000;
+// One unfinished sign-in's profile choice, stored in the profile root that
+// outlives the backend process so a retry resumes the same Chrome profile.
+export const SIGNIN_TIMEOUT_FILE = 'signin.profile';
+const PROFILE_CLAIM = /^[a-zA-Z0-9_-]{1,64}$/;
+export function signinWindow(milliseconds) {
+  const minutes = milliseconds / 60_000;
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+export function signinTimeoutWindow() {
+  return signinWindow(DEFAULT_SIGNIN_TIMEOUT_MS);
+}
+
+const claimLocks = new Map();
+
+async function lockSigninProfile(root) {
+  if (!claimLocks.has(root)) {
+    const identity = createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex');
+    const address = process.platform === 'win32' ? '\\\\.\\pipe\\magpie-signin-' + identity : '\0magpie-signin-' + identity;
+    const server = createServer(socket => socket.destroy());
+    const acquisition = new Promise((resolveLock, reject) => {
+      server.once('error', error => {
+        claimLocks.delete(root);
+        if (error.code === 'EADDRINUSE') resolveLock(null);
+        else reject(new BackendError('browserConfiguration'));
+      });
+      server.listen(address, () => { server.unref(); resolveLock(server); });
+    });
+    claimLocks.set(root, acquisition);
+  }
+  return claimLocks.get(root);
+}
+
+export async function signinProfileClaim(profileRoot, owner) {
+  const root = resolve(profileRoot);
+  try {
+    mkdirSync(root, { recursive: true });
+    const lock = await lockSigninProfile(root);
+    if (!lock) return randomUUID();
+    let stored;
+    try { stored = readFileSync(join(root, SIGNIN_TIMEOUT_FILE), 'utf8').trim(); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!stored || !PROFILE_CLAIM.test(stored)) {
+      stored = randomUUID();
+      writeFileSync(join(root, SIGNIN_TIMEOUT_FILE), stored);
+    }
+    lock.owners ??= new Map();
+    lock.owners.set(owner ?? stored, stored);
+    return stored;
+  } catch { throw new BackendError('browserConfiguration'); }
+}
+
+export async function releaseSigninProfileClaim(profileRoot, owner) {
+  const root = resolve(profileRoot);
+  const lock = await claimLocks.get(root);
+  if (!lock || (owner && !lock.owners.has(owner))) return;
+  try {
+    const pending = readFileSync(join(root, SIGNIN_TIMEOUT_FILE), 'utf8').trim();
+    if (!owner || pending === lock.owners.get(owner)) rmSync(join(root, SIGNIN_TIMEOUT_FILE), { force: true });
+  }
+  catch (error) { if (error.code !== 'ENOENT') throw new BackendError('browserConfiguration'); }
+}
+
+export async function unlockSigninProfile(profileRoot, owner) {
+  const root = resolve(profileRoot);
+  const lock = await claimLocks.get(root);
+  if (!lock || !lock.owners.has(owner)) return;
+  lock.owners.delete(owner);
+  if (lock.owners.size) return;
+  claimLocks.delete(root);
+  await new Promise((resolveClose, reject) => lock.close(error => error ? reject(new BackendError('browserConfiguration')) : resolveClose()));
+}
 
 async function reconcileSessionCookies(context, credential, origin) {
   if (typeof credential !== 'string' || /[\r\n\0]/.test(credential)) throw new BackendError('expired');
@@ -152,7 +230,7 @@ export class LoginStates {
   finish(account, state, credential, error) {
     if (state === 'signed-in') this.#states.set(account, { state, credential });
     else if (state === 'cancelled') this.#states.set(account, { state });
-    else this.#states.set(account, { state: state === 'timeout' ? 'timeout' : 'failed', reason: error instanceof BackendError ? error.toJSON().message : error?.message || (typeof error === 'string' && error) || (state === 'timeout' ? 'Sign-in did not finish within 5 minutes. Start sign-in again; the previous attempt was cancelled cleanly.' : 'Sign-in failed. Start sign-in again.') });
+    else this.#states.set(account, { state: state === 'timeout' ? 'timeout' : 'failed', reason: error instanceof BackendError ? error.toJSON().message : error?.message || (typeof error === 'string' && error) || (state === 'timeout' ? new BackendError('signinTimeout', { values: { windowMinutes: signinTimeoutWindow() } }).message : 'Sign-in failed. Start sign-in again.') });
     return this.status(account);
   }
   status(account) { return structuredClone(this.#states.get(account) ?? { state: 'cancelled' }); }
