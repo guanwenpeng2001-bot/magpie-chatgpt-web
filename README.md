@@ -1,6 +1,8 @@
 # ChatGPT Web for magpie
 
-Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run headless by default. This README describes the redesign contract; release verification is incomplete until the measurements below are filled in. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
+Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run headless by default. Sign-in lifecycle is live-verified; the turn path remains blocked by a durable verification challenge, handled by design as described in the [failure table](#failure-messages). Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
+
+Plugin version: `0.2.0`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -72,22 +74,21 @@ The provider declares `npm: '@ai-sdk/anthropic'` for **Anthropic-wire emulation*
 
 DOM snapshots are the primary answer carrier, polled every 500 ms. That polling interval is an implementation setting, not measured delivery cadence. A best-effort SSE reader may carry the answer; `x-chatgptweb-route: dom|sse` identifies the route. DOM text can lose formatting. Clone unavailability is logged as an observation change, not a fabricated successful answer or an independent failure code. Whole-block delivery is acceptable; progressive or token-level streaming is not verified. An interrupted or unterminated answer remains an error.
 
-The following release measurements are intentionally unfilled. Each must be replaced with measured values and an evidence-path citation before release; historical measurements from another build are not evidence for this redesign.
+## Release verification status
+
+The sign-in lifecycle was live-verified, but no complete live turn was observed in the acceptance runs. The evidence references below identify the project's acceptance records; historical measurements from another build are not evidence for this release.
 
 ### Turn-budget measurement
 
-<!-- VERIFY:turn-budget -->
-TBD
+Unmeasured: live turn measurement was blocked by the durable verification challenge recorded in `verification/verify-live-acceptance-r3.md`. No successful live-turn timing establishes the turn budget. See the `verification` row in the [failure table](#failure-messages) for the condition and manual recovery action; that action is not a verified workaround for the challenged session.
 
 ### Delivery-cadence measurement
 
-<!-- VERIFY:delivery-cadence -->
-TBD
+Unmeasured: live turn measurement was blocked by the durable verification challenge recorded in `verification/verify-live-acceptance-r3.md`. The backend assembles whole-block replies and emits one content delta after observation returns, by construction (`verification/verify-live-acceptance.md:183-201`). The 500 ms DOM poll is an implementation setting, not measured delivery cadence. See the `verification` row in the [failure table](#failure-messages); no live arrival cadence is claimed.
 
 ### Running host identity and bundle SHA-256
 
-<!-- VERIFY:host-identity -->
-TBD
+Verified against magpie `0.1.1247`, host bundle `host-79c61aeda399.js`, 91 864 bytes, SHA-256 `79c61aeda399c1baa3edbe0b41af0403013ec95224724e5a92126e9f69ba2646` (evidence: `verification/verify-live-acceptance.md:148-156`). The acceptance sandbox's bundle path is `…/home/.cache/magpie/plugin-host/host-79c61aeda399.js` (`verification/verify-live-acceptance-r3.md:283-286`).
 
 ## Failure messages
 
