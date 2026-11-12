@@ -65,6 +65,36 @@ test('shared sign-in keeps its Chrome context resident for the following turn', 
   assert.equal(closes, 0);
 });
 
+test('the first default background chat moves visible sign-in Chrome off-screen without replacing its context', async () => {
+  const fixture = loginFixture();
+  fixture.context.close = fixture.close;
+  fixture.page.url = () => 'https://chatgpt.com/';
+  const launches = [];
+  const bounds = [];
+  fixture.context.newCDPSession = async () => ({
+    async send(method, params) {
+      if (method === 'Browser.getWindowForTarget') return { windowId: 1, bounds: { left: 120, top: 90, width: 1000, height: 700 } };
+      if (method === 'Browser.setWindowBounds') bounds.push(params.bounds);
+      return {};
+    },
+    async detach() {},
+  });
+  const supervisor = new browserModule.BrowserSupervisor({
+    profileRoot: '.', idleMilliseconds: null, headless: false,
+    launch: async (profile, options) => {
+      launches.push({ profile, headless: options.headless });
+      return fixture.context;
+    },
+  });
+  const flow = browserModule.createLoginFlow();
+  try {
+    assert.equal((await flow('fixture', new AbortController().signal, '.', { browser: supervisor })).state, 'signed-in');
+    await supervisor.run('fixture', async context => assert.equal(context, fixture.context), undefined, { visibleTurns: false });
+    assert.deepEqual(launches, [{ profile: launches[0].profile, headless: false }]);
+    assert.ok(bounds.some(value => value.left === -32000 && value.top === -32000));
+  } finally { await supervisor.close(); }
+});
+
 test('cancellation during browser attachment closes it before navigating', async () => {
   const controller = new AbortController();
   const context = new EventEmitter();

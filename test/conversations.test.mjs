@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Conversations } from '../backend/conversations.mjs';
 
 const request = { conversationKey: 'caller', model: 'auto', system: '', history: [{ role: 'user', content: 'one' }] };
 const continued = { ...request, history: [...request.history, { role: 'assistant', content: 'answer' }, { role: 'user', content: 'two' }] };
 const page = () => ({ isClosed: () => false, close: async () => {} });
+const historyDigest = history => createHash('sha256').update(JSON.stringify(history)).digest('hex');
+const tool = { name: 'lookup', input_schema: { type: 'object' } };
+const image = data => ({ mediaType: 'image/png', dataBase64: data, bytes: data.length });
 
 test('matching history resumes after the completed assistant message', async () => {
   const bindings = new Conversations();
@@ -17,6 +21,68 @@ test('matching history resumes after the completed assistant message', async () 
   assert.equal(result.entry.resumeIndex, 2);
   assert.equal(result.entry.page, first.page);
   assert.equal(result.entry.busy, true);
+});
+
+test('a pending challenge resumes only the exact submitted history', async () => {
+  const bindings = new Conversations();
+  const first = await bindings.take(request, 'account');
+  const remotePage = page();
+  first.page = remotePage;
+  bindings.finish(first, request, 'answer');
+  first.pendingChallenge = { submitted: true, historyDigest: historyDigest(continued.history) };
+
+  const resumed = await bindings.take(continued, 'account');
+  assert.equal(resumed.entry, first);
+  assert.equal(resumed.entry.page, remotePage);
+  assert.equal(resumed.resumeFrom, 2);
+  bindings.finish(first, continued, 'second answer');
+  delete first.pendingChallenge;
+
+  let closed = 0;
+  first.page = { ...remotePage, close: async () => { closed++; } };
+  first.pendingChallenge = { submitted: true, historyDigest: historyDigest(continued.history) };
+  const edited = {
+    ...continued,
+    history: [...continued.history.slice(0, -1), { role: 'user', content: 'edited prompt' }],
+  };
+  const fresh = await bindings.take(edited, 'account');
+  assert.notEqual(fresh.entry, first);
+  assert.equal(fresh.resumeFrom, 0);
+  assert.equal(closed, 1);
+});
+
+test('a pending challenge with changed images rebuilds despite unchanged text history', async () => {
+  const original = { ...request, images: [image('b3JpZ2luYWw=')] };
+  const bindings = new Conversations();
+  const first = await bindings.take(original, 'account');
+  let closed = 0;
+  first.page = { ...page(), close: async () => { closed++; } };
+  bindings.finish(first, original, 'answer');
+  first.pendingChallenge = { submitted: true, historyDigest: historyDigest(request.history) };
+  const changed = { ...original, images: [image('bW9kaWZpZWQ=')] };
+  const result = await bindings.take(changed, 'account');
+  assert.notEqual(result.entry, first);
+  assert.equal(result.resumeFrom, 0);
+  assert.equal(closed, 1);
+});
+
+for (const [label, change] of [
+  ['tools', value => ({ ...value, tools: [{ ...tool, name: 'changed' }] })],
+  ['tool choice', value => ({ ...value, toolChoice: { type: 'any' } })],
+  ['image bytes', value => ({ ...value, images: [image('bW9kaWZpZWQ=')] })],
+]) test(`changed ${label} rebuilds a completed binding`, async () => {
+  const original = { ...request, tools: [tool], toolChoice: { type: 'auto' }, images: [image('b3JpZ2luYWw=')] };
+  const next = { ...continued, tools: [tool], toolChoice: { type: 'auto' }, images: [image('b3JpZ2luYWw=')] };
+  const bindings = new Conversations();
+  const first = await bindings.take(original, 'account');
+  let closed = 0;
+  first.page = { ...page(), close: async () => { closed++; } };
+  bindings.finish(first, original, 'answer');
+  const changed = change(next);
+  const result = await bindings.take(changed, 'account');
+  assert.notEqual(result.entry, first);
+  assert.equal(result.resumeFrom, 0);
+  assert.equal(closed, 1);
 });
 
 test('equal-length completed history rebuilds with the full transcript', async () => {

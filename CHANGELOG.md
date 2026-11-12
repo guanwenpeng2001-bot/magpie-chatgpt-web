@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.4 — 2026-11-13
+
+- Add checked CLI profile and journalled Codex Desktop routes for Chatgpt Web models. Both are model-agnostic, preserve Magpie's existing auth and headers, disable Responses WebSockets, follow Magpie's current gateway address, and fail closed on unowned or conflicting settings.
+- Resolve the Codex model catalogue to an absolute path so Codex can load the ChatGPT Web context and tool metadata instead of silently using fallback metadata. Desktop activation and mutation repair preserve rollback and refuse later catalogue edits.
+- Keep tool rounds in the same ChatGPT task conversation and translate browser output incrementally into Codex SSE. Codex environment metadata no longer forces unrelated text-only turns to call a tool, and a complete tool action remains usable when ChatGPT omits the redundant closing marker.
+- Accept current Codex catalogues with more than 300 tools. For an oversized catalogue, select direct Agent controls plus tools relevant to the current turn and dynamically compact verbose schemas while retaining the complete definitions for local validation.
+- Continue past hidden intermediate reasoning units and wait for a visible answer or tool action, so Pro models no longer fail merely because they emit hidden reasoning first. Background turns also wait for the hydrated model picker before selecting a model.
+- Match the current ordinary model picker and select effort by slider position so localized labels do not cause a valid family selection to fail.
+- Promote GPT-6 Thinking mini to a request-only exact-model route after a live completion check. Keep GPT-6 mini and Research explicitly unsupported after exact overrides returned no usable rendered answer.
+- Recognize the current text-row shape of the Create image tool and honor its disabled state.
+- Run ordinary chats in headed Chrome positioned off-screen by default while keeping sign-in visibly interactive. Window position changes reuse the same context and normal browser fingerprint instead of closing and relaunching a profile.
+- Reveal the same background window when ChatGPT requests human verification, wait for the check to clear, resume observation without resubmitting the prompt, and return the window off-screen. If the turn deadline expires first, preserve the visible page and conversation binding for retry.
+- Preserve the credential watermark across window-position changes so server-rotated session cookies survive mode changes and only a genuinely new host credential replaces them.
+- Keep normalized tool IDs and structured tool results stable across rounds so the next request can reuse the same browser page; changed history, tools, tool choice or image bytes force a safe rebuild.
+- Protect pending verification turns with a complete request fingerprint and avoid retaining keyless pages that cannot be resumed.
+- Reject conservatively estimated over-context prompts before browser submission with a typed `contextLength` error, and populate Magpie's existing proxied-request usage accounting with local input/output/cache estimates in the Anthropic stream without a duplicate out-of-band usage event.
+
+## 0.4.3 — 2026-11-12
+
+- Stream translated frames as the browser turn produces them. The previous loader buffered every backend frame before returning an SSE response, which left Codex with only gateway keepalives and caused 300-second cancellations before the first model or tool event.
+
 ## 0.4.2 — 2026-11-12
 
 - Hand the completed sign-in Chrome context directly to the chat driver instead of closing it and starting a second process. The next visible turn reuses the same browser instance and account profile.

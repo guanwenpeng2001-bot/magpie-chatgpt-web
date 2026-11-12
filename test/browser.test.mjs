@@ -150,11 +150,11 @@ test('one crash retries the operation and a second crash exhausts that turn only
   } finally { await browser.close(); }
 });
 
-test('visible turns replace an idle headless context and remain visible for background reads', async () => {
-  const modes = [];
+test('visible and background requests switch idle contexts on the same account profile', async () => {
+  const launches = [];
   let closes = 0;
   const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async (profile, options) => {
-    modes.push(options.headless);
+    launches.push({ profile, headless: options.headless });
     const context = new EventEmitter();
     context.pages = () => [];
     context.close = async () => { closes++; context.emit('close'); };
@@ -164,12 +164,101 @@ test('visible turns replace an idle headless context and remain visible for back
     await browser.run('fixture', async () => {});
     await browser.run('fixture', async () => {}, undefined, { visibleTurns: true });
     await browser.run('fixture', async () => {}, undefined, { visibleTurns: false });
-    assert.deepEqual(modes, [true, false]);
-    assert.equal(closes, 1);
+    assert.deepEqual(launches.map(item => item.headless), [true, false, true]);
+    assert.deepEqual(new Set(launches.map(item => item.profile)), new Set([launches[0].profile]));
+    assert.equal(closes, 2);
   } finally { await browser.close(); }
 });
 
-for (const visibleTurns of [true]) test(`active operation rejects a switch to visibleTurns=${visibleTurns} with a local mode conflict`, async () => {
+test('a mode switch waits for the previous context to close before relaunching the profile', async () => {
+  const launches = [];
+  let finishClose;
+  let notifyCloseStarted;
+  const closeStarted = new Promise(resolve => { notifyCloseStarted = resolve; });
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async (profile, options) => {
+    launches.push(options.headless);
+    const context = new EventEmitter();
+    context.pages = () => [];
+    context.close = launches.length === 1
+      ? () => new Promise(resolve => {
+        finishClose = () => { context.emit('close'); resolve(); };
+        notifyCloseStarted();
+      })
+      : async () => context.emit('close');
+    return context;
+  } });
+  try {
+    await browser.run('fixture', async () => {});
+    const switching = browser.run('fixture', async () => {}, undefined, { visibleTurns: true });
+    await closeStarted;
+    assert.deepEqual(launches, [true]);
+    finishClose();
+    await switching;
+    assert.deepEqual(launches, [true, false]);
+  } finally { await browser.close(); }
+});
+
+test('background chat Chrome remains headed and is positioned off-screen', () => {
+  const args = module.chromeArguments('profile', 9222, { background: true, env: {} });
+  assert.equal(args.some(argument => /^--headless/.test(argument)), false);
+  assert.ok(args.includes('--window-position=-32000,-32000'));
+});
+
+test('a headed background switch restores the prior window bounds', async () => {
+  const calls = [];
+  const page = { isClosed: () => false };
+  const context = {
+    pages: () => [page],
+    newCDPSession: async () => ({
+      send: async (method, params) => {
+        calls.push({ method, params });
+        if (method === 'Browser.getWindowForTarget') return { windowId: 7, bounds: { left: 120, top: 80, width: 1000, height: 700 } };
+        return {};
+      },
+      detach: async () => {},
+    }),
+  };
+  const saved = new Map();
+  await module.setBrowserWindowBackground(context, true, saved);
+  await module.setBrowserWindowBackground(context, false, saved);
+  assert.equal(saved.size, 0);
+  assert.deepEqual(calls.filter(call => call.method === 'Browser.setWindowBounds').at(-1).params.bounds, { left: 120, top: 80, width: 1000, height: 700 });
+});
+
+test('concurrent headed window changes serialize without overlapping CDP moves', async () => {
+  let active = 0;
+  let maximum = 0;
+  let bounds = { left: 100, top: 100, width: 1000, height: 700 };
+  const page = { isClosed: () => false, url: () => 'about:blank', goto: async () => {}, bringToFront: async () => {} };
+  const context = Object.assign(new EventEmitter(), {
+    pages: () => [page],
+    close: async () => context.emit('close'),
+    newCDPSession: async () => ({
+      async send(method, params) {
+        if (method === 'Browser.getWindowForTarget') return { windowId: 1, bounds };
+        if (method === 'Browser.setWindowBounds') {
+          active++;
+          maximum = Math.max(maximum, active);
+          await new Promise(resolve => setTimeout(resolve, 5));
+          if (params.bounds.left !== undefined) bounds = { ...bounds, ...params.bounds };
+          active--;
+        }
+        return {};
+      },
+      async detach() {},
+    }),
+  });
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', headless: false, launch: async () => context });
+  try {
+    await browser.run('fixture', async () => {});
+    await Promise.all([browser.setBackground('fixture', false), browser.setBackground('fixture', false)]);
+    assert.equal(maximum, 1);
+    assert.equal(bounds.left, 80);
+    assert.equal(bounds.top, 80);
+  } finally { await browser.close(); }
+});
+
+for (const visibleTurns of [true, false]) test(`active operation rejects a switch to visibleTurns=${visibleTurns} with a local mode conflict`, async () => {
   const modes = [];
   const context = new EventEmitter();
   context.pages = () => [];
@@ -235,6 +324,41 @@ test('a reused browser preserves server-rotated cookies until the host supplies 
     await context.addCookies([{ name: '__Secure-next-auth.session-token', value: 'server-rotated' }]);
     assert.equal(await run('__Secure-next-auth.session-token=original'), 'server-rotated');
     assert.equal(await run('__Secure-next-auth.session-token=host-renewed'), 'host-renewed');
+  } finally { await browser.close(); }
+});
+
+test('a mode switch preserves server-rotated cookies for the same host credential', async () => {
+  let cookies = [{ name: '__Secure-next-auth.session-token', value: 'current', domain: '.chatgpt.com', path: '/' }];
+  const contexts = [];
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', idleMilliseconds: null, launch: async () => {
+    const context = new EventEmitter();
+    context.writes = [];
+    context.pages = () => [];
+    context.close = async () => context.emit('close');
+    context.cookies = async () => structuredClone(cookies);
+    context.clearCookies = async filter => { cookies = cookies.filter(cookie => !(cookie.name === filter.name && cookie.domain === filter.domain && cookie.path === filter.path)); };
+    context.addCookies = async additions => {
+      context.writes.push(additions);
+      for (const cookie of additions) {
+        cookies = cookies.filter(existing => existing.name !== cookie.name);
+        cookies.push(cookie);
+      }
+    };
+    contexts.push(context);
+    return context;
+  } });
+  const refresh = '__Secure-next-auth.session-token=current';
+  try {
+    await browser.run('fixture', async context => {
+      cookies = [{ name: '__Secure-next-auth.session-token', value: 'server-rotated', domain: '.chatgpt.com', path: '/' }];
+      assert.equal((await context.cookies())[0].value, 'server-rotated');
+    }, undefined, { auth: { refresh }, origin: 'https://chatgpt.com' });
+    await browser.run('fixture', async context => {
+      assert.equal(context, contexts[1]);
+      assert.equal((await context.cookies())[0].value, 'server-rotated');
+    }, undefined, { auth: { refresh }, origin: 'https://chatgpt.com', visibleTurns: true });
+    assert.equal(contexts[1].writes.length, 0);
+    assert.equal(contexts.length, 2);
   } finally { await browser.close(); }
 });
 

@@ -8,7 +8,7 @@ import { AccountGuard } from '../backend/guard.mjs';
 import { prepare } from '../src/wire/prepare.mjs';
 import { createTurnFixture } from '../integrations/turn-fixture.mjs';
 
-const verification = 'ChatGPT asked to verify you are human. Complete verification in the open browser, then retry the chat.';
+const verification = "ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.";
 
 test('offline challenge turn routing', async t => {
   try { import.meta.resolve('playwright-core'); }
@@ -21,13 +21,17 @@ test('offline challenge turn routing', async t => {
   const fixture = await createTurnFixture({ interval: 20 });
   const root = await mkdtemp(join(tmpdir(), 'challenge-turn-'));
   let context;
-  const driver = new TurnDriver({ profileRoot: root, origin: fixture.origin, timeout: 15000, launch: async profile => {
+  const driver = new TurnDriver({ profileRoot: root, origin: fixture.origin, timeout: 15000, challengeTimeout: 50, launch: async profile => {
     context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, serviceWorkers: 'block', args: ['--disable-background-networking'] });
     await context.route('**/*', route => new URL(route.request().url()).origin === fixture.origin ? route.continue() : route.abort());
     if (process.env.CHALLENGE_TRACE) await context.tracing.start({ screenshots: true, snapshots: true });
     return context;
   } });
-  const command = () => ({ ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }), auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } });
+  driver.browser.setBackground = async () => true;
+  const command = (conversation = 'challenge-turn') => ({
+    ...prepare({ model: 'auto', conversation_id: conversation, messages: [{ role: 'user', content: 'Describe a fictional garden.' }] }),
+    auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' },
+  });
   try {
     for (const [mode, expected] of [
       ['app-shell-challenge', 'verification'], ['app-shell-card', 'verification'], ['app-shell-script', null],
@@ -40,7 +44,7 @@ test('offline challenge turn routing', async t => {
       const frames = [];
       const before = fixture.requests.length;
       let failure;
-      try { await driver.complete(command(), guard, 'fixture', new AbortController().signal, frame => frames.push(frame)); }
+      try { await driver.complete(command(mode), guard, 'fixture', new AbortController().signal, frame => frames.push(frame)); }
       catch (error) { failure = error; }
       console.log(JSON.stringify({ mode, code: failure?.code, error: failure?.toJSON(), text: frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join('') }));
       assert.equal(failure?.code ?? null, expected);
@@ -50,7 +54,7 @@ test('offline challenge turn routing', async t => {
       if (expected === 'verification') {
         assert.deepEqual(failure.toJSON(), { status: 502, message: verification });
         (await guard.begin())();
-        assert.equal(context.pages().some(page => !page.isClosed() && page.url().startsWith(fixture.origin)), false, 'failed turn pages are closed');
+        assert.equal(context.pages().some(page => !page.isClosed() && page.url().startsWith(fixture.origin)), true, 'unresolved challenge pages stay available for recovery');
       } else if (expected === 'expired') await assert.rejects(guard.begin(), { code: 'expired' });
       else if (expected === 'cooldown') assert.equal(failure.retryAfter, '120');
     });
@@ -59,7 +63,7 @@ test('offline challenge turn routing', async t => {
       await Promise.all(context.pages().map(page => page.close()));
       const frames = [];
       const seen = {};
-      await driver.complete(command(), new AccountGuard(), 'fixture', new AbortController().signal, async frame => {
+      await driver.complete(command('normal'), new AccountGuard(), 'fixture', new AbortController().signal, async frame => {
         frames.push(frame);
         if (frame.type === 'delta' && !seen.script) {
           const page = context.pages().find(page => !page.isClosed() && page.url().startsWith(fixture.origin));

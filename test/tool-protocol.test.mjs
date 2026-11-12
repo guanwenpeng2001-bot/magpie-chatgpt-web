@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Conversations } from '../backend/conversations.mjs';
 import { prepare } from '../src/wire/prepare.mjs';
-import { translate } from '../src/wire/translate.mjs';
-import { ToolParser } from '../src/tool-emulation.mjs';
+import { reconstruct, translate } from '../src/wire/translate.mjs';
+import {
+  ToolParser,
+  normalizeAssistantContent,
+  selectToolDefinitionsForPrompt,
+} from '../src/tool-emulation.mjs';
 import { parseSSE } from '../src/wire/sse.mjs';
 const protocol = { prepare, translate, ToolParser };
 
@@ -16,10 +21,71 @@ const collect = async (source, prepared) => { const events = []; for await (cons
 test('prepare accepts client tools and injects a fresh prompt-level protocol', () => {
   let prepared;
   assert.doesNotThrow(() => { prepared = protocol.prepare(request()); });
-  assert.match(prepared.prompt, /\[Tool protocol\]/);
+  assert.match(prepared.prompt, /\[Client action format\]/);
   assert.match(prepared.start, /^\[MAGPIE_TOOL_[a-f0-9]{32}\]$/);
   assert.ok(prepared.prompt.includes(prepared.start));
   assert.notEqual(prepared.start, protocol.prepare(request()).start);
+});
+
+test('ordinary questions containing action words remain text-eligible with tools available', async () => {
+  const prepared = protocol.prepare(request({
+    messages: [{ role: 'user', content: 'What does run mean in JavaScript, and how do I test it?' }],
+  }));
+  assert.equal(prepared.toolChoice.type, 'auto');
+  const events = await collect(frames(['It executes a statement or function.']), prepared);
+  assert.equal(events.at(-2).delta.stop_reason, 'end_turn');
+  assert.equal(events.some(event => event.content_block?.type === 'tool_use'), false);
+});
+
+test('an exact tool name in the user turn requests that tool without using broad keyword matching', () => {
+  const prepared = protocol.prepare(request({
+    messages: [{ role: 'user', content: 'Use exec_command once, then report the result.' }],
+    tools: [{ name: 'exec_command', input_schema: { type: 'object', properties: { cmd: { type: 'string' } } } }],
+  }));
+  assert.deepEqual(prepared.toolChoice, { type: 'tool', name: 'exec_command' });
+});
+
+test('mentioning or explicitly excluding a tool name never forces a call', () => {
+  const tools = [{ name: 'exec_command', input_schema: { type: 'object' } }];
+  for (const content of [
+    'Explain what exec_command means.',
+    'Do not call exec_command for this question.',
+  ]) {
+    const prepared = protocol.prepare(request({ messages: [{ role: 'user', content }], tools }));
+    assert.equal(prepared.toolChoice.type, 'auto', content);
+  }
+});
+
+test('large client catalogues retain core controls and the tools named by the current turn', () => {
+  const support = {
+    history: [{ role: 'user', content: 'Use exec_command, then inspect an image with image_gen.' }],
+  };
+  const tools = [
+    { name: 'exec_command', input_schema: { type: 'object' } },
+    { name: 'write_stdin', input_schema: { type: 'object' } },
+    { name: 'image_gen__imagegen', input_schema: { type: 'object' } },
+    ...Array.from({ length: 330 }, (_, index) => ({ name: `ext__unrelated_${index}`, input_schema: { type: 'object' } })),
+  ];
+  const selected = selectToolDefinitionsForPrompt(tools, support).map(tool => tool.name);
+  assert.ok(selected.includes('exec_command'));
+  assert.ok(selected.includes('write_stdin'));
+  assert.ok(selected.includes('image_gen__imagegen'));
+  assert.ok(selected.length <= 64);
+});
+
+test('a forced tool remains exposed even when it ranks beyond the first 64 tools', () => {
+  const tools = Array.from({ length: 100 }, (_, index) => ({ name: `ext__tool_${index}`, input_schema: { type: 'object' } }));
+  const selected = selectToolDefinitionsForPrompt(tools, {
+    history: [{ role: 'user', content: 'no named tool' }],
+    toolChoice: { type: 'tool', name: 'ext__tool_99' },
+  });
+  assert.equal(selected.length, 64);
+  assert.equal(selected[0].name, 'ext__tool_99');
+});
+
+test('small tool catalogues are not filtered', () => {
+  const tools = Array.from({ length: 64 }, (_, index) => ({ name: `tool_${index}`, input_schema: { type: 'object' } }));
+  assert.equal(selectToolDefinitionsForPrompt(tools, request()).length, 64);
 });
 
 test('parser survives every offset inside opening and closing ASCII delimiters', () => {
@@ -61,7 +127,6 @@ for (const [label, extra, text, code] of [
   ['none forbids calls', { tool_choice: { type: 'none' } }, prepared => call(prepared), 'toolChoiceViolation'],
   ['disabled parallel calls', { tool_choice: { type: 'auto', disable_parallel_tool_use: true } }, prepared => call(prepared) + call(prepared), 'toolParallel'],
   ['unfinished JSON', {}, prepared => prepared.start + '{"name":', 'toolIncomplete'],
-  ['unfinished closing marker', {}, prepared => call(prepared).slice(0, -3), 'toolIncomplete'],
   ['missing required call', { tool_choice: { type: 'any' } }, () => 'Only prose.', 'toolRequired'],
   ['malformed closing delimiter', {}, prepared => call(prepared).replace(prepared.end, 'wrong'), 'toolDelimiter'],
 ]) test(`${label} raises ${code} without successful termination`, async () => {
@@ -69,6 +134,13 @@ for (const [label, extra, text, code] of [
   const output = [];
   await assert.rejects(async () => { for await (const chunk of protocol.translate(frames([text(prepared)]), prepared)) output.push(parseEvent(chunk)); }, error => error.name === 'BackendError' && error.code === code);
   assert.equal(output.some(event => event.type === 'message_stop'), false);
+});
+
+test('a complete JSON action is accepted when the model omits the redundant closing marker', async () => {
+  const prepared = protocol.prepare(request());
+  const events = await collect(frames([call(prepared).slice(0, -3)]), prepared);
+  assert.deepEqual(events.filter(event => event.delta?.type === 'input_json_delta').map(event => JSON.parse(event.delta.partial_json)), [{ query: 'garden' }]);
+  assert.equal(events.at(-2).delta.stop_reason, 'tool_use');
 });
 
 test('undefined forced tool is rejected before dispatch', () => {
@@ -120,7 +192,36 @@ test('tool result history preserves identifiers and errors and uses full-history
   ] }));
   assert.match(prepared.prompt, /\[Previous tool call\]/);
   assert.match(prepared.prompt, /"tool_use_id":"call-id","is_error":true,"content":"No matching entry\."/);
-  assert.equal(prepared.conversationKey, undefined);
+  assert.equal(prepared.conversationKey, 'existing');
+});
+
+test('a completed tool round resumes the same browser binding with its normalized assistant history', async () => {
+  const firstRequest = protocol.prepare(request({ conversation_id: 'caller' }));
+  const bindings = new Conversations();
+  const first = await bindings.take(firstRequest, 'account');
+  const page = { isClosed: () => false, close: async () => {} };
+  first.page = page;
+  const raw = 'Before the call. ' + call(firstRequest);
+  const message = await reconstruct(protocol.translate(frames([raw]), firstRequest));
+  const toolBlock = message.content.find(block => block.type === 'tool_use');
+  const assistantContent = normalizeAssistantContent(firstRequest, raw);
+  assert.match(assistantContent, /Before the call\. \n\[Previous tool call\]/);
+
+  bindings.finish(first, firstRequest, raw, assistantContent);
+  const nextRequest = protocol.prepare({
+    model: 'auto',
+    conversation_id: 'caller',
+    tools: [tool],
+    messages: [
+      { role: 'user', content: 'Look up a fictional garden.' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Before the call. ' }, { type: 'tool_use', ...toolBlock }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolBlock.id, content: 'A matching garden exists.' }] },
+    ],
+  });
+  const next = await bindings.take(nextRequest, 'account');
+  assert.equal(next.entry, first);
+  assert.equal(next.entry.page, page);
+  assert.equal(next.resumeFrom, firstRequest.history.length + 1);
 });
 
 test('call limits exclude trailing prose and bound whitespace before the closing delimiter', () => {

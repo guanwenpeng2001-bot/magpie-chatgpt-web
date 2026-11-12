@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { imageExtension, readGeneratedImages, IMAGE_MODEL } from '../backend/site-adapter/images.mjs';
+import { imageExtension, readGeneratedImages, selectImageTool, IMAGE_MODEL } from '../backend/site-adapter/images.mjs';
 import { describeCatalogue } from '../src/models.mjs';
 
 test('image workflow is exposed only when the account catalogue declares image generation', () => {
@@ -13,6 +13,29 @@ test('image workflow is exposed only when the account catalogue declares image g
   assert.ok(model);
   assert.match(model.name, /local image file/);
   assert.equal(model.capabilities.output.text, true);
+});
+
+test('image tool recognizes the current text row and rejects its disabled state', async () => {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    for (const disabled of [false, true]) {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(`
+          <main><button aria-label="添加文件等内容" onclick="document.querySelector('#image-menu').hidden=false">Add</button></main>
+          <div id="image-menu" hidden>
+            <div ${disabled ? 'aria-disabled="true"' : ''} onclick="window.imageSelected=true">
+              <div data-menu-row-content="true"><span>创建图像</span></div>
+            </div>
+          </div>`);
+        const result = await selectImageTool(page);
+        assert.equal(result.ok, !disabled);
+        if (disabled) assert.equal(result.kind, 'model-not-offered');
+        else assert.equal(await page.evaluate(() => window.imageSelected), true);
+      } finally { await page.close(); }
+    }
+  } finally { await browser.close(); }
 });
 
 test('generated images are saved from page-owned blobs without trusting remote filenames or formats', async () => {

@@ -37,11 +37,12 @@ for (const challenge of [true, 'url-token', false]) test(`served late-title page
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const root = await mkdtemp(join(tmpdir(), 'late-title-'));
-  const driver = new TurnDriver({ profileRoot: root, origin, timeout: 15000, launch: async profile => {
+  const driver = new TurnDriver({ profileRoot: root, origin, timeout: 15000, challengeTimeout: 20, launch: async profile => {
     const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, serviceWorkers: 'block' });
     await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     return context;
   } });
+  driver.browser.setBackground = async () => true;
   const command = { ...prepare({ model: 'auto', messages: [{ role: 'user', content: 'Fixture' }] }), auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } };
   try {
     await assert.rejects(driver.complete(command, new AccountGuard(), 'fixture', new AbortController().signal, () => assert.fail('no output expected')), { code: challenge ? 'verification' : 'temporary' });

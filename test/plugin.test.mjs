@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { resolveChatGptWebContextLimit } from '../src/usage/context.mjs';
 
 const plugin = await import('../src/index.mjs').catch(() => ({}));
 
@@ -17,7 +18,8 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
         : titles[index];
     assert.deepEqual(models[slug], {
       name, api: { id: slug },
-      limit: { context: 200000, output: 34834 },
+      limit: { context: resolveChatGptWebContextLimit(slug).limit, output: 34834 },
+      prefer_websockets: false,
       capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
     });
   }

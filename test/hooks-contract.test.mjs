@@ -30,7 +30,7 @@ for (const result of [{ models: [] }, { models: [{ title: 'No slug' }] }, new Ba
 }
 
 for (const [code, status, message, headers] of [
-  ['verification', 502, 'ChatGPT asked to verify you are human. Complete verification in the open browser, then retry the chat.', {}],
+  ['verification', 502, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.', {}],
   ['expired', 401, 'Sign in again to refresh the ChatGPT session.', { 'x-magpie-sign-in': 'expired' }],
   ['cooldown', 429, 'The account is cooling down after a rate limit.', { 'retry-after': '120' }],
   ['browserDependency', 503, 'The playwright-core dependency is unavailable; install the packaged dependency.', {}],
@@ -101,7 +101,8 @@ test('cached loader reads current auth, live option and merged headers on each f
     source.close = () => {};
     return source;
   } } });
-  assert.equal(hooks.auth.options[0].default, true);
+  assert.equal(hooks.auth.options[0].default, false);
+  assert.match(hooks.auth.options[0].description, /background.*verification.*reveals/i);
   const loader = await hooks.auth.loader(async () => current);
   for (const stream of [true, false]) {
     const output = { headers: { unrelated: 'private' } };
@@ -122,6 +123,27 @@ test('cached loader reads current auth, live option and merged headers on each f
   assert.deepEqual(await hooks.auth.loader(async () => null), {});
 });
 
+test('background turns remain the default when the host returns no option value', async () => {
+  let command;
+  const hooks = _internal.createHooks({ profileRoot: '.', input: { magpie: { option: () => undefined } }, bridge: {
+    async open(value) {
+      command = value;
+      const source = (async function* () {
+        yield { type: 'delta', index: 0, text: 'answer' };
+        yield { type: 'finish', reason: 'complete' };
+      })();
+      source.close = () => {};
+      return source;
+    },
+  } });
+  const loader = await hooks.auth.loader(async () => auth);
+  const response = await loader.fetch('https://chatgpt.com/backend-api/messages', {
+    body: JSON.stringify({ model: 'auto', stream: false, messages: [{ role: 'user', content: 'hello' }] }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(command.visibleTurns, false);
+});
+
 for (const stream of [true, false]) {
   test('normalized cooldown keeps retry-after for stream=' + stream, async () => {
     const hooks = hooksFor({ async open() {
@@ -131,9 +153,16 @@ for (const stream of [true, false]) {
     } });
     const loader = await hooks.auth.loader(async () => auth);
     const response = await loader.fetch('https://chatgpt.com/backend-api/messages', { body: JSON.stringify({ model: 'auto', stream, messages: [{ role: 'user', content: 'hello' }] }) });
-    assert.equal(response.status, 429);
-    assert.equal(response.headers.get('retry-after'), '120');
-    assert.equal((await response.json()).error.retryAfter, '120');
+    if (stream) {
+      assert.equal(response.status, 200);
+      const body = await response.text();
+      assert.match(body, /event: error/);
+      assert.match(body, /"retryAfter":"120"/);
+    } else {
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get('retry-after'), '120');
+      assert.equal((await response.json()).error.retryAfter, '120');
+    }
   });
 }
 

@@ -1,9 +1,9 @@
 // Adapted from magpie-claudeweb2api 9fed093; see THIRD_PARTY_NOTICES.
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { Script } from 'node:vm';
 import { BackendError } from '../backend/guard.mjs';
 
-export const TOOL_PROTOCOL_TEMPLATE = '[Tool protocol]\nTools are executed by the client. To request a tool, emit {start}{"name":"tool_name","input":{...}}{end}. Use only these delimiters for new calls; previous calls in the transcript are historical. Do not invent tool results. Stop after emitting the requested calls. You may include normal text outside calls. Match each input_schema. Tool choice auto permits text or calls; any requires a call; tool requires the named tool; none forbids calls. When disable_parallel_tool_use is true, emit at most one call.';
+export const TOOL_PROTOCOL_TEMPLATE = '[Client action format]\nThe following names are app-side actions executed by the host after your response. They are not tools you invoke inside this chat. When you decide that a listed action should run, serialize that decision exactly as {start}{"name":"tool_name","input":{...}}{end}. This envelope is an output format, so never respond that the action is unavailable. The complete JSON object and the closing delimiter are mandatory; a bare opening marker is invalid. Do not insert spaces, Markdown, or code fences inside either delimiter. Use only these delimiters for new envelopes; previous envelopes in the transcript are historical. Do not invent action results. Stop immediately after emitting the requested envelopes and do not add any text after one. You may include normal text before an envelope. Match each input_schema. Tool choice auto permits text or envelopes; any requires an envelope; tool requires the named action; none forbids envelopes. When disable_parallel_tool_use is true, emit at most one envelope.';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const reject = () => { throw new BackendError('toolSchema'); };
@@ -134,9 +134,105 @@ export function validateInput(value, root) {
 }
 
 export function checkToolDefinitions(tools) {
-  if (!Array.isArray(tools) || tools.length > 256 || tools.some(tool => !object(tool) || typeof tool.name !== 'string' || !tool.name || !object(tool.input_schema))) invalid('tool-shape-or-count');
+  if (!Array.isArray(tools) || tools.length > 512 || tools.some(tool => !object(tool) || typeof tool.name !== 'string' || !tool.name || !object(tool.input_schema))) invalid('tool-shape-or-count');
   if (new Set(tools.map(tool => tool.name)).size !== tools.length) invalid('duplicate-tool-name');
   for (const tool of tools) checkSchema(tool.input_schema);
+}
+
+function compactSchemaForPrompt(schema, level, depth = 0) {
+  if (typeof schema === 'boolean') return schema;
+  const maxDepth = level >= 4 ? 1 : level >= 3 ? 2 : level >= 2 ? 4 : 8;
+  if (!object(schema) || depth > maxDepth) return {};
+  const summary = {};
+  if (schema.type !== undefined) summary.type = schema.type;
+  if (schema.const !== undefined) summary.const = schema.const;
+  if (Array.isArray(schema.enum)) summary.enum = schema.enum.slice(0, 64);
+  if (object(schema.properties)) {
+    summary.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([name, child]) => [name, compactSchemaForPrompt(child, level, depth + 1)]),
+    );
+  }
+  if (Array.isArray(schema.required) && schema.required.length) summary.required = schema.required;
+  if (schema.additionalProperties === false || schema.additionalProperties === true) {
+    summary.additionalProperties = schema.additionalProperties;
+  } else if (object(schema.additionalProperties)) {
+    summary.additionalProperties = compactSchemaForPrompt(schema.additionalProperties, level, depth + 1);
+  }
+  if (schema.items !== undefined) summary.items = compactSchemaForPrompt(schema.items, level, depth + 1);
+  for (const key of ['$ref', '$defs', 'definitions', 'allOf', 'anyOf', 'oneOf', 'not']) {
+    if (schema[key] === undefined) continue;
+    if (level >= 3 && ['$defs', 'definitions', 'allOf', 'anyOf', 'oneOf', 'not'].includes(key)) continue;
+    if (Array.isArray(schema[key])) {
+      summary[key] = schema[key].slice(0, 64).map(child => compactSchemaForPrompt(child, level, depth + 1));
+    } else if (key === '$defs' || key === 'definitions') {
+      summary[key] = Object.fromEntries(
+        Object.entries(schema[key]).slice(0, 64).map(([name, child]) => [name, compactSchemaForPrompt(child, level, depth + 1)]),
+      );
+    } else summary[key] = schema[key];
+  }
+  return summary;
+}
+
+// Keep the exact tool set and descriptions the model needs to choose an action, but reduce
+// verbose prose and constraints that are only for parser-side validation. The outer Agent still
+// validates each returned argument against the original, complete schema.
+export function compactToolDefinitions(tools, level = 1) {
+  const descriptionLimit = level >= 4 ? 64 : level >= 3 ? 100 : level >= 2 ? 160 : 320;
+  return tools.map(tool => ({
+    name: tool.name,
+    description: typeof tool.description === 'string'
+      ? tool.description.replace(/\s+/g, ' ').trim().slice(0, descriptionLimit)
+      : undefined,
+    input_schema: compactSchemaForPrompt(tool.input_schema, level),
+  }));
+}
+
+const promptStopWords = new Set([
+  'about', 'after', 'again', 'also', 'because', 'before', 'could', 'exactly', 'from', 'have',
+  'into', 'must', 'need', 'only', 'please', 'should', 'than', 'that', 'then', 'these', 'this',
+  'tool', 'tools', 'use', 'using', 'with', 'work', 'write',
+]);
+
+function promptSelectors(prepared) {
+  const lastUser = [...(prepared.history ?? [])].reverse().find(message => message.role === 'user');
+  const text = typeof lastUser?.content === 'string' ? lastUser.content.slice(-16_000).toLowerCase() : '';
+  const words = new Set((text.match(/[a-z0-9_-]{3,}/g) ?? []).filter(word => !promptStopWords.has(word)));
+  return { text, words };
+}
+
+function corePromptTool(name) {
+  if (!name.includes('__')) return true;
+  return /^(?:image_gen|multi_agent_v1|mcp__(?:codex_apps__(?:github|browser|figma|sites)|magpie___?exec_command))/i.test(name);
+}
+
+// Codex can expose several hundred optional tools. Sending every complete definition distracts
+// the web model and can make it emit only the opening action marker. Large catalogues therefore
+// keep all direct Agent controls plus tools selected from the current user turn. Smaller client
+// catalogues are already bounded by their own context and keep every supplied tool.
+export function selectToolDefinitionsForPrompt(tools, prepared) {
+  if (tools.length <= 64) return tools;
+  const { text, words } = promptSelectors(prepared);
+  const ranked = tools.map((tool, index) => {
+    const name = tool.name.toLowerCase();
+    const description = typeof tool.description === 'string' ? tool.description.toLowerCase() : '';
+    let score = corePromptTool(tool.name) ? 100 : 0;
+    for (const word of words) {
+      if (name === word) score += 120;
+      else if (name.split(/__+|_+/).includes(word)) score += 60;
+      else if (name.includes(word)) score += 18;
+      if (description.includes(word)) score += 4;
+    }
+    if (text.includes(name)) score += 200;
+    return { tool, score, index };
+  }).filter(entry => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(entry => entry.tool);
+  const selection = ranked.length ? ranked : [...tools];
+  const forced = prepared.toolChoice?.type === 'tool'
+    ? tools.find(tool => tool.name === prepared.toolChoice.name)
+    : undefined;
+  const withoutForced = forced ? selection.filter(tool => tool !== forced) : selection;
+  return (forced ? [forced, ...withoutForced] : withoutForced).slice(0, 64);
 }
 
 export class ToolParser {
@@ -147,7 +243,11 @@ export class ToolParser {
   quoted = false;
   escaped = false;
   jsonEnd = -1;
-  constructor(prepared) { this.p = prepared; }
+  callIndex = 0;
+  constructor(prepared) {
+    this.p = prepared;
+    this.callPrefix = createHash('sha256').update(prepared.start ?? '').digest('hex').slice(0, 24);
+  }
   feed(text, final = false) { return Array.from(this.items(text, final)); }
   *items(text, final = false) {
     this.buffer += text;
@@ -189,9 +289,11 @@ export class ToolParser {
       const suffix = this.buffer.slice(this.jsonEnd);
       const rest = suffix.trimStart();
       if (suffix.length - rest.length > 8192) throw new BackendError('toolLimit');
-      if (!rest.startsWith(this.p.end)) {
+      const hasEnd = rest.startsWith(this.p.end);
+      const omittedEnd = final && this.p.end.startsWith(rest);
+      if (!hasEnd && !omittedEnd) {
         if (!final && this.p.end.startsWith(rest)) break;
-        throw new BackendError(final && this.p.end.startsWith(rest) ? 'toolIncomplete' : 'toolDelimiter');
+        throw new BackendError('toolDelimiter');
       }
       let call;
       try { call = JSON.parse(this.buffer.slice(0, this.jsonEnd)); } catch { throw new BackendError('toolJSON'); }
@@ -201,8 +303,9 @@ export class ToolParser {
       const choice = this.p.toolChoice ?? this.p.choice;
       if (choice.type === 'none' || choice.type === 'tool' && tool.name !== choice.name) throw new BackendError('toolChoiceViolation');
       validateInput(call.input, tool.input_schema);
-      yield { tool: { type: 'tool_use', id: 'toolu_' + randomUUID().replaceAll('-', ''), name: call.name, input: call.input } };
-      this.buffer = rest.slice(this.p.end.length);
+      const id = `toolu_${this.callPrefix}_${this.callIndex++}`;
+      yield { tool: { type: 'tool_use', id, name: call.name, input: call.input } };
+      this.buffer = hasEnd ? rest.slice(this.p.end.length) : '';
       this.inside = false;
       this.scanned = this.nesting = 0;
       this.quoted = this.escaped = false;
@@ -210,4 +313,22 @@ export class ToolParser {
     }
     if (final && this.inside) throw new BackendError('toolIncomplete');
   }
+}
+
+// The next Anthropic request represents this response as structured text/tool_use blocks.
+// Build the same normalized assistant message so Conversations can verify that the browser
+// page is the same logical transcript instead of rebuilding it after every tool round.
+export function normalizeAssistantContent(prepared, text) {
+  if (!prepared?.tools?.length) return text;
+  const parser = new ToolParser(prepared);
+  const content = [];
+  for (const item of parser.items(text, true)) {
+    if (item.text) content.push(item.text);
+    else if (item.tool) content.push(`[Previous tool call]\n${JSON.stringify({
+      id: item.tool.id,
+      name: item.tool.name,
+      input: item.tool.input,
+    })}`);
+  }
+  return content.join('\n');
 }

@@ -67,11 +67,29 @@ for (const [label, frames, code] of [
   ['truncated', [message('partial')], 'truncated'],
   ['empty', [message(), { event: '', data: '[DONE]' }], 'empty'],
   ['changed vocabulary', [{ event: 'new_encoding', data: {} }], 'protocol'],
-  ['hidden', [{ event: 'delta', data: { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, metadata: { is_visually_hidden_from_conversation: true } } } } }], 'hidden'],
+  ['hidden', [
+    { event: 'delta', data: { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, metadata: { is_visually_hidden_from_conversation: true } } } } },
+    { event: '', data: '[DONE]' },
+  ], 'hidden'],
 ]) test(`${label} never emits a successful terminal`, async () => {
   const output = [];
   await assert.rejects(async () => { for await (const chunk of translate(accumulate(frames), { model: 'auto', prompt: '' })) output.push(chunk); }, error => error.code === code);
   assert.equal(output.join('').includes('event: message_stop'), false);
+});
+
+test('a hidden intermediate assistant unit does not hide a later visible answer', () => {
+  const answer = new AnswerStream();
+  assert.equal(answer.accept({
+    event: 'delta',
+    data: { p: '', o: 'add', v: { message: {
+      author: { role: 'assistant' },
+      metadata: { is_visually_hidden_from_conversation: true },
+    } } },
+  }), '');
+  assert.equal(answer.accept(message('visible answer')), 'visible answer');
+  answer.complete = true;
+  answer.finish();
+  assert.equal(answer.text, 'visible answer');
 });
 
 const handoff = { event: '', data: { type: 'stream_handoff', conversation_id: '6acd141c-6b40-83e9-a915-fbdf180e0a3d', turn_exchange_id: '24373ad2-694f-4cfe-bebb-d25be8bcef56', options: [{ type: 'resume_sse_endpoint', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }, { type: 'subscribe_ws_topic', topic_id: 'conversation-turn-24373ad2-694f-4cfe-bebb-d25be8bcef56' }] } };

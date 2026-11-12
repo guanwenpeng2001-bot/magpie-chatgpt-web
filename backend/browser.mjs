@@ -159,6 +159,41 @@ export async function launchBrowserContext(profile, options) {
   return chromium.launchPersistentContext(profile, { ...options, userAgent });
 }
 
+export async function setBrowserWindowBackground(context, background, savedBounds = new Map()) {
+  const pages = typeof context?.pages === 'function' ? context.pages().filter(page => !page.isClosed?.()) : [];
+  if (!pages.length || typeof context.newCDPSession !== 'function') return false;
+  let moved = false;
+  for (const page of pages) {
+    let session;
+    try {
+      session = await context.newCDPSession(page);
+      const { windowId, bounds } = await session.send('Browser.getWindowForTarget');
+      if (background) {
+        if (!savedBounds.has(windowId)) savedBounds.set(windowId, {
+          left: Number.isFinite(bounds?.left) && bounds.left > -10_000 ? bounds.left : 80,
+          top: Number.isFinite(bounds?.top) && bounds.top > -10_000 ? bounds.top : 80,
+          width: Number.isFinite(bounds?.width) ? bounds.width : 1280,
+          height: Number.isFinite(bounds?.height) ? bounds.height : 900,
+        });
+        await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+        await session.send('Browser.setWindowBounds', { windowId, bounds: { left: -32000, top: -32000, width: 1280, height: 900 } });
+      } else {
+        const target = savedBounds.get(windowId) ?? { left: 80, top: 80, width: 1280, height: 900 };
+        await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+        await session.send('Browser.setWindowBounds', { windowId, bounds: target });
+        savedBounds.delete(windowId);
+        await page.bringToFront?.();
+      }
+      moved = true;
+    } catch {
+      return false;
+    } finally {
+      await session?.detach?.().catch(() => {});
+    }
+  }
+  return moved;
+}
+
 export class BrowserSupervisor {
   #accounts = new Map();
   #closed = false;
@@ -174,20 +209,24 @@ export class BrowserSupervisor {
       });
     });
   }
-  async #ensure(account, headless) {
+  async #ensure(account, headless, background, credentialState) {
     if (this.#closed) throw new BackendError('browserClosed');
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
     if (this.profile !== undefined ? typeof this.profile !== 'string' || !this.profile : typeof this.profileRoot !== 'string' || !this.profileRoot) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
-    if (entry && entry.headless && !headless) {
+    if (entry && entry.headless !== headless) {
       if (entry.users) throw new Error('An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.');
+      credentialState = entry.credentials;
       await this.closeAccount(account);
-      return this.#ensure(account, headless);
+      return this.#ensure(account, headless, background, credentialState);
     }
     if (!entry) {
-      entry = { users: 0, context: null, timer: null, crashed: new Set(), closed: false, stopping: false, headless, credentials: new Map() };
+      entry = { users: 0, context: null, timer: null, crashed: new Set(), closed: false, stopping: false, headless, background,
+        windowBounds: new Map(), windowTransition: Promise.resolve(), credentials: credentialState ?? new Map() };
       this.#accounts.set(account, entry);
-      entry.starting = Promise.resolve().then(() => this.launch(this.profile ?? resolve(this.profileRoot, account), { ...this.options, headless })).then(async context => {
+      entry.starting = Promise.resolve().then(() => this.launch(this.profile ?? resolve(this.profileRoot, account), {
+        ...this.options, headless, background,
+      })).then(async context => {
         entry.context = context;
         entry.closed = false;
         context.once('close', () => {
@@ -212,15 +251,49 @@ export class BrowserSupervisor {
     clearTimeout(entry.timer);
     return entry;
   }
-  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com' } = {}) {
+  async #setBackground(entry, background, signal) {
+    const transition = entry.windowTransition.catch(() => {}).then(async () => {
+      signal?.throwIfAborted();
+      if (entry.closed) throw new BackendError('browserClosed');
+      if (entry.background === background) return true;
+      const context = await entry.starting;
+      const moved = await setBrowserWindowBackground(context, background, entry.windowBounds);
+      signal?.throwIfAborted();
+      if (moved) entry.background = background;
+      return moved;
+    });
+    entry.windowTransition = transition;
+    try {
+      return await transition;
+    } finally {
+      if (entry.windowTransition === transition) entry.windowTransition = Promise.resolve();
+    }
+  }
+  async setBackground(account, background, signal) {
+    const entry = this.#accounts.get(account);
+    if (!entry) return false;
+    return this.#setBackground(entry, background, signal);
+  }
+  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com', credentialState } = {}) {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
-      const entry = await this.#ensure(account, visibleTurns === undefined ? this.options.headless : !visibleTurns);
+      const background = visibleTurns !== true;
+      const headless = this.options.headless && background;
+      const entry = await this.#ensure(account, headless, background, credentialState);
       entry.users++;
       let rejectCrash;
       let onAbort;
       try {
         const context = await entry.starting;
+        if (entry.background !== background) {
+          if (entry.users > 1) throw new Error('An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.');
+          const moved = await this.#setBackground(entry, background, signal);
+          if (!moved) {
+            const credentials = entry.credentials;
+            await this.closeAccount(account);
+            return await this.run(account, operation, signal, { visibleTurns, auth, origin, credentialState: credentials });
+          }
+        }
         signal?.throwIfAborted();
         if (entry.closed) throw new BackendError('browserClosed');
         return await Promise.race([
@@ -286,9 +359,10 @@ export function browserProxy(env = process.env) {
   if (Object.hasOwn(env, 'MAGPIE_CHATGPT_WEB_PROXY')) return env.MAGPIE_CHATGPT_WEB_PROXY || 'direct';
 }
 
-export function chromeArguments(profile, port, { proxy, env = process.env } = {}) {
+export function chromeArguments(profile, port, { proxy, env = process.env, background = false } = {}) {
   proxy ??= browserProxy(env);
   const args = [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--no-first-run', '--no-default-browser-check'];
+  if (background) args.push('--window-position=-32000,-32000', '--window-size=1280,900');
   if (proxy === 'direct') args.push('--no-proxy-server');
   else if (proxy) args.push(`--proxy-server=${proxy}`);
   return args;
@@ -312,7 +386,7 @@ export function sessionCredential(session, refresh, profile) {
   return { type: 'oauth', refresh, access: session.accessToken, expires, accountId: typeof session.user?.email === 'string' ? session.user.email : 'chatgpt-web', profile, persona: 'chatgpt-paid' };
 }
 
-export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates } = {}) {
+export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates, background = false } = {}) {
   if (!chromium) {
     try { ({ chromium } = await import('playwright-core')); }
     catch { throw new BackendError('browserDependency'); }
@@ -335,7 +409,7 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
     });
   });
   signal?.throwIfAborted();
-  const child = spawnBrowser(executable, chromeArguments(profile, port, { proxy, env }), { stdio: ['ignore', 'ignore', 'ignore'] });
+  const child = spawnBrowser(executable, chromeArguments(profile, port, { proxy, env, background }), { stdio: ['ignore', 'ignore', 'ignore'] });
   let ended = false;
   const exited = new Promise(resolveExit => {
     child.once('error', () => { ended = true; resolveExit(); });
@@ -373,7 +447,7 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
 // owns the process and keeps it available for subsequent operations.
 export async function launchChatBrowserContext(profile, options) {
   if (options.headless) return launchBrowserContext(profile, options);
-  const owned = await launchSignInBrowser(profile);
+  const owned = await launchSignInBrowser(profile, undefined, { background: options.background });
   owned.context.close = owned.close;
   return owned.context;
 }

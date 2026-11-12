@@ -10,6 +10,7 @@ const taxonomy = {
   cooldown: [429, 'The account is cooling down after a rate limit.'],
   upstream: [502, 'The upstream request failed.'],
   requestBudget: [504, 'This request exceeded its local time budget and was stopped before any confirmed result.'],
+  contextLength: [400, 'This request is estimated at {estimated} input tokens, which meets or exceeds the {limit}-token {limitKind} context ceiling for {model}. Start a new chat, compact the conversation, or remove history, images, or tool schemas, then retry. The prompt was not truncated and no browser turn was opened.'],
   empty: [502, 'ChatGPT returned an empty reply.'],
   hidden: [502, 'ChatGPT hid the reply from the conversation.'],
   truncated: [502, 'ChatGPT stopped before confirming the reply was complete.'],
@@ -30,7 +31,7 @@ const taxonomy = {
   temporary: [502, 'Temporary chat could not be confirmed; no message was sent.'],
   harvest: [502, 'The answer reader failed; no completed reply can be confirmed.'],
   protocol: [502, 'The backend or upstream protocol is invalid.'],
-  verification: [502, 'ChatGPT asked to verify you are human. Complete verification in the open browser, then retry the chat.'],
+  verification: [502, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.'],
   capacity: [503, 'Local backend capacity is exhausted; active work and cooldowns may clear, but sign-in blocks persist until the backend restarts.'],
   browserDependency: [503, 'The playwright-core dependency is unavailable; install the packaged dependency.'],
   browserProfile: [502, 'The browser profile restored a page other than about:blank.'],
@@ -57,6 +58,12 @@ const slotValues = {
   modelUnsupported: { slug: 'research' },
   attachmentUnsupported: { kind: 'a PDF file', maxCount: 4, maxBytes: '10 MiB' },
   imageRejected: { detail: 'unsupported media type' },
+  contextLength: {
+    estimated: 92_000,
+    limit: 90_000,
+    limitKind: 'conservative ChatGPT Web reasoning browser',
+    model: 'gpt-6',
+  },
 };
 
 test('every §3.1 code exists with its pinned status and message template', () => {
@@ -134,8 +141,8 @@ test('a provided values object with a missing or null slot still throws', () => 
   assert.throws(() => new BackendError('imageRejected', { values: { detail: undefined } }), TypeError);
 });
 
-test('the template-match fallback never throws for any of the 41 raw templates', () => {
-  assert.equal(Object.keys(errorTable).length, 41);
+test('the template-match fallback never throws for any of the 42 raw templates', () => {
+  assert.equal(Object.keys(errorTable).length, 42);
   for (const [code, [status, template]] of Object.entries(errorTable)) {
     const restored = BackendError.fromEnvelope({ status, message: template });
     assert.ok(restored instanceof BackendError, code);

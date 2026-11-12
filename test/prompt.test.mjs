@@ -25,10 +25,40 @@ test('prefix-matching resumeFrom compiles only the suffix without the system pre
 test('compile regenerates tool protocol definitions when tools are present', () => {
   const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: 'one' }], tools: [{ name: 'lookup', input_schema: { type: 'object' } }] });
   const prompt = compile(prepared);
-  assert.match(prompt, /\[Tool protocol\]/);
+  assert.ok(prompt.indexOf('[Client action format]') < prompt.indexOf('[Human]'));
+  assert.match(prompt, /\[Client action format\]/);
+  assert.match(prompt, /app-side actions executed by the host/);
   assert.ok(prompt.includes(prepared.start));
+  assert.ok(prompt.includes(`${prepared.start}{"name":"lookup","input":{"query":"example"}}${prepared.end}`));
   assert.match(prompt, /"name":"lookup"/);
+  assert.match(prompt, /tool definitions may be compacted/);
   assert.match(prompt, /Tool choice: \{"type":"auto"\}/);
+  assert.doesNotMatch(prompt, /\[Assistant\]\s*$/);
+  assert.match(prompt, /\[Client action reminder\]\s*If this turn needs a listed app-side action/);
+});
+
+test('required tool choice is stated explicitly in the system protocol', () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [{ role: 'user', content: 'one' }],
+    tools: [{ name: 'lookup', input_schema: { type: 'object' } }],
+    tool_choice: { type: 'any' },
+  });
+  assert.match(compile(prepared), /requires a tool call: emit at least one listed tool and no final prose/);
+});
+
+test('a completed tool result tells the model not to repeat the action', () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'call', name: 'lookup', input: { query: 'x' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call', content: 'found' }] },
+    ],
+    tools: [{ name: 'lookup', input_schema: { type: 'object' } }],
+  });
+  const prompt = compile(prepared, prepared.history.length - 1);
+  assert.match(prompt, /preceding client action has completed/i);
+  assert.match(prompt, /Do not repeat it/i);
 });
 
 test('history changed prefixes reject the resume index instead of compiling wrong context', () => {

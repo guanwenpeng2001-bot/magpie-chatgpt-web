@@ -14,8 +14,12 @@ export async function initializeImagePage(page, { budget }) {
 export async function selectImageTool(page) {
   const main = page.locator('main').filter({ visible: true }).last();
   await main.getByRole('button', { name: /^(添加文件等内容|Add files and more|Add photos & files)$/i }).click();
-  const item = page.getByRole('button', { name: /^(创建图像|Create image)/i }).filter({ visible: true });
-  if (await item.count() !== 1 || !await item.isEnabled() || await item.getAttribute('aria-disabled') === 'true') return { ok: false, kind: 'model-not-offered', detail: { slug: IMAGE_MODEL } };
+  const label = page.getByText(/^(创建图像|Create image)$/i).filter({ visible: true });
+  if (await label.count() !== 1) return { ok: false, kind: 'model-not-offered', detail: { slug: IMAGE_MODEL } };
+  const disabled = label.locator('xpath=ancestor-or-self::*[@aria-disabled="true"]');
+  if (await disabled.count()) return { ok: false, kind: 'model-not-offered', detail: { slug: IMAGE_MODEL } };
+  const item = label.locator('xpath=ancestor::*[@data-menu-row-content="true"][1]/..').first();
+  if (await item.count() !== 1) return { ok: false, kind: 'model-not-offered', detail: { slug: IMAGE_MODEL } };
   await item.click();
   return { ok: true };
 }

@@ -13,6 +13,7 @@ export const workModels = Object.freeze({
 export const wireModels = Object.freeze({
   'gpt-5-6-mini': { uiModel: 'gpt-5-6-instant', name: 'GPT-5.6 Luna (mini)' },
   'gpt-5-6-t-mini': { uiModel: 'gpt-5-6-thinking', name: 'GPT-5.6 Luna Thinking (mini)' },
+  'gpt-6-t-mini': { uiModel: 'gpt-6-thinking', name: 'GPT-6 Thinking (mini)' },
   chatgpt_alpha_model_external_access_reserved_gate_13: {
     uiModel: 'gpt-6-instant', name: 'Newly create multisys_rollout',
   },
@@ -23,8 +24,7 @@ export const wireModels = Object.freeze({
 
 export const unsupportedModels = Object.freeze({
   'gpt-6-mini': 'The current live web submission returned an empty answer.',
-  'gpt-6-t-mini': 'The current live web submission returned a hidden/empty answer.',
-  research: 'No Deep Research entry is present in the current account surface.',
+  research: 'The exact research override completed without a rendered answer or research canvas.',
 });
 export const compatibilityTable = Object.freeze(Object.fromEntries([
   ...Object.entries(unsupportedModels).map(([slug, reason]) => [slug, { knownBroken: reason }]),

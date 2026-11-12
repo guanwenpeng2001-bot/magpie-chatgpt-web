@@ -23,10 +23,20 @@ function harness(options = {}) {
     pages: () => pages,
     cookies: async () => [{ name: 'next-auth.session-token', value: 'fixture' }],
     exposeBinding: async () => {}, addInitScript: async () => {},
+    async newCDPSession() {
+      return {
+        async send(method) {
+          if (method === 'Browser.getWindowForTarget') return { windowId: 1, bounds: { left: 80, top: 80, width: 1280, height: 900 } };
+          return {};
+        },
+        async detach() {},
+      };
+    },
     async newPage() {
       const page = {
         closed: false, isClosed() { return this.closed; },
         async close() { this.closed = true; calls.push('close'); },
+        async bringToFront() { calls.push('front'); },
         async goto() { calls.push('navigate'); },
         async evaluate(fn, value) {
           if (typeof value?.network === 'boolean') calls.push(['network', value.network]);
@@ -44,6 +54,8 @@ function harness(options = {}) {
     async probePageError() { calls.push('probe'); return null; },
     async readComposer() { calls.push('composer'); return { ok: true }; },
     async selectModel() { calls.push('model'); return { ok: true }; },
+    async submitPrompt() { calls.push('submit'); return { ok: true }; },
+    async waitForReady() {},
     async attachImages(page, images) { calls.push(['images', images]); return { ok: true }; },
     ...options.adapter,
   };
@@ -56,12 +68,22 @@ function harness(options = {}) {
   return { driver, calls, pages, context, complete };
 }
 
+function trackBackground(driver) {
+  const calls = [];
+  const setBackground = driver.browser.setBackground.bind(driver.browser);
+  driver.browser.setBackground = async (...args) => {
+    calls.push(args[1]);
+    return setBackground(...args);
+  };
+  return calls;
+}
+
 test('real page interstitial takes precedence over rate limit and sign-in', async t => {
   let chromium;
   try { ({ chromium } = await import('playwright-core')); }
   catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error; t.skip('playwright-core is not installed'); return; }
   const root = await mkdtemp(join(tmpdir(), 'turn-precedence-'));
-  const driver = new TurnDriver({ profileRoot: root, launch: async (profile, options) => {
+  const driver = new TurnDriver({ profileRoot: root, challengeTimeout: 20, launch: async (profile, options) => {
     const context = await chromium.launchPersistentContext(profile, { ...options, serviceWorkers: 'block' });
     await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: siteAdapterHtml({ challenge: 'title', rate: 'Rate limit', signIn: true, composer: 'none' }) }));
     return context;
@@ -97,6 +119,24 @@ test('visible browser turns read the rendered answer without parsing hidden inte
   try {
     await h.complete(command({ visibleTurns: true }));
     assert.deepEqual(h.calls.find(call => Array.isArray(call) && call[0] === 'network'), ['network', false]);
+  } finally { await h.driver.close(); }
+});
+
+test('browser observation emits incremental assistant deltas before finish', async () => {
+  const h = harness({
+    observe: async (page, { emit }) => {
+      await emit({ event: 'answer', data: { text: 'incremental ' } });
+      await emit({ event: 'answer', data: { text: 'answer' } });
+      return { text: 'incremental answer', route: 'dom' };
+    },
+  });
+  try {
+    const { frames } = await h.complete(command({ visibleTurns: true }));
+    assert.deepEqual(frames, [
+      { type: 'delta', index: 0, text: 'incremental ' },
+      { type: 'delta', index: 0, text: 'answer' },
+      { type: 'finish', reason: 'complete' },
+    ]);
   } finally { await h.driver.close(); }
 });
 
@@ -152,7 +192,7 @@ test('equal-length resume index is rejected before compilation', async () => {
 });
 
 for (const [kind, code] of [['challenge', 'verification'], ['rate-limit', 'cooldown'], ['sign-in', 'expired']]) test(`page ${kind} blocks composer and maps to ${code}`, async () => {
-  const h = harness({ adapter: { probePageError: async () => ({ kind }) } });
+  const h = harness({ challengeTimeout: 20, adapter: { probePageError: async () => ({ kind }) } });
   const accountGuard = guard();
   try {
     await assert.rejects(h.complete(command(), accountGuard), { code });
@@ -162,16 +202,157 @@ for (const [kind, code] of [['challenge', 'verification'], ['rate-limit', 'coold
   } finally { await h.driver.close(); }
 });
 
+test('a pre-submit challenge reveals the same context, waits for recovery, and returns it to the background', async () => {
+  let probes = 0;
+  const h = harness({
+    challengeTimeout: 250,
+    adapter: { probePageError: async () => ++probes <= 2 ? { kind: 'challenge' } : null },
+  });
+  const backgrounds = trackBackground(h.driver);
+  try {
+    const { result } = await h.complete(command({ conversationKey: 'recover-before-submit' }));
+    assert.equal(result.text, 'answer');
+    assert.deepEqual(backgrounds, [false, true]);
+    assert.equal(h.calls.filter(call => call === 'submit').length, 1);
+    assert.equal(h.pages.length, 1);
+    assert.equal(h.pages[0].isClosed(), false);
+  } finally { await h.driver.close(); }
+});
+
+test('a post-submit challenge resumes observation without submitting twice', async () => {
+  let observations = 0;
+  let recovering = false;
+  let recoveryProbes = 0;
+  const h = harness({
+    challengeTimeout: 250,
+    adapter: { probePageError: async () => recovering && ++recoveryProbes === 1 ? { kind: 'challenge' } : null },
+    observe: async () => {
+      if (++observations === 1) {
+        recovering = true;
+        throw new BackendError('verification');
+      }
+      return { text: 'recovered answer', route: 'dom' };
+    },
+  });
+  const backgrounds = trackBackground(h.driver);
+  try {
+    const { result } = await h.complete(command({ conversationKey: 'recover-after-submit' }));
+    assert.equal(result.text, 'recovered answer');
+    assert.deepEqual(backgrounds, [false, true]);
+    assert.equal(h.calls.filter(call => call === 'submit').length, 1);
+    assert.equal(h.pages.length, 1);
+  } finally { await h.driver.close(); }
+});
+
+test('a recovery deadline preserves the visible page and the next request resumes without resubmitting', async () => {
+  let readyCalls = 0;
+  const h = harness({
+    timeout: 60,
+    challengeTimeout: 60,
+    adapter: {
+      probePageError: async () => ({ kind: 'challenge' }),
+      waitForReady: async (page, { signal }) => {
+        if (++readyCalls === 1) return;
+        await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      },
+    },
+  });
+  const backgrounds = trackBackground(h.driver);
+  const request = command({ conversationKey: 'recovery-deadline' });
+  try {
+    await assert.rejects(h.complete(request), { code: 'verification' });
+    assert.equal(h.pages[0].isClosed(), false);
+    assert.equal(h.driver.bindings.entries.get('recovery-deadline').busy, false);
+    h.driver.adapter.probePageError = async () => null;
+    h.driver.adapter.waitForReady = async () => {};
+    const { result } = await h.complete(request);
+    assert.equal(result.text, 'answer');
+    assert.deepEqual(backgrounds, [false, false, true]);
+    assert.equal(h.calls.filter(call => call === 'submit').length, 1);
+    assert.equal(h.pages.length, 1);
+  } finally { await h.driver.close(); }
+});
+
+test('a keyless challenge does not retain an unreachable page after the deadline', async () => {
+  let readyCalls = 0;
+  const h = harness({
+    timeout: 60,
+    challengeTimeout: 60,
+    adapter: {
+      probePageError: async () => ({ kind: 'challenge' }),
+      waitForReady: async (page, { signal }) => {
+        if (++readyCalls === 1) return;
+        await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      },
+    },
+  });
+  try {
+    await assert.rejects(h.complete(command()), { code: 'verification' });
+    assert.equal(h.pages[0].isClosed(), true);
+    assert.equal(h.driver.bindings.entries.size, 0);
+  } finally { await h.driver.close(); }
+});
+
+test('a deadline after recovery preserves the submitted page for the next observation attempt', async () => {
+  let probes = 0;
+  let observations = 0;
+  const h = harness({
+    timeout: 60,
+    challengeTimeout: 60,
+    adapter: { probePageError: async () => ++probes >= 2 && probes <= 3 ? { kind: 'challenge' } : null },
+    observe: async () => {
+      if (++observations === 1) await new Promise(() => {});
+      return { text: 'continued answer', route: 'dom' };
+    },
+  });
+  const request = command({ conversationKey: 'recovery-then-deadline' });
+  try {
+    await assert.rejects(h.complete(request), { code: 'verification' });
+    assert.equal(h.pages[0].isClosed(), false);
+    assert.equal(h.driver.bindings.entries.get('recovery-then-deadline').pendingChallenge.submitted, true);
+    const { result } = await h.complete(request);
+    assert.equal(result.text, 'continued answer');
+    assert.equal(h.calls.filter(call => call === 'submit').length, 1);
+    assert.equal(h.pages.length, 1);
+  } finally { await h.driver.close(); }
+});
+
+test('cancellation during challenge recovery closes the page instead of persisting it', async () => {
+  let entered;
+  const recovering = new Promise(resolve => { entered = resolve; });
+  const h = harness({
+    timeout: 1000,
+    challengeTimeout: 500,
+    adapter: {
+      probePageError: async () => ({ kind: 'challenge' }),
+      waitForReady: async (page, { signal }) => {
+        entered();
+        await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      },
+    },
+  });
+  const controller = new AbortController();
+  const request = h.complete(command({ conversationKey: 'cancel-recovery' }), guard(), controller.signal);
+  const rejected = assert.rejects(request, { code: 'upstream' });
+  try {
+    await recovering;
+    controller.abort();
+    await rejected;
+    assert.equal(h.pages[0].isClosed(), true);
+    assert.equal(h.driver.bindings.entries.has('cancel-recovery'), false);
+  } finally { await h.driver.close(); }
+});
+
 for (const [kind, code] of [['challenge', 'verification'], ['rate-limit', 'cooldown'], ['sign-in', 'expired']]) test(`page ${kind} classification survives deadline during slow teardown`, async () => {
-  const h = harness({ timeout: 120, adapter: { probePageError: async page => {
+  const h = harness({ timeout: 120, challengeTimeout: 30, adapter: { probePageError: async page => {
     const close = page.close.bind(page);
     page.close = async () => { await delay(200); await close(); };
     return { kind };
   } } });
   try {
     await assert.rejects(h.complete(command({ conversationKey: 'classified' })), { code });
-    assert.equal(h.pages[0].isClosed(), true);
-    assert.equal(h.driver.bindings.entries.size, 0);
+    assert.equal(h.pages[0].isClosed(), kind !== 'challenge');
+    assert.equal(h.driver.bindings.entries.size, kind === 'challenge' ? 1 : 0);
     assert.equal(h.calls.includes('submit'), false);
   } finally { await h.driver.close(); }
 });
