@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 — 2026-11-12
+
+- Hand the completed sign-in Chrome context directly to the chat driver instead of closing it and starting a second process. The next visible turn reuses the same browser instance and account profile.
+
 ## 0.4.1 — 2026-11-12
 
 - Ignore Magpie's injected `HTTPS_PROXY` and `MAGPIE_HTTPS_PROXY` values when launching the ordinary ChatGPT Web Chrome profile. Those values made Chrome use an explicit `--proxy-server` path that differed from the user's normal system-proxy session and produced a fresh verification challenge.

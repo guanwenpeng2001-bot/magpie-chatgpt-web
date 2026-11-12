@@ -40,6 +40,31 @@ test('a restored non-blank page recovers without discarding its session', async 
   } finally { await supervisor.close(); }
 });
 
+test('shared sign-in keeps its Chrome context resident for the following turn', async () => {
+  const fixture = loginFixture();
+  fixture.page.url = () => 'https://chatgpt.com/';
+  let launches = 0;
+  let runs = 0;
+  let closes = 0;
+  const browser = {
+    async run(account, operation, signal, options) {
+      runs++;
+      assert.equal(account, 'fixture');
+      assert.deepEqual(options, { visibleTurns: true });
+      return operation(fixture.context, signal);
+    },
+    async closeAccount() { closes++; },
+  };
+  const flow = browserModule.createLoginFlow({
+    launch: async () => { launches++; throw new Error('shared browser must bypass a second launch'); },
+  });
+  const result = await flow('fixture', new AbortController().signal, '.', { browser });
+  assert.equal(result.state, 'signed-in');
+  assert.equal(runs, 1);
+  assert.equal(launches, 0);
+  assert.equal(closes, 0);
+});
+
 test('cancellation during browser attachment closes it before navigating', async () => {
   const controller = new AbortController();
   const context = new EventEmitter();

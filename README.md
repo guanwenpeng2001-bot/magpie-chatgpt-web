@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns are visible by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.4.1`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.4.2`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -41,7 +41,7 @@ For that local-install case, commit the desired source and run `git rev-parse HE
 
 ## Sign-in and ordinary use
 
-Choose **ChatGPT account (browser sign-in)**. Sign-in always opens a visible Chrome window on chatgpt.com, using a plugin-owned profile below `~/.config/magpie/chatgpt-web-profile/`, separate from your normal Chrome profile. Sign in normally, including MFA or manual verification. No cookie copying, token pasting or developer tools are needed. The window closes after session confirmation; closing it early cancels sign-in. The sign-in window lasts **15 minutes**. A sign-in that lapses is not restarted from nothing: retrying resumes the same plugin-owned profile, so a password, MFA trust or partially completed verification already entered is still there. A completed sign-in releases that profile, and the next account you add gets its own.
+Choose **ChatGPT account (browser sign-in)**. Sign-in always opens a visible Chrome window on chatgpt.com, using a plugin-owned profile below `~/.config/magpie/chatgpt-web-profile/`, separate from your normal Chrome profile. Sign in normally, including MFA or manual verification. No cookie copying, token pasting or developer tools are needed. After session confirmation the same Chrome process remains open and is reused by the next visible chat, so the site sees one continuous browser instance. Closing it early cancels sign-in. The sign-in window lasts **15 minutes**. A sign-in that lapses is not restarted from nothing: retrying resumes the same plugin-owned profile, so a password, MFA trust or partially completed verification already entered is still there. A completed sign-in releases that profile, and the next account you add gets its own.
 
 Open magpie's normal model picker, choose **ChatGPT Web**, and select a model offered to your account. `magpie plugin list --json` confirms installation. Continue conversations normally and use the usual stop control to cancel a reply.
 

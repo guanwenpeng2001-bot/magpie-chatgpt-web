@@ -6,7 +6,19 @@ import { LoginStates, createLoginFlow, sessionCredential, browserRead, DEFAULT_S
 import { TurnDriver } from './turn.mjs';
 
 export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
-  let turns = turnDriver;
+  const turnDrivers = new Map();
+  let latestDriver = turnDriver;
+  const driverFor = profileRoot => {
+    if (turnDriver) return latestDriver;
+    if (typeof profileRoot !== 'string' || !profileRoot) throw new BackendError('browserConfiguration');
+    let driver = turnDrivers.get(profileRoot);
+    if (!driver) {
+      driver = new TurnDriver({ profileRoot });
+      turnDrivers.set(profileRoot, driver);
+    }
+    latestDriver = driver;
+    return latestDriver;
+  };
   const pending = new Map();
   const clients = new Map();
   const guards = new Map();
@@ -54,8 +66,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, access: command.auth?.access, guard,
         browserRoute: async (path, signal, origin) => {
           if (typeof command.auth?.profile !== 'string' || typeof command.profileRoot !== 'string') throw new BackendError('browserConfiguration');
-          turns ??= new TurnDriver({ profileRoot: command.profileRoot });
-          return turns.browser.run(command.auth.profile, async context => {
+          return driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
             const page = await context.newPage();
             const abort = () => { page.close().catch(() => {}); };
             signal.addEventListener('abort', abort, { once: true });
@@ -120,7 +131,11 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       login.finish(account, state, controller.signal.aborted ? undefined : outcome?.credential, reason);
     };
     controller.signal.addEventListener('abort', () => settle(), { once: true });
-    entry.work = Promise.resolve().then(() => loginFlow(account, controller.signal, profileRoot, { proxy })).then(settle, error => settle({ state: 'failed', error })).finally(() => {
+    entry.work = Promise.resolve().then(() => {
+      const options = { proxy };
+      if (typeof profileRoot === 'string' && profileRoot) options.browser = driverFor(profileRoot).browser;
+      return loginFlow(account, controller.signal, profileRoot, options);
+    }).then(settle, error => settle({ state: 'failed', error })).finally(() => {
       clearTimeout(timer);
       if (loginPromises.get(account) === entry) loginPromises.delete(account);
     });
@@ -151,7 +166,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       case 'logout': loginPromises.get(account)?.cancel(); loginPromises.delete(account); login.clear(account); return { ok: true };
       case 'discard': {
         if (typeof command.conversationKey !== 'string' || !command.conversationKey) throw new BackendError('invalidRequest');
-        await turns?.bindings.discard(command.conversationKey);
+        await latestDriver?.bindings.discard(command.conversationKey);
         return { ok: true };
       }
       case 'complete': {
@@ -168,8 +183,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         }
         const { client, identity, release } = clientFor(command);
         try {
-          turns ??= new TurnDriver({ profileRoot: command.profileRoot });
-          return await turns.complete({ ...command, auth: { ...command.auth, refresh: client.credential } }, client.guard, identity, signal, emit);
+          return await driverFor(command.profileRoot).complete({ ...command, auth: { ...command.auth, refresh: client.credential } }, client.guard, identity, signal, emit);
         } finally { release(); }
       }
       default: throw new BackendError('protocol');
@@ -248,7 +262,9 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     for (const entry of logins) entry.cancel();
     await Promise.allSettled(logins.map(entry => entry.work));
     loginPromises.clear();
-    await turns?.close();
+    const ownedDrivers = new Set(turnDrivers.values());
+    if (turnDriver) ownedDrivers.add(turnDriver);
+    await Promise.allSettled([...ownedDrivers].map(driver => driver.close()));
     await close();
     await writes.catch(() => {});
     clients.clear(); guards.clear();
