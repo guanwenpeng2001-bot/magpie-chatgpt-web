@@ -11,10 +11,15 @@ test('ordinary Chrome sign-in launch uses only the four prescribed arguments', (
   assert.equal(args.some(arg => /no-sandbox|enable-automation|headless/.test(arg)), false);
 });
 
-test('ordinary browser keeps the system proxy unless the plugin proxy is explicitly overridden', () => {
-  assert.equal(browserModule.browserProxy({ HTTPS_PROXY: 'http://127.0.0.1:7897' }), undefined);
-  assert.equal(browserModule.browserProxy({ MAGPIE_HTTPS_PROXY: 'http://127.0.0.1:9123' }), 'http://127.0.0.1:9123');
-  const args = browserModule.chromeArguments('profile', 1234, { env: { MAGPIE_HTTPS_PROXY: '', HTTPS_PROXY: 'http://127.0.0.1:7897' } });
+test('ordinary browser ignores Magpie-injected proxy variables and accepts its own explicit override', () => {
+  const host = {
+    HTTPS_PROXY: 'http://127.0.0.1:7897',
+    HTTP_PROXY: 'http://127.0.0.1:7897',
+    MAGPIE_HTTPS_PROXY: 'http://127.0.0.1:7897',
+  };
+  assert.equal(browserModule.browserProxy(host), undefined);
+  assert.equal(browserModule.browserProxy({ ...host, MAGPIE_CHATGPT_WEB_PROXY: 'http://127.0.0.1:9123' }), 'http://127.0.0.1:9123');
+  const args = browserModule.chromeArguments('profile', 1234, { env: { ...host, MAGPIE_CHATGPT_WEB_PROXY: '' } });
   assert.ok(args.includes('--no-proxy-server'));
   assert.equal(args.some(arg => arg.startsWith('--proxy-server=')), false);
 });
@@ -102,7 +107,7 @@ test('sign-in launch inherits host proxy and stays visible', async () => {
   let spawned;
   const context = new EventEmitter();
   const owned = await browserModule.launchSignInBrowser('.', undefined, {
-    candidates: [process.execPath], env: { MAGPIE_HTTPS_PROXY: 'http://127.0.0.1:9123' },
+    candidates: [process.execPath], env: { MAGPIE_CHATGPT_WEB_PROXY: 'http://127.0.0.1:9123' },
     spawn: (executable, args) => { spawned = args; return child; },
     chromium: { connectOverCDP: async () => ({ contexts: () => [context], isConnected: () => true,
       newBrowserCDPSession: async () => ({ send: async () => { child.emit('exit', 0); } }),

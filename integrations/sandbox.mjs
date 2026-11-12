@@ -39,7 +39,7 @@ const ledger = { rotationSemantics: 'Fixture accepts current and prior cookies u
 const passed = (name, evidence) => { ledger.checks.push({ name, evidence }); console.log(name); };
 env.CHATGPT_WEB_FIXTURE_STATE = join(sandbox, 'fixture-state.json');
 env.CHATGPT_WEB_FIXTURE_LOG = join(sandbox, 'fixture-events.jsonl');
-env.MAGPIE_HTTPS_PROXY = 'http://127.0.0.1:9';
+env.MAGPIE_CHATGPT_WEB_PROXY = 'http://127.0.0.1:9';
 const fixtureEvents = async () => (await readFile(env.CHATGPT_WEB_FIXTURE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
 let host;
 try {
@@ -153,7 +153,7 @@ try {
   const callback = await rpc('callback', { session: authorization.session });
   assert.equal(callback.ok, true, 'fixture callback: ' + (callback.error ?? 'no diagnostic'));
   const signinSpawn = (await fixtureEvents()).find(event => event.event === 'signinSpawn');
-  assert.ok(signinSpawn.args.includes('--proxy-server=' + env.MAGPIE_HTTPS_PROXY));
+  assert.ok(signinSpawn.args.includes('--proxy-server=' + env.MAGPIE_CHATGPT_WEB_PROXY));
   passed('fixture sign-in and proxy launch args', signinSpawn);
   const auths = JSON.parse(await readFile(authPath, 'utf8'));
   const auth = auths[callback.account];

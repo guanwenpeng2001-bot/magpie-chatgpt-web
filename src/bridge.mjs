@@ -43,7 +43,7 @@ export class Bridge {
   }
   async #launch() {
     const env = {};
-    for (const key of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LOCALAPPDATA', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'MAGPIE_HTTPS_PROXY', 'MAGPIE_HTTP_PROXY', 'MAGPIE_ALL_PROXY']) {
+    for (const key of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LOCALAPPDATA', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'MAGPIE_CHATGPT_WEB_PROXY']) {
       if (process.env[key] !== undefined) env[key] = process.env[key];
     }
     let child;
