@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.4.7`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.4.8`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 

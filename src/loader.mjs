@@ -1,6 +1,6 @@
 import { BackendError } from './bridge.mjs';
 import { prepare } from './wire/prepare.mjs';
-import { translate, reconstruct, errorEvent } from './wire/translate.mjs';
+import { translate, reconstruct, errorEvent, errorType, backendFrameError } from './wire/translate.mjs';
 import { requireAuth } from './hooks/auth.mjs';
 import { compile } from '../backend/prompt.mjs';
 import { compactToolDefinitions } from './tool-emulation.mjs';
@@ -62,7 +62,24 @@ export function makeLoader({ bridge, profileRoot, input }) {
             upstream.close();
             return Response.json(message, { headers });
           }
-          const translated = translate(upstream, prepared);
+          // Bridge.open returns a head before the browser has produced anything.
+          // Await actual data so an immediate logout can still set HTTP headers.
+          const iterator = upstream[Symbol.asyncIterator]();
+          const first = await iterator.next();
+          signal?.throwIfAborted();
+          if (first.done) throw new BackendError('empty');
+          if (first.value?.type === 'error') throw backendFrameError(first.value);
+          async function* frames() {
+            try {
+              yield first.value;
+              for (;;) {
+                const next = await iterator.next();
+                if (next.done) return;
+                yield next.value;
+              }
+            } finally { await iterator.return?.(); }
+          }
+          const translated = translate(frames(), prepared);
           const encoder = new TextEncoder();
           const body = new ReadableStream({
             async pull(controller) {
@@ -100,7 +117,7 @@ export function makeLoader({ bridge, profileRoot, input }) {
             }));
             try { await input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'error', message: 'preflightRejected ' + JSON.stringify(requestShape(request, error.code, error.diagnostic)) } }); } catch {}
           }
-          return Response.json({ error: error.toJSON() }, { status: error.status, headers: error.headers });
+          return Response.json({ error: { type: errorType(error), ...error.toJSON() } }, { status: error.status, headers: error.headers });
         }
       },
     };

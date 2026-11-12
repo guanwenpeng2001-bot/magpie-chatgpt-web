@@ -164,6 +164,8 @@ function attachmentError(kind) {
 
 export function prepare(request, headers = new Headers()) {
   if (!request || typeof request.model !== 'string' || !request.model || !Array.isArray(request.messages) || !request.messages.length) throw new BackendError('invalidRequest');
+  if (request.max_tokens !== undefined && (!Number.isSafeInteger(request.max_tokens) || request.max_tokens <= 0)) throw new BackendError('invalidRequest');
+  if (request.stop_sequences !== undefined && (!Array.isArray(request.stop_sequences) || request.stop_sequences.some(stop => typeof stop !== 'string' || !stop.length))) throw new BackendError('invalidRequest');
   const tools = request.tools ?? [];
   checkToolDefinitions(tools);
   let toolChoice = request.tool_choice ?? { type: 'auto' };
@@ -179,6 +181,8 @@ export function prepare(request, headers = new Headers()) {
     }
   }
   const images = [];
+  const imageHistoryIndices = [];
+  let historyIndex = 0;
   function textContent(content, allowTools = true, allowImages = true) {
     if (typeof content === 'string') return content;
     if (!Array.isArray(content)) throw new BackendError('unsupported');
@@ -190,6 +194,7 @@ export function prepare(request, headers = new Headers()) {
         if (source.data.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw attachmentError('an oversized image');
         const bytes = Buffer.from(source.data, 'base64');
         if (bytes.toString('base64') !== source.data || bytes.length > MAX_IMAGE_BYTES || images.length >= MAX_INPUT_IMAGES) throw attachmentError('invalid or over-cap images');
+        imageHistoryIndices.push(historyIndex);
         images.push({
           mediaType: source.media_type,
           dataBase64: source.data,
@@ -214,7 +219,9 @@ export function prepare(request, headers = new Headers()) {
       systems.push(textContent(message.content, false, false));
       return [];
     }
-    return { role: message.role, content: textContent(message.content) };
+    const entry = { role: message.role, content: textContent(message.content) };
+    historyIndex++;
+    return entry;
   });
   if (!history.length) throw new BackendError('invalidRequest');
   if (request.tool_choice === undefined && tools.length && toolChoice.type === 'auto') {
@@ -239,7 +246,9 @@ export function prepare(request, headers = new Headers()) {
     toolExposureReason: tools.length ? toolExposureReason : 'no-tools',
     ...(tools.length && textOnly ? { promptTools: [] } : {}),
     start: `[MAGPIE_TOOL_${nonce}]`, end: `[/MAGPIE_TOOL_${nonce}]`,
-    ...(images.length ? { images } : {}), stream: request.stream !== false,
+    ...(images.length ? { images, imageHistoryIndices } : {}), stream: request.stream !== false,
+    ...(request.max_tokens !== undefined ? { maxTokens: request.max_tokens } : {}),
+    stopSequences: request.stop_sequences ?? [],
     conversationKey: supplied ?? (session ? createHash('sha256').update(session).digest('hex') : undefined) };
   prepared.prompt = compile(prepared);
   return prepared;

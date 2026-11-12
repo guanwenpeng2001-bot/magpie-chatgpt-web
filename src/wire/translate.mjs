@@ -82,7 +82,6 @@ export class AnswerStream {
     } else if (!/^\/message\/(metadata(?:\/|$)|end_turn$|recipient$|channel$)/.test(patch.p)) throw new BackendError('protocol');
   }
   extend(text) {
-    if (!text.startsWith(this.text)) throw new BackendError('protocol');
     this.text = text;
   }
   finish() {
@@ -93,25 +92,89 @@ export class AnswerStream {
 
 const event = value => encodeSSE({ event: value.type, data: value });
 
+export function backendFrameError(frame) {
+  if (!Object.hasOwn(errors, frame.code) || typeof frame.message !== 'string') throw new BackendError('protocol');
+  if (frame.retryAfter !== undefined && (!Number.isSafeInteger(frame.retryAfter) || frame.retryAfter < 0)) throw new BackendError('protocol');
+  const failure = new BackendError(frame.code, { retryAfter: frame.retryAfter });
+  if (frame.retryAfter !== undefined) failure.retryAfter = String(frame.retryAfter);
+  failure.message = frame.message;
+  const envelope = { status: failure.status, code: failure.code, message: failure.message };
+  if (failure.signIn) envelope.signIn = failure.signIn;
+  if (failure.retryAfter) envelope.retryAfter = failure.retryAfter;
+  failure.toJSON = () => ({ ...envelope });
+  return failure;
+}
+
 export async function* translate(source, prepared) {
   const parser = prepared.tools?.length ? new ToolParser(prepared) : null;
   const choice = prepared.toolChoice ?? prepared.choice;
   let index = 0, textOpen = false, calls = 0, outputText = '', complete = false, usage, visibleText = false;
+  const stops = prepared.stopSequences ?? [];
+  const maxTokens = prepared.maxTokens ?? Infinity;
+  let pendingText = '', stopReason, stopSequence = null;
   const inputTokens = prepared.usageEstimate?.inputTokens
     ?? estimateTextTokens(prepared.prompt ?? JSON.stringify(prepared.history ?? []));
   yield event({ type: 'message_start', message: { id: `msg_${randomUUID()}`, type: 'message', role: 'assistant', model: prepared.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } } });
+  function limited(text) {
+    if (estimateTextTokens(outputText + text) <= maxTokens) return text;
+    const chars = Array.from(text);
+    let low = 0, high = chars.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (estimateTextTokens(outputText + chars.slice(0, mid).join('')) <= maxTokens) low = mid;
+      else high = mid - 1;
+    }
+    stopReason = 'max_tokens';
+    stopSequence = null;
+    return chars.slice(0, low).join('');
+  }
+  function* flushText(final = false) {
+    let end = pendingText.length, matched;
+    for (const stop of stops) {
+      const at = pendingText.indexOf(stop);
+      if (at >= 0 && (matched === undefined || at < end)) { end = at; matched = stop; }
+    }
+    if (matched !== undefined) { stopReason = 'stop_sequence'; stopSequence = matched; }
+    else if (!final) {
+      // Keep only a suffix that could become a stop across chunk boundaries.
+      for (const stop of stops) for (let n = Math.min(stop.length - 1, pendingText.length); n > 0; n--) {
+        if (pendingText.endsWith(stop.slice(0, n))) { end = Math.min(end, pendingText.length - n); break; }
+      }
+      // Do not split UTF-16 pairs when upstream splits a code point.
+      if (end && /[\uD800-\uDBFF]/.test(pendingText[end - 1])) end--;
+    }
+    const text = limited(pendingText.slice(0, end));
+    pendingText = stopReason ? '' : pendingText.slice(end);
+    if (!text) return;
+    if (!textOpen) { yield event({ type: 'content_block_start', index, content_block: { type: 'text', text: '' } }); textOpen = true; }
+    visibleText ||= !!text.trim();
+    outputText += text;
+    yield event({ type: 'content_block_delta', index, delta: { type: 'text_delta', text } });
+  }
   function* emit(items) {
     for (const item of items) {
+      if (stopReason) return;
       if (item.text) {
-        if (!textOpen) { yield event({ type: 'content_block_start', index, content_block: { type: 'text', text: '' } }); textOpen = true; }
-        visibleText ||= !!item.text.trim();
-        outputText += item.text;
-        yield event({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: item.text } });
+        pendingText += item.text;
+        yield* flushText();
+        if (stopReason) return;
       } else if (item.tool) {
+        yield* flushText(true);
+        if (stopReason) return;
+        const json = JSON.stringify(item.tool.input);
+        // Tool blocks are atomic: never send invalid partial JSON as a call.
+        const match = stops.map(stop => ({ stop, at: json.indexOf(stop) })).filter(item => item.at >= 0).sort((a, b) => a.at - b.at)[0];
+        if (match) {
+          if (limited(json.slice(0, match.at)) === json.slice(0, match.at)) {
+            stopReason = 'stop_sequence';
+            stopSequence = match.stop;
+          }
+          return;
+        }
+        if (limited(json) !== json) return;
         if (++calls > 1 && choice.disable_parallel_tool_use) throw new BackendError('toolParallel');
         if (textOpen) { yield event({ type: 'content_block_stop', index: index++ }); textOpen = false; }
         const { input, ...block } = item.tool;
-        const json = JSON.stringify(input);
         outputText += json;
         yield event({ type: 'content_block_start', index, content_block: { ...block, input: {} } });
         yield event({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json } });
@@ -121,20 +184,7 @@ export async function* translate(source, prepared) {
   }
   for await (const frame of source) {
     if (!frame || complete || !['delta', 'finish', 'error'].includes(frame.type)) throw new BackendError('protocol');
-    if (frame.type === 'error') {
-      if (!Object.hasOwn(errors, frame.code) || typeof frame.message !== 'string') throw new BackendError('protocol');
-      if (frame.retryAfter !== undefined && (!Number.isSafeInteger(frame.retryAfter) || frame.retryAfter < 0)) throw new BackendError('protocol');
-      const failure = new BackendError(frame.code, { retryAfter: frame.retryAfter });
-      if (frame.retryAfter !== undefined) failure.retryAfter = String(frame.retryAfter);
-      failure.code = frame.code;
-      failure.status = errors[frame.code].status;
-      failure.message = frame.message;
-      const envelope = { status: failure.status, message: failure.message };
-      if (failure.signIn) envelope.signIn = failure.signIn;
-      if (failure.retryAfter) envelope.retryAfter = failure.retryAfter;
-      failure.toJSON = () => ({ ...envelope });
-      throw failure;
-    }
+    if (frame.type === 'error') throw backendFrameError(frame);
     if (frame.type === 'finish') {
       if (!['complete', 'truncated'].includes(frame.reason)) throw new BackendError('protocol');
       if (frame.reason === 'truncated') throw new BackendError('truncated');
@@ -145,22 +195,28 @@ export async function* translate(source, prepared) {
       if (!Number.isSafeInteger(frame.index) || frame.index < 0 || typeof frame.text !== 'string') throw new BackendError('protocol');
       if (frame.text) yield* emit(parser ? parser.items(frame.text) : [{ text: frame.text }]);
     }
+    if (stopReason) break;
   }
-  if (!complete) throw new BackendError('truncated');
-  if (parser) yield* emit(parser.items('', true));
-  if (['any', 'tool'].includes(choice?.type) && !calls) throw new BackendError('toolRequired');
-  if (!visibleText && !calls) throw new BackendError('empty');
+  if (!complete && !stopReason) throw new BackendError('truncated');
+  if (parser && !stopReason) yield* emit(parser.items('', true));
+  if (!stopReason) yield* flushText(true);
+  if (!stopReason && ['any', 'tool'].includes(choice?.type) && !calls) throw new BackendError('toolRequired');
+  if (!stopReason && !visibleText && !calls) throw new BackendError('empty');
   if (textOpen) yield event({ type: 'content_block_stop', index });
-  yield event({ type: 'message_delta', delta: { stop_reason: calls ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: usage ?? { output_tokens: estimateTextTokens(outputText) } });
+  yield event({ type: 'message_delta', delta: { stop_reason: stopReason ?? (calls ? 'tool_use' : 'end_turn'), stop_sequence: stopSequence }, usage: (!stopReason && usage) || { output_tokens: estimateTextTokens(outputText) } });
   yield event({ type: 'message_stop' });
+}
+
+export function errorType(failure) {
+  return failure.code === 'cooldown'
+    ? 'rate_limit_error'
+    : failure.code === 'expired' ? 'authentication_error'
+      : failure.status < 500 ? 'invalid_request_error' : 'api_error';
 }
 
 export function errorEvent(error) {
   const failure = error instanceof BackendError ? error : new BackendError('upstream');
-  const type = failure.code === 'cooldown'
-    ? 'rate_limit_error'
-    : failure.status < 500 ? 'invalid_request_error' : 'api_error';
-  return event({ type: 'error', error: { type, ...failure.toJSON() } });
+  return event({ type: 'error', error: { type: errorType(failure), ...failure.toJSON() } });
 }
 
 export async function reconstruct(source) {
