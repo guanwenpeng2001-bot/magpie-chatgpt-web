@@ -246,6 +246,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         }
         await send({ id: command.id, event: 'done', ...metadata });
       } catch (error) {
+        if (process.env.MAGPIE_CHATGPT_WEB_DEBUG) process.stderr.write('DEBUG ' + command.method + ' ' + (error?.stack ?? error) + '\n');
         if (!stopping) await send({ id: command.id, event: 'error', error: publicError(budgetExpired ? new BackendError('requestBudget') : error) }).catch(() => {});
       } finally {
         clearTimeout(timer);

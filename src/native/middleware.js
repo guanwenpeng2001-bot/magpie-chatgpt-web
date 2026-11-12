@@ -1,14 +1,15 @@
-// Magpie runs this after privacy masking, in its gateway's restricted JS
-// runtime. Keep it in sync with mark() in provenance.mjs.
+// 0.1.3930 runs this after the Node onRequest hook, before provider-specific
+// metadata stripping. This restricted runtime has its own ctx.state and no
+// raw request headers. Only the nonce crosses from the Node hook's state.
 export function onProvider(body, ctx) {
   const provider = "chatgpt-web";
   if (!body) return;
-  if (ctx.provider.id !== provider && ctx.provider.id !== provider + "-plugin") {
+  if (!ctx || !ctx.provider || (ctx.provider.id !== provider && ctx.provider.id !== provider + "-plugin")) {
     if (body.client_metadata) {
       delete body.client_metadata["x-magpie-native-nonce"];
       delete body.client_metadata["x-magpie-native-checked"];
     }
-    for (const item of body.input || []) if (item && typeof item === "object") {
+    for (const item of Array.isArray(body.input) ? body.input : []) if (item && typeof item === "object") {
       delete item.__magpie_native_ticket;
     }
     return body;

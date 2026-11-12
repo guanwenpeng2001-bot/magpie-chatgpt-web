@@ -57,17 +57,18 @@ function matchesPost(response, url) {
 }
 
 /** Capture the dashboard's own login response; never replay its login request. */
-export async function capturePlatformSession(page, { timeoutMs = 30_000 } = {}) {
+// The plugin's Chrome profile is signed in to ChatGPT, not necessarily to
+// platform.openai.com. The page stays visible so the user can finish that
+// sign-in (usually one click through the shared OpenAI account).
+export async function capturePlatformSession(page, { timeoutMs = 30_000, signinTimeoutMs = 10 * 60_000 } = {}) {
   try {
     const responsePromise = page.waitForResponse(
-      response => matchesPost(response, `${API}/v1/dashboard/onboarding/login`),
-      { timeout: timeoutMs },
+      response => matchesPost(response, `${API}/v1/dashboard/onboarding/login`) && response.ok(),
+      { timeout: signinTimeoutMs },
     );
-    // Attach handlers before navigation (including when navigation fails).
-    const [response] = await Promise.all([
-      responsePromise,
-      page.goto(`${PLATFORM}/settings/organization/tunnels`, { waitUntil: 'domcontentloaded', timeout: timeoutMs }),
-    ]);
+    await page.goto(`${PLATFORM}/settings/organization/tunnels`, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.bringToFront?.().catch?.(() => {});
+    const response = await responsePromise;
     requireValue(response.ok(), 'platformSignin');
     const { user } = await response.json();
     const org = user?.orgs?.data?.find(item => item.is_default);

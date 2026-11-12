@@ -1,5 +1,5 @@
-// Only request identifiers and native item metadata are retained here. In
-// particular, never retain message text, tool outputs, arguments or images.
+// Retain only routing proof, native item metadata and opaque replay fields.
+// Message text, plaintext arguments, tool outputs and images are not cached.
 import { createHash, randomBytes } from "node:crypto";
 
 const PROVIDER = "chatgpt-web";
@@ -16,7 +16,8 @@ const MAX_LIVE_TICKETS = 50000;
 const MAX_RECORD_BYTES = 512 * 1024;
 const MAX_LIVE_BYTES = 16 * 1024 * 1024;
 const IDENTITY = ["id", "type", "role", "call_id", "name", "namespace", "author", "recipient"];
-const TURN_FIELDS = ["thread_id", "turn_id", "parent_thread_id", "forked_from_thread_id", "agent_name", "request_kind", "subagent_kind", "thread_source"];
+const METADATA = "internal_chat_message_metadata_passthrough";
+const KEPT_SEALS = new Set(["reasoning", "compaction", "compaction_summary", "context_compaction"]);
 const routePattern = /^native\/([A-Za-z0-9_-]{1,64})\/([A-Za-z0-9._-]{1,100})$/;
 let liveTickets = 0, liveBytes = 0;
 
@@ -40,21 +41,22 @@ function forget(nonce) {
   liveBytes -= value.bytes;
   records.delete(nonce);
 }
-function turnMetadata(client) {
-  let raw = client?.["x-codex-turn-metadata"];
+function metadataDigest(body) {
+  const client = { ...body.client_metadata };
+  delete client[NONCE];
+  delete client[CHECKED];
+  let raw = client["x-codex-turn-metadata"];
   if (typeof raw === "string") {
     if (raw.length > 65536) throw new Error("Native turn metadata is too large");
     try { raw = JSON.parse(raw); } catch { throw new Error("Invalid native turn metadata"); }
   }
-  if (raw === undefined) return {};
-  if (!object(raw)) throw new Error("Invalid native turn metadata");
-  const out = {};
-  for (const field of TURN_FIELDS) {
-    if (raw[field] === undefined) continue;
-    if (typeof raw[field] !== "string" || raw[field].length > 1024) throw new Error("Invalid native turn identity");
-    out[field] = raw[field];
-  }
-  return out;
+  if (raw !== undefined && !object(raw)) throw new Error("Invalid native turn metadata");
+  // 0.1.3930 preserves client_metadata and prompt_cache_key verbatim. Bind
+  // ALL of it, including sandbox/workspaces/turn_trigger and future fields,
+  // without retaining another copy or reconstructing it from lossy headers.
+  const encoded = canonical({ client, prompt_cache_key: body.prompt_cache_key });
+  if (encoded.length * 2 > MAX_RECORD_BYTES) throw new Error("Native client metadata is too large");
+  return createHash("sha256").update(encoded).digest("hex");
 }
 function identity(item) {
   const out = {};
@@ -68,23 +70,27 @@ function identity(item) {
 }
 function nativeMetadata(value) {
   if (!object(value)) throw new Error("Invalid native item metadata");
-  const out = {};
   if (value.turn_id !== undefined) {
-    // Codex generates UUID turn IDs; native auto-compaction uses this
-    // separate counter form. Arbitrary text is never promoted to metadata.
-    if (typeof value.turn_id !== "string"
-        || !/^(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|auto-compact-[0-9]{1,20})$/i.test(value.turn_id)) {
+    if (typeof value.turn_id !== "string" || value.turn_id.length > 1024) {
       throw new Error("Invalid native turn identity");
     }
-    out.turn_id = value.turn_id;
   }
   if (value.content_item_kinds !== undefined) {
     if (!Array.isArray(value.content_item_kinds) || value.content_item_kinds.length > 100
-        || value.content_item_kinds.some(kind => typeof kind !== "string" || kind.length > 128 || !/^[a-z0-9_]+(?:\.[a-z0-9_]+)*$/.test(kind))) {
+        || value.content_item_kinds.some(kind => typeof kind !== "string" || kind.length > 1024)) {
       throw new Error("Invalid native content kinds");
     }
-    out.content_item_kinds = [...value.content_item_kinds];
   }
+  // Do not project an allowlist: unknown metadata belongs to Codex too.
+  return value;
+}
+function strippedFields(item) {
+  const out = {};
+  if (item[METADATA] !== undefined) out[METADATA] = nativeMetadata(item[METADATA]);
+  if (item.encrypted_function_args !== undefined) out.encrypted_function_args = item.encrypted_function_args;
+  // The daemon reads these opaque fields (including native passthrough).
+  // Magpie keeps reasoning/compaction seals but strips message/call/agent seals.
+  if (!KEPT_SEALS.has(item.type) && item.encrypted_content !== undefined) out.encrypted_content = item.encrypted_content;
   return out;
 }
 function sameIdentity(item, expected) {
@@ -114,23 +120,24 @@ export function prepare(body, ctx = {}, provider = PROVIDER) {
   if (records.size >= MAX_RECORDS) return body;
   if (!object(body.client_metadata)) body.client_metadata = {};
   const nonce = random(), tickets = new Map();
-  let valid = true, bytes = 0, turn = {};
-  try { turn = turnMetadata(body.client_metadata); } catch { valid = false; }
+  let valid = true, bytes = 0, metadata;
+  try { metadata = metadataDigest(body); } catch { valid = false; }
   for (const item of body.input) {
     if (!object(item)) { valid = false; continue; }
-    if (item.internal_chat_message_metadata_passthrough === undefined) continue;
     try {
+      const fields = strippedFields(item);
+      if (!Object.keys(fields).length) continue;
       if (tickets.size >= MAX_TICKETS_PER_REQUEST || liveTickets + tickets.size >= MAX_LIVE_TICKETS) { valid = false; continue; }
-      const saved = { identity: identity(item), metadata: nativeMetadata(item.internal_chat_message_metadata_passthrough) };
-      const size = JSON.stringify(saved).length * 2;
+      const encoded = JSON.stringify({ identity: identity(item), fields });
+      const size = encoded.length * 2;
       if (bytes + size > MAX_RECORD_BYTES || liveBytes + bytes + size > MAX_LIVE_BYTES) { valid = false; continue; }
       const ticket = random();
-      tickets.set(ticket, saved);
+      tickets.set(ticket, JSON.parse(encoded));
       bytes += size;
       item[TICKET] = ticket;
     } catch { valid = false; }
   }
-  records.set(nonce, { created: Date.now(), provider: activeProvider, route, tickets, bytes, turn, valid, claimed: false });
+  records.set(nonce, { created: Date.now(), provider: activeProvider, route, tickets, bytes, metadata, valid, claimed: false });
   liveTickets += tickets.size;
   liveBytes += bytes;
   body.client_metadata[NONCE] = nonce;
@@ -138,7 +145,8 @@ export function prepare(body, ctx = {}, provider = PROVIDER) {
   return body;
 }
 
-// Called after Magpie selects a provider, in its gateway middleware runtime.
+// Measured on 0.1.3930: onProvider runs after onRequest but BEFORE forVendor
+// strips metadata. Its ctx.state is separate; only the body carries the nonce.
 // This helper is mirrored in middleware.js because that runtime has no Node.
 export function mark(body, ctx, provider = PROVIDER) {
   const activeProvider = ctx?.provider?.id;
@@ -152,7 +160,7 @@ export function mark(body, ctx, provider = PROVIDER) {
 }
 
 // Called inside account-scoped provider fetch. Message and tool content stay
-// exactly as Magpie sent them; only the native item metadata is restored.
+// exactly as Magpie sent them; only captured native fields are restored.
 export function restore(body, profile, provider = PROVIDER) {
   if (!object(body) || !object(body.client_metadata) || !Array.isArray(body.input)) throw new Error("Native request provenance is missing");
   const nonce = body.client_metadata[NONCE];
@@ -167,7 +175,7 @@ export function restore(body, profile, provider = PROVIDER) {
       || checked.route !== record.route || match[1] !== profile || body.model !== record.route) {
     throw new Error("Native request account or routing proof is invalid");
   }
-  if (JSON.stringify(turnMetadata(body.client_metadata)) !== JSON.stringify(record.turn)) throw new Error("Native turn identity changed during routing");
+  if (metadataDigest(body) !== record.metadata) throw new Error("Native client metadata or cache identity changed during routing");
   const bodyDigest = createHash("sha256").update(canonical(body)).digest("hex");
   if (record.claimed && record.digest !== bodyDigest) throw new Error("Native request retry changed after forwarding");
   const seen = new Set(), changes = [];
@@ -175,14 +183,14 @@ export function restore(body, profile, provider = PROVIDER) {
     if (!object(item)) throw new Error("Native request item is invalid");
     const ticket = item[TICKET];
     if (ticket === undefined) {
-      if (item.internal_chat_message_metadata_passthrough !== undefined) throw new Error("Unverified native metadata");
+      if (Object.keys(strippedFields(item)).length) throw new Error("Unverified native metadata");
       continue;
     }
     const stored = typeof ticket === "string" && record.tickets.get(ticket);
     if (!stored || seen.has(ticket) || !sameIdentity(item, stored.identity)) throw new Error("Native item ticket is invalid");
-    if (item.internal_chat_message_metadata_passthrough !== undefined) throw new Error("Unexpected native metadata");
+    if (Object.keys(strippedFields(item)).length) throw new Error("Unexpected native metadata");
     seen.add(ticket);
-    changes.push([item, stored.metadata]);
+    changes.push([item, stored.fields]);
   }
   if (seen.size !== record.tickets.size) throw new Error("A native item was lost during routing");
   // A retry may reuse proof only for the identical filtered body and account.
@@ -192,9 +200,9 @@ export function restore(body, profile, provider = PROVIDER) {
     record.claimedAt = Date.now();
     record.digest = bodyDigest;
   }
-  for (const [item, metadata] of changes) {
+  for (const [item, fields] of changes) {
     delete item[TICKET];
-    item.internal_chat_message_metadata_passthrough = metadata;
+    Object.assign(item, structuredClone(fields));
   }
   delete body.client_metadata[NONCE];
   delete body.client_metadata[CHECKED];
