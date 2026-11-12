@@ -286,7 +286,6 @@ export function browserProxy(env = process.env) {
   for (const key of ['MAGPIE_HTTPS_PROXY', 'MAGPIE_HTTP_PROXY', 'MAGPIE_ALL_PROXY']) {
     if (Object.hasOwn(env, key)) return env[key] || 'direct';
   }
-  return env.HTTPS_PROXY || env.HTTP_PROXY || env.ALL_PROXY;
 }
 
 export function chromeArguments(profile, port, { proxy, env = process.env } = {}) {
