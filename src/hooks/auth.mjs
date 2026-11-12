@@ -15,7 +15,7 @@ export function authHook(env) {
     provider: PROVIDER,
     refreshLead: 24 * 3600_000,
     options: [{ key: 'visible-turns', label: 'Show browser during chats',
-      description: 'Run turns in a visible Chrome window so site checks can be completed by hand.', default: false }],
+      description: 'Keep ordinary Chrome visible during chats. Site checks can finish in the same session.', default: true }],
     async refresh(auth) { return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot }); },
     loader: makeLoader(env),
     methods: [{

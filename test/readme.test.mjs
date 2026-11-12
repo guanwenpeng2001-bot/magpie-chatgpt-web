@@ -23,7 +23,7 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.3\.0`\. Host verified against: magpie `0\.1\.1247`/);
+  assert.match(prose, /Plugin version: `0\.3\.1`\. Host verified against: magpie `0\.1\.1247`/);
 });
 
 test('README records the exact verified host identity with its evidence citation', () => {
@@ -41,8 +41,8 @@ test('README records the exact verified host identity with its evidence citation
 test('README distinguishes live sign-in verification from unmeasured turns', () => {
   const opening = readme.split('\n')[2];
   assert.match(opening, /Sign-in lifecycle is live-verified/);
-  assert.match(opening, /turn path remains blocked by a durable verification challenge/);
-  assert.match(opening, /handled by design.*\[failure table\]\(#failure-messages\)/);
+  assert.match(opening, /two consecutive live turns completed/);
+  assert.match(opening, /Site verification can still occur/);
   assert.match(opening, /Turn budget and delivery cadence remain unmeasured/);
 });
 
@@ -73,9 +73,10 @@ test('README makes no unmeasured progressive delivery claim', () => {
   }
 });
 
-test('README distinguishes visible sign-in from default headless turns', () => {
+test('README documents visible-by-default turns and explicit headless opt-out', () => {
   assert.match(prose, /Sign-in always opens (?:a )?visible Chrome/);
-  assert.match(prose, /headless by default/);
+  assert.match(prose, /visible by default/);
+  assert.match(prose, /explicitly disable/);
   assert.match(prose, /Show browser during chats.*visible-turns/);
   assert.match(prose, /Idle turn browser contexts close after \*\*5 minutes\*\*/);
 });

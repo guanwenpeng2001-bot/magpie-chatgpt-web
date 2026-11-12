@@ -220,7 +220,7 @@ for (const rejected of [false, true]) test(`browser fallback reconciles rotated 
       await server.until(frames => frames.some(frame => frame.id === id && ['done', 'error'].includes(frame.event)));
     }
     assert.deepEqual(sent, ['prior', 'rotated-secret', 'rotated-secret']);
-    assert.equal(writes, 1);
+    assert.equal(writes, 2, 'normalize the legacy host-only cookie once, then apply the renewed credential');
     assert.equal(server.frames.filter(frame => frame.event === 'error').length, rejected ? 3 : 0);
     if (rejected) for (const frame of server.frames.filter(frame => frame.event === 'error')) assert.equal(BackendError.fromEnvelope(frame.error).code, 'expired');
     assert.equal(JSON.stringify(server.frames).includes('rotated-secret'), false);

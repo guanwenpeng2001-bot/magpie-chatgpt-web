@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ADAPTER_VERSION, shape } from './selectors.mjs';
+import { BackendError } from '../guard.mjs';
 
 const visible = (page, selector) => page.locator(selector).filter({ visible: true });
 function failure(kind, detail) {
@@ -41,16 +42,43 @@ export async function selectModel(page, slug) {
         for (const entry of await entries.all()) {
           const id = await entry.getAttribute(shape.modelId);
           const title = (await entry.innerText()).split('\n')[0].trim();
-          if (!id && shape.titles[slug]?.includes(title)) matches.push(entry);
+          if (!id && (shape.titles[slug]?.includes(title) || (slug === 'gpt-5-6-pro' && title === 'GPT-5.6 Sol'))) matches.push(entry);
         }
         if (matches.length > 1) return failure('picker-ambiguous', { slug, count: matches.length });
-        if (matches.length === 1) { await matches[0].click(); return { ok: true }; }
-        return failure('model-not-offered', { slug });
+        if (matches.length === 1) {
+          await matches[0].click();
+          return slug === 'gpt-5-6-pro' ? await selectProEffort(page, picker) : { ok: true };
+        }
+        return failure('model-not-offered', { slug, stage: 'model-rows' });
       }
       await delay(shape.pollInterval);
     }
     return failure('picker-missing', { component: 'model entries', selector: shape.entries });
   } finally { await page.keyboard.press('Escape'); }
+}
+
+async function selectProEffort(page, picker) {
+  let control = visible(page, '[role="menu"] [data-reasoning-slider="true"]');
+  if (!await control.count()) await picker.click();
+  control = visible(page, '[role="menu"] [data-reasoning-slider="true"]');
+  if (await control.count() !== 1) return failure('picker-missing', { component: 'Pro effort control', selector: '[data-reasoning-slider="true"]' });
+  const thumb = page.locator('[role="menu"] [data-model-picker-power-slider] [role="slider"]');
+  if (await thumb.count() !== 1) return failure('picker-missing', { component: 'Pro effort slider', selector: '[data-model-picker-power-slider] [role="slider"]' });
+  for (let step = 0; step < 6; step++) {
+    const value = await thumb.getAttribute('aria-valuenow');
+    const maximum = await thumb.getAttribute('aria-valuemax');
+    if (!/^\d+$/.test(value ?? '') || !/^\d+$/.test(maximum ?? '') || Number(maximum) > 5) return failure('model-not-offered', { slug: 'gpt-5-6-pro', stage: 'pro-slider' });
+    if (value === maximum) break;
+    await control.press('ArrowRight');
+    try {
+      await page.waitForFunction(previous => document.querySelector('[role="menu"] [data-model-picker-power-slider] [role="slider"]')?.getAttribute('aria-valuenow') !== previous, value, { timeout: shape.transitionTimeout });
+    } catch { return failure('model-not-offered', { slug: 'gpt-5-6-pro', stage: 'pro-slider' }); }
+  }
+  const header = await visible(page, shape.toggle).textContent();
+  const selected = page.locator('[role="menu"] [role="menuitemradio"][aria-checked="true"]');
+  const family = await selected.count() === 1 ? (await selected.textContent()).trim() : '';
+  if (family !== 'GPT-5.6 Sol' || !/^5\.6\s*Pro$/.test((header ?? '').trim())) return failure('model-not-offered', { slug: 'gpt-5-6-pro', stage: 'pro-slider' });
+  return { ok: true };
 }
 
 export async function assertTemporaryChat(page) {
@@ -92,6 +120,30 @@ export async function readComposer(page) {
   if (await visible(page, shape.composer).count() === 1) return { ok: true };
   failure('composer-missing', { component: 'composer', selector: shape.composer });
   return { ok: false, kind: 'composer-missing' };
+}
+
+// DOMContentLoaded can precede the site's own checks and hydrated composer.
+// Observe the same page; never reload, submit or interact with a challenge.
+export async function waitForReady(page, { signal, budget, requirePicker = false }) {
+  const deadline = Date.now() + budget;
+  let state;
+  while (Date.now() < deadline) {
+    signal?.throwIfAborted();
+    if (page.isClosed()) throw new BackendError('browserClosed');
+    try {
+      state = await probePageError(page);
+      if (state?.kind === 'rate-limit' || state?.kind === 'sign-in') return;
+      if (!state && await visible(page, shape.composer).count() === 1) {
+        const picker = visible(page, shape.picker);
+        if (!requirePicker || (await picker.count() === 1 && await picker.isEnabled() && await picker.getAttribute('data-disabled') === null && await picker.getAttribute('aria-disabled') !== 'true')) return;
+      }
+    } catch (error) {
+      // The site may navigate while its initial check completes.
+      if (!/Execution context was destroyed|Cannot find context/i.test(error.message)) throw error;
+    }
+    await delay(Math.min(200, Math.max(0, deadline - Date.now())), undefined, { signal });
+  }
+  throw new BackendError(state?.kind === 'challenge' ? 'verification' : 'pageShape');
 }
 
 export async function attachImages(page, images) {

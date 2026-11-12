@@ -1,8 +1,8 @@
 # ChatGPT Web for magpie
 
-Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run headless by default. Sign-in lifecycle is live-verified; the turn path remains blocked by a durable verification challenge, handled by design as described in the [failure table](#failure-messages). Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
+Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns are visible by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.3.0`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.3.1`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -45,7 +45,7 @@ Choose **ChatGPT account (browser sign-in)**. Sign-in always opens a visible Chr
 
 Open magpie's normal model picker, choose **ChatGPT Web**, and select a model offered to your account. `magpie plugin list --json` confirms installation. Continue conversations normally and use the usual stop control to cancel a reply.
 
-Turns run **headless by default**. In the provider editor, enable **Show browser during chats** (`visible-turns`) to run turns in visible Chrome, including when a site check needs manual attention. Sign-in remains visible regardless of that switch. Headless operation is the configured default, not a claim of measured live-site success. Idle turn browser contexts close after **5 minutes**.
+Turns are **visible by default**. In the provider editor, **Show browser during chats** (`visible-turns`) uses ordinary installed Chrome with the plugin-owned account profile. Existing users who explicitly disabled this setting should enable it; you may explicitly disable it to request headless operation for a newly started browser. Once a visible browser is running, background reads reuse it rather than closing it to switch modes. Initial navigation waits for the site's checks and the visible composer within the existing turn budget, without reloading or submitting through a challenge. Browser-rotated session cookies are preserved until the host supplies a new credential, and restored cookies use the site's domain to avoid duplicate session tokens. Idle turn browser contexts close after **5 minutes**.
 
 Magpie stores the session in its credential store. Renewal starts 24 hours before expiry. Session refresh uses an HTTP-only read with a 10-second cap and no browser fallback; a challenge is surfaced for recovery. Model catalogue reads send the signed-in access token as Bearer authorization on both HTTP and browser routes and are cached for 60 seconds. Session renewal updates that token. An empty catalogue refresh or a generic upstream/network failure preserves the previous host list with a marked fallback. Classified failures, including verification challenges, are passed to the host with their status, message and recovery headers intact.
 
@@ -66,17 +66,17 @@ Browser state is a sensitive login artifact. Use a trusted workstation and never
 
 ## Models, images and delivery
 
-The model list comes from the signed-in account's full catalogue. Unknown slugs remain listed and are attempted; compatibility annotations are not an allowlist. Listing a model does not prove entitlement, picker compatibility or successful generation. Refresh the list after changing accounts. Duplicate mini-model titles include their slug to distinguish them.
+The inline model picker is supported, including explicit GPT-5.6 Pro selection with family and Pro-state verification before Send. The model list comes from the signed-in account's full catalogue. Unknown slugs remain listed and are attempted; compatibility annotations are not an allowlist. Listing a model does not prove entitlement, picker compatibility or successful generation. Refresh the list after changing accounts. Duplicate mini-model titles include their slug to distinguish them.
 
 Image input is supported up to **4 images / 10 MiB each**; non-image attachments and over-cap input are rejected before submission. A model advertises image input only when verified for that model. Every model keeps `toolcall: false`, `reasoning: false` and `temperature: false`. Reasoning controls/traces, native tool calling, web search, canvas, image generation, voice and quota display are not provided. Context and output limits of 200,000 and 34,834 are planning values, not verified subscription or generation guarantees. Usage is estimated from characters, not measured tokens or account quota.
 
 The provider declares `npm: '@ai-sdk/anthropic'` for **Anthropic-wire emulation**: magpie sends Messages-shaped requests and receives translated responses. Requests are served through the ChatGPT web session, not the Anthropic service; this declaration does not establish native Anthropic semantics or capabilities.
 
-DOM snapshots are the primary answer carrier, polled every 500 ms. That polling interval is an implementation setting, not measured delivery cadence. A best-effort SSE reader may carry the answer; `x-chatgptweb-route: dom|sse` identifies the route. DOM text can lose formatting. Clone unavailability is logged as an observation change, not a fabricated successful answer or an independent failure code. Whole-block delivery is acceptable; progressive or token-level streaming is not verified. An interrupted or unterminated answer remains an error.
+Visible browser turns read only the rendered DOM answer, so hidden intermediate stream messages cannot terminate a normal thinking response. Headless mode retains its optional SSE reader. DOM snapshots are the primary answer carrier, polled every 500 ms. That polling interval is an implementation setting, not measured delivery cadence. A best-effort SSE reader may carry the answer; `x-chatgptweb-route: dom|sse` identifies the route. DOM text can lose formatting. Clone unavailability is logged as an observation change, not a fabricated successful answer or an independent failure code. Whole-block delivery is acceptable; progressive or token-level streaming is not verified. An interrupted or unterminated answer remains an error.
 
 ## Release verification status
 
-The sign-in lifecycle was live-verified, but no complete live turn was observed in the acceptance runs. The evidence references below identify the project's acceptance records; historical measurements from another build are not evidence for this release.
+For 0.3.1, two consecutive live `auto` turns completed through both the source backend and the installed backend on Windows, returning `BROWSER_OK_1` and `BROWSER_OK_2` over the DOM route without a manual verification click. Explicit `gpt-5-6-pro` selection also completed a live source-backend turn. The final automated suite passed 600 tests; its one default skip, the real-Chrome launch gate, passed separately. Visible turns use DOM-only observation after earlier stream-based probes exposed empty/hidden intermediate responses. These are short functional checks, not a guarantee against future site verification or a benchmark; other accounts and model families remain unverified. Historical acceptance records below describe the earlier build, not the current browser-session checks.
 
 ### Turn-budget measurement
 
