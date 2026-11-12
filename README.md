@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns are visible by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.3.1`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.3.2`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -66,7 +66,7 @@ Browser state is a sensitive login artifact. Use a trusted workstation and never
 
 ## Models, images and delivery
 
-The inline model picker is supported, including explicit GPT-5.6 Pro selection with family and Pro-state verification before Send. The model list comes from the signed-in account's full catalogue. Unknown slugs remain listed and are attempted; compatibility annotations are not an allowlist. Listing a model does not prove entitlement, picker compatibility or successful generation. Refresh the list after changing accounts. Duplicate mini-model titles include their slug to distinguish them.
+The inline model picker is supported, including GPT-5.6 and GPT-6 default/Instant/Thinking/Pro selection with family and effort verification before Send. See [the full model audit](MODEL_SUPPORT.md) for all 23 catalogue IDs. Known unsupported entries are marked `[not yet supported]` and fail as `modelUnsupported`, not as an account-permission claim. The model list comes from the signed-in account's full catalogue. Unknown slugs remain listed and are attempted; compatibility annotations are not an allowlist. Listing a model does not prove entitlement, picker compatibility or successful generation. Refresh the list after changing accounts. Duplicate mini-model titles include their slug to distinguish them.
 
 Image input is supported up to **4 images / 10 MiB each**; non-image attachments and over-cap input are rejected before submission. A model advertises image input only when verified for that model. Every model keeps `toolcall: false`, `reasoning: false` and `temperature: false`. Reasoning controls/traces, native tool calling, web search, canvas, image generation, voice and quota display are not provided. Context and output limits of 200,000 and 34,834 are planning values, not verified subscription or generation guarantees. Usage is estimated from characters, not measured tokens or account quota.
 
@@ -75,6 +75,8 @@ The provider declares `npm: '@ai-sdk/anthropic'` for **Anthropic-wire emulation*
 Visible browser turns read only the rendered DOM answer, so hidden intermediate stream messages cannot terminate a normal thinking response. Headless mode retains its optional SSE reader. DOM snapshots are the primary answer carrier, polled every 500 ms. That polling interval is an implementation setting, not measured delivery cadence. A best-effort SSE reader may carry the answer; `x-chatgptweb-route: dom|sse` identifies the route. DOM text can lose formatting. Clone unavailability is logged as an observation change, not a fabricated successful answer or an independent failure code. Whole-block delivery is acceptable; progressive or token-level streaming is not verified. An interrupted or unterminated answer remains an error.
 
 ## Release verification status
+
+For 0.3.2, all eight mapped model IDs passed live UI selection checks, and GPT-6 Pro completed a live source-backend turn. [MODEL_SUPPORT.md](MODEL_SUPPORT.md) covers every one of the 23 catalogue entries. The Claude Desktop 400 report is a separate request/tool-schema compatibility investigation; no full Claude Desktop tool workflow is claimed as verified.
 
 For 0.3.1, two consecutive live `auto` turns completed through both the source backend and the installed backend on Windows, returning `BROWSER_OK_1` and `BROWSER_OK_2` over the DOM route without a manual verification click. Explicit `gpt-5-6-pro` selection also completed a live source-backend turn. The final automated suite passed 600 tests; its one default skip, the real-Chrome launch gate, passed separately. Visible turns use DOM-only observation after earlier stream-based probes exposed empty/hidden intermediate responses. These are short functional checks, not a guarantee against future site verification or a benchmark; other accounts and model families remain unverified. Historical acceptance records below describe the earlier build, not the current browser-session checks.
 
@@ -131,6 +133,7 @@ Each row names a public error code, its condition and an action the user can tak
 | `missingComponent` | Google Chrome, Node.js >= 20 or a plugin dependency was not found. | Install the named component or reinstall the plugin dependency as instructed. |
 | `pickerMissing` | A named page component or selector is missing after a site change. | Update the plugin; if already current, report the adapter version and named component/selector. |
 | `pickerAmbiguous` | The picker contains multiple entries for the requested model slug. | Retry, or enable `visible-turns` and select the model once by hand. |
+| `modelUnsupported` | This adapter has no verified selector/workflow for the requested model. Account access is not inferred. | Choose a mapped model in [MODEL_SUPPORT.md](MODEL_SUPPORT.md), or update the plugin for additional adapters. |
 | `modelNotOffered` | The requested slug is not offered to this account. | Pick a listed model; refresh the model list if the account changed. |
 | `attachmentUnsupported` | Input is not an image or exceeds 4 images / 10 MiB each. | Remove unsupported or excess files, reduce image size, then retry. |
 | `imageRejected` | ChatGPT refused an image upload. | Retry; if it persists, send the message without the image. |

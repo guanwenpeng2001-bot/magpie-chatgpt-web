@@ -131,6 +131,7 @@ export class TurnDriver {
       case 'composer-missing': throw new BackendError('pickerMissing', { values: { component: 'composer', selector: shape.composer, adapterVersion: ADAPTER_VERSION } });
       case 'picker-missing': throw new BackendError('pickerMissing', { values: detail });
       case 'picker-ambiguous': throw new BackendError('pickerAmbiguous', { values: { slug, count: detail.count } });
+      case 'model-unsupported': throw new BackendError('modelUnsupported', { values: { slug } });
       case 'model-not-offered': throw new BackendError('modelNotOffered', { values: { slug } });
       case 'attach-unavailable': throw new BackendError('attachmentUnsupported', { values: { kind: 'images without an upload control', maxCount: 4, maxBytes: '10 MiB' } });
       case 'image-rejected': throw new BackendError('imageRejected', { values: { detail: detail.reason } });

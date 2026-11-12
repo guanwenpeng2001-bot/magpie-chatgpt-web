@@ -41,6 +41,7 @@ const taxonomy = {
   missingComponent: [503, '{component} was not found. {remedy}'],
   pickerMissing: [502, 'The ChatGPT page changed: {component} was not found (selector {selector}, adapter {adapterVersion}). Update the plugin; if it is already latest, report this adapter version.'],
   pickerAmbiguous: [502, "The model picker shows {count} entries for {slug}; the plugin cannot choose safely. Retry, or select the model once by hand in a visible browser (enable 'visible-turns')."],
+  modelUnsupported: [400, 'The plugin cannot select {slug} in the current ChatGPT page yet. This does not indicate missing account access.'],
   modelNotOffered: [400, '{slug} is not offered to this ChatGPT account. Pick one of the listed models; refresh the model list if the account changed.'],
   attachmentUnsupported: [400, 'This message contains {kind}, which chatgpt-web cannot send. Remove it and retry. Images are supported up to {maxCount} files / {maxBytes} each.'],
   imageRejected: [502, 'ChatGPT refused the image upload ({detail}). Retry; if it persists, send the message without the image.'],
@@ -52,6 +53,7 @@ const slotValues = {
   pickerMissing: { component: 'composer', selector: '[id="prompt-textarea"]', adapterVersion: '2026-10-15.1' },
   pickerAmbiguous: { count: 3, slug: 'gpt-5.2' },
   modelNotOffered: { slug: 'gpt-6' },
+  modelUnsupported: { slug: 'research' },
   attachmentUnsupported: { kind: 'a PDF file', maxCount: 4, maxBytes: '10 MiB' },
   imageRejected: { detail: 'unsupported media type' },
 };
@@ -131,8 +133,8 @@ test('a provided values object with a missing or null slot still throws', () => 
   assert.throws(() => new BackendError('imageRejected', { values: { detail: undefined } }), TypeError);
 });
 
-test('the template-match fallback never throws for any of the 39 raw templates', () => {
-  assert.equal(Object.keys(errorTable).length, 39);
+test('the template-match fallback never throws for any of the 40 raw templates', () => {
+  assert.equal(Object.keys(errorTable).length, 40);
   for (const [code, [status, template]] of Object.entries(errorTable)) {
     const restored = BackendError.fromEnvelope({ status, message: template });
     assert.ok(restored instanceof BackendError, code);

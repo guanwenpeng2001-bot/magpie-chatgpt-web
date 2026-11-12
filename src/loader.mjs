@@ -13,12 +13,14 @@ export function makeLoader({ bridge, profileRoot, input }) {
       baseURL: API, apiKey: 'managed-locally',
       async fetch(resource, init = {}) {
         let upstream;
+        let request;
+        let preflight = true;
         try {
           const current = requireAuth(await getAuth());
-          let request;
           try { request = JSON.parse(init.body ?? (resource instanceof Request ? await resource.text() : '')); }
           catch { throw new BackendError('invalidRequest'); }
           const prepared = prepare(request, init.headers ?? (resource instanceof Request ? resource.headers : undefined));
+          preflight = false;
           const signal = init.signal ?? (resource instanceof Request ? resource.signal : undefined);
           const visibleTurns = input?.magpie?.option(PROVIDER, 'visible-turns') !== false;
           upstream = await bridge.open({ method: 'complete', auth: current, profileRoot, ...prepared, visibleTurns }, signal);
@@ -63,9 +65,33 @@ export function makeLoader({ bridge, profileRoot, input }) {
         } catch (failure) {
           upstream?.close();
           const error = failure instanceof BackendError ? failure : new BackendError('upstream');
+          if (preflight) {
+            try { await input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'error', message: 'preflightRejected ' + JSON.stringify(requestShape(request, error.code)) } }); } catch {}
+          }
           return Response.json({ error: error.toJSON() }, { status: error.status, headers: error.headers });
         }
       },
     };
   };
+}
+
+// Structural diagnostics only: never record prompts, schemas, tool names or credentials.
+export function requestShape(request, code) {
+  const schemaKeys = new Set();
+  let nodes = 0;
+  const walk = (value, depth = 0) => {
+    if (++nodes > 10000 || depth > 32 || !value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      if (['$schema', '$id', '$ref', 'format', 'pattern', 'nullable', 'readOnly', 'writeOnly', 'deprecated', 'prefixItems', 'unevaluatedProperties', 'dependentRequired'].includes(key)) schemaKeys.add(key);
+      if (child && typeof child === 'object') walk(child, depth + 1);
+    }
+  };
+  const tools = Array.isArray(request?.tools) ? request.tools : [];
+  for (const tool of tools) walk(tool?.input_schema ?? tool?.function?.parameters);
+  return { code, hasModel: typeof request?.model === 'string', messagesArray: Array.isArray(request?.messages),
+    messageCount: request?.messages?.length ?? null, roles: [...new Set((Array.isArray(request?.messages) ? request.messages : []).map(m => ['user','assistant','system','tool'].includes(m?.role) ? m.role : 'other'))],
+    contentTypes: [...new Set((Array.isArray(request?.messages) ? request.messages : []).flatMap(m => Array.isArray(m?.content) ? m.content.map(b => ['text','image','tool_use','tool_result','thinking','redacted_thinking','tool_reference'].includes(b?.type) ? b.type : 'other') : [typeof m?.content]))],
+    toolCount: tools.length, missingInputSchemas: tools.filter(t => !t?.input_schema).length,
+    functionWrappedTools: tools.filter(t => !!t?.function).length, schemaKeywords: [...schemaKeys].sort(),
+    choiceType: ['auto','any','tool','none'].includes(request?.tool_choice?.type) ? request.tool_choice.type : typeof request?.tool_choice };
 }

@@ -10,7 +10,7 @@ export function describeCatalogue(catalogue, table = compatibilityTable) {
     const imageOk = annotation.imageOk === true;
     const name = annotation.name ?? (titles.get(title) > 1 && slug.endsWith('-mini') ? `${title} (${slug})` : title);
     return [slug, {
-      name, api: { id: slug }, limit: { context: 200_000, output: 34_834 },
+      name: annotation.knownBroken ? `${name} [not yet supported]` : name, api: { id: slug }, limit: { context: 200_000, output: 34_834 },
       capabilities: { reasoning: false, toolcall: false, attachment: imageOk, temperature: false,
         input: { text: true, image: imageOk }, output: { text: true } },
     }];
