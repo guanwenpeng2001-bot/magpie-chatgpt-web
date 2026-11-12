@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5 — 2026-11-13
+
+- Return ownership of the Codex Desktop route, `model_provider`, `model_catalog_json`, context override lookup and reconnect state to Magpie. The plugin no longer edits or repairs Magpie's main `config.toml`.
+- Keep `codex-profile` as an explicit CLI-only helper that writes `chatgpt-web-http.config.toml`, resolves catalogue metadata for that isolated profile, and leaves the Magpie Desktop configuration read-only.
+- Prevent the configuration ownership conflict introduced by 0.4.4 with Magpie 0.1.3930.
+
 ## 0.4.4 — 2026-11-13
 
 - Add checked CLI profile and journalled Codex Desktop routes for Chatgpt Web models. Both are model-agnostic, preserve Magpie's existing auth and headers, disable Responses WebSockets, follow Magpie's current gateway address, and fail closed on unowned or conflicting settings.

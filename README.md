@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.4.4`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.4.5`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -39,35 +39,24 @@ Local `git+file://` installs have a verified upstream magpie **stale-pin** defec
 
 For that local-install case, commit the desired source and run `git rev-parse HEAD` in its checkout to obtain the intended SHA. Back up `~/.config/magpie/plugins/bun.lock`, then edit only this plugin's git dependency entry to replace its pinned commit SHA with that intended SHA. Rerun `magpie plugin add $pluginSpec` from the local installation steps. Confirm the intended version or changed behavior is actually serving; a successful installer exit alone does not prove the upgrade. Do not alter other plugins' lock entries or erase browser profiles as an upgrade workaround.
 
-## Codex HTTP-only profile
+## Codex integration boundary
 
-Codex 0.167 prewarms the Responses WebSocket before its first turn. Magpie's built-in `openai` route cannot be disabled by overriding the reserved `model_providers.openai` table, and a WebSocket attempt for this browser-backed provider can stall. The supported workaround is a real custom provider with `supports_websockets = false`.
+Magpie owns the Codex Desktop route. The plugin must not edit `config.toml`, choose `model_provider`, own `model_catalog_json`, or repair/reconnect Magpie's desktop wiring. Magpie 0.1.3930 writes and validates that configuration itself. If Magpie reports that its configuration changed, use Magpie's normal disconnect/reconnect flow and do not run a plugin-side activation command.
 
-Magpie has no install, upgrade, or removal callback that could safely own a Codex route. Also, Codex 0.134 and later no longer select named profiles through a top-level `profile` key, so Codex Desktop cannot choose `-p profile` by itself. The helper therefore provides two explicit, checked modes. Activate the journalled Desktop route from the plugin checkout:
+The plugin's responsibility ends at its ChatGPT Web provider: browser sign-in, the persistent Chrome profile, verification recovery, model selection, the shared Anthropic-compatible SSE route, client tool rounds, context preflight and usage estimates. Magpie remains responsible for installation, the Desktop gateway address, provider selection, model catalogue generation and reconnect behavior.
 
-```powershell
-npm run codex-profile -- --check
-npm run codex-profile -- --activate
-```
-
-Restart Codex Desktop after activation. `--activate` preserves the complete existing `[model_providers.magpie]` table, including `experimental_bearer_token`, `http_headers`, `requires_openai_auth`, environment/auth settings, capabilities and nested header tables. It adds only `supports_websockets = false` and journals the previous top-level provider selection. If Magpie later rewrites the route while a journal is active, the plugin repairs it on startup and model-list refresh. No repair or write happens unless `--activate` created the journal.
-
-For the CLI, create a separate profile instead:
+For an isolated Codex CLI profile, the helper can write one separate file without touching Magpie's Desktop config:
 
 ```powershell
 npm run codex-profile -- --apply
 codex -p chatgpt-web-http
 ```
 
-The profile is `$CODEX_HOME\chatgpt-web-http.config.toml`, or `~/.codex/chatgpt-web-http.config.toml` when `CODEX_HOME` is unset. It copies the complete Magpie provider block, then sets `supports_websockets = false`. It inherits the selected model and catalog from the main config and does not enumerate model IDs. The URL is taken from the existing `[model_providers.magpie]`, then `openai_base_url`, then `MAGPIE_ADDR` or Magpie's `gateway.json`. Rerun `--check` and `--apply` after changing the gateway address for CLI use.
-
-`--check` never writes and exits nonzero when the profile is missing or stale. `--activate` first creates `config.toml.magpie-chatgpt-web-http.bak`, writes a journal containing the exact previous provider assignment and websocket line, then edits the config atomically. It fails closed if either target is already owned by another provider or has `supports_websockets = true`. Exact rollback restores the journalled route and removes only helper-owned files:
+The profile is `$CODEX_HOME\chatgpt-web-http.config.toml`, or `~/.codex/chatgpt-web-http.config.toml` when `CODEX_HOME` is unset. It reads the existing Magpie provider block and gateway address, disables WebSockets only in that separate profile, and resolves the catalogue to an absolute path for CLI metadata lookup. The main `config.toml` remains read-only. `--check` never writes; `--rollback` removes only this plugin-managed CLI profile and never changes Magpie's Desktop config:
 
 ```powershell
 npm run codex-profile -- --rollback
 ```
-
-Activation also removes the top-level `model_context_window` and `model_auto_compact_token_limit` overrides for the active HTTP route. A single global value would otherwise override every ChatGPT Web model's conservative limit; for example, a 1,050,000-token global window made a Web Instant request appear to have 997,500 usable tokens. When Magpie's model catalogue is present, activation rewrites `model_catalog_json` to its absolute path so Codex loads model metadata instead of resolving it relative to the current working directory and silently falling back. The journal records and restores the original provider, websocket, context and catalogue lines exactly. Repeated plugin startup repairs those values if Magpie rewrites the config. Rollback refuses to overwrite a provider, websocket, context or catalogue value changed by the user after activation, and it preserves unrelated edits made since the backup. Existing sessions recorded under Codex's built-in provider id `openai` remain separate because Codex binds resume to provider identity; switch back to that provider to resume them. The journalled route preserves Magpie-provider sessions without requiring a launcher or daemon.
 
 ## Sign-in and ordinary use
 
@@ -108,7 +97,7 @@ Visible browser turns read only the rendered DOM answer, so hidden intermediate 
 
 ## Release verification status
 
-For 0.4.4, live Codex CLI checks on Windows used the HTTP-only custom provider and the same ordinary Chrome account profile. Both `chatgpt-web/gpt-5-6-pro` and `chatgpt-web/gpt-6-pro` executed a real `exec_command`, received its result, continued the same task, and returned the requested completion text. A separate `chatgpt-web/gpt-6` session used `apply_patch`, then `exec_command` to read the changed file, and completed without a new browser identity. A persisted Codex thread resumed under `chatgpt-web/gpt-6` and recalled a value from its earlier turn. Magpie recorded separate usage entries for the browser rounds. These checks cover the current 330-tool Codex catalogue; larger client catalogues are bounded by the same preflight and may still contain client-specific behavior beyond this test.
+For 0.4.5, Magpie 0.1.3930's native Desktop route completed a live `chatgpt-web/gpt-6` request while the plugin made no writes to the main Codex configuration. The earlier 0.4.4 custom-provider checks also completed `exec_command` on GPT-5.6 Pro and GPT-6 Pro, `apply_patch` followed by `exec_command` on GPT-6, a persisted-session resume, and per-round Magpie usage records. The current 330-tool Codex catalogue is bounded by the same preflight; larger client catalogues may still contain client-specific behavior beyond these tests.
 
 For 0.4.0, ordinary GPT-6 Pro and GPT-5.6 Pro completed live source-backend turns; all eight Work IDs passed live UI selection checks and GPT-6 Luna Work completed a live saved-task turn. GPT-5.6 mini, GPT-5.6 Thinking mini and both experimental catalogue IDs passed live request-override and DOM-completion checks after their browser bundles were installed. ChatGPT Images generated and saved a valid PNG through the source backend. A representative 36-tool Claude-shaped request completed both through the source backend and the real Magpie `/v1/messages` route with HTTP 200 and the requested `tool_use`.
 
@@ -126,7 +115,7 @@ Unmeasured: live turn measurement was blocked by the durable verification challe
 
 ### Running host identity and bundle SHA-256
 
-Live verification for `0.4.4` ran against magpie `0.1.3930`, host bundle `host-e6801c6cb0f6.js`, 166 257 bytes, SHA-256 `e6801c6cb0f61553ca747c2b02209bfe87720183b37bb8840d08bcfb5352c5f3`, and Codex CLI `0.167.2`.
+Live verification for `0.4.5` ran against magpie `0.1.3930`, host bundle `host-e6801c6cb0f6.js`, 166 257 bytes, SHA-256 `e6801c6cb0f61553ca747c2b02209bfe87720183b37bb8840d08bcfb5352c5f3`, and Codex CLI `0.167.2`.
 
 ## Failure messages
 
