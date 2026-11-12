@@ -1,10 +1,10 @@
-export const ADAPTER_VERSION = '2026-10-15.1';
+export const ADAPTER_VERSION = '2026-11-12.1';
 
 // Verified against archived page shapes and offline fixtures on 2026-10-15; live revalidation is separate.
 export const shape = {
   modelRows: '[data-model-id]',
   modelId: 'data-model-id',
-  picker: 'button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"][data-composer-navigation-target="reasoning"]',
+  picker: 'button[aria-haspopup="menu"][data-composer-navigation-target="reasoning"]:is([data-codex-intelligence-trigger="true"], [data-selected-reasoning-effort])',
   toggle: '[role="menu"] [role="menuitem"][data-model-picker-view-toggle="true"]',
   entries: '[role="menuitemradio"]',
   titles: { 'gpt-6': ['GPT-6'], 'gpt-5-5': ['GPT-5.5'] },

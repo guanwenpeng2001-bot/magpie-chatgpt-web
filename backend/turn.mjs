@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BackendError } from './guard.mjs';
-import { BrowserSupervisor, launchBrowserContext } from './browser.mjs';
+import { BrowserSupervisor, launchChatBrowserContext } from './browser.mjs';
 import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
 import * as siteAdapter from './site-adapter/index.mjs';
@@ -19,7 +19,7 @@ export class TurnDriver {
     this.prompter = prompter;
     this.bindings = new Conversations({ now });
     this.browser = new BrowserSupervisor({ profileRoot, profile, launch: launch ?? (async (profile, options) => {
-      return launchBrowserContext(profile, { ...options, serviceWorkers: 'block' });
+      return launchChatBrowserContext(profile, { ...options, serviceWorkers: 'block' });
     }) });
     this.installed = new WeakSet();
     this.turns = new Map();
@@ -74,6 +74,9 @@ export class TurnDriver {
           if (activeSignal.aborted) { await closePage(); activeSignal.throwIfAborted(); }
           resumeFrom = 0;
           await wait(page.goto(`${this.origin}/?temporary-chat=true`, { waitUntil: 'domcontentloaded', timeout: Math.max(1, deadline - this.now()) }));
+          if (command.visibleTurns && this.adapter.waitForReady) {
+            await wait(this.adapter.waitForReady(page, { signal: activeSignal, budget: Math.max(0, deadline - this.now()), requirePicker: true }));
+          }
         }
         await wait(this.pageError(page, guard));
         const temporary = await wait(this.adapter.assertTemporaryChat(page));
@@ -86,7 +89,7 @@ export class TurnDriver {
         const prompt = this.prompter(command, resumeFrom);
         const run = { id: randomUUID(), queue: [] };
         this.turns.set(page, run);
-        await wait(page.evaluate(({ id, network }) => window.__chatgptHarvest.start(id, network), { id: run.id, network: this.network }));
+        await wait(page.evaluate(({ id, network }) => window.__chatgptHarvest.start(id, network), { id: run.id, network: this.network && !command.visibleTurns }));
         const composer = page.locator(shape.composer).filter({ visible: true });
         await wait(composer.fill(prompt));
         activeSignal.throwIfAborted();

@@ -28,7 +28,7 @@ function harness(options = {}) {
         closed: false, isClosed() { return this.closed; },
         async close() { this.closed = true; calls.push('close'); },
         async goto() { calls.push('navigate'); },
-        async evaluate() {},
+        async evaluate(fn, value) { if (typeof value?.network === 'boolean') calls.push(['network', value.network]); },
         locator() { return { filter() { return this; }, async fill(text) { calls.push(['fill', text]); }, async press() { calls.push('submit'); } }; },
       };
       pages.push(page);
@@ -86,6 +86,14 @@ test('driver compiles history, attaches images and returns normalized rendered o
     assert.deepEqual(h.calls.find(value => value[0] === 'fill'), ['fill', '[Human]\nfirst']);
     assert.deepEqual(frames, [{ type: 'delta', index: 0, text: 'answer' }, { type: 'finish', reason: 'complete' }]);
     assert.equal(result.route, 'dom');
+  } finally { await h.driver.close(); }
+});
+
+test('visible browser turns read the rendered answer without parsing hidden intermediate stream messages', async () => {
+  const h = harness();
+  try {
+    await h.complete(command({ visibleTurns: true }));
+    assert.deepEqual(h.calls.find(call => Array.isArray(call) && call[0] === 'network'), ['network', false]);
   } finally { await h.driver.close(); }
 });
 

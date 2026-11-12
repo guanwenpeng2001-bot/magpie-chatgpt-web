@@ -101,7 +101,7 @@ test('cached loader reads current auth, live option and merged headers on each f
     source.close = () => {};
     return source;
   } } });
-  assert.equal(hooks.auth.options[0].default, false);
+  assert.equal(hooks.auth.options[0].default, true);
   const loader = await hooks.auth.loader(async () => current);
   for (const stream of [true, false]) {
     const output = { headers: { unrelated: 'private' } };

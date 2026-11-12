@@ -133,13 +133,15 @@ async function reconcileSessionCookies(context, credential, origin) {
   if (!desired.length || desired.some(cookie => !cookie.value)) throw new BackendError('expired');
   try {
     const current = (await context.cookies(String(origin))).filter(cookie => sessionName.test(cookie.name));
-    if (current.length === desired.length && current.every(cookie => desired.some(next => next.name === cookie.name && next.value === cookie.value))) return;
+    const site = new URL(origin);
+    const domain = site.hostname === 'chatgpt.com' ? '.chatgpt.com' : site.hostname;
+    if (current.length === desired.length && current.every(cookie => (!cookie.domain || cookie.domain === domain) && desired.some(next => next.name === cookie.name && next.value === cookie.value))) return;
     if (new URL(origin).protocol !== 'https:' && desired.some(cookie => /^(?:__Secure-|__Host-)/.test(cookie.name))) {
       console.error(JSON.stringify({ event: 'session-cookie-reconcile-skipped', origin: new URL(origin).origin }));
       return;
     }
     for (const cookie of current) await context.clearCookies({ name: cookie.name, domain: cookie.domain, path: cookie.path });
-    await context.addCookies(desired.map(cookie => ({ ...cookie, url: new URL('/', origin).href, httpOnly: true, secure: new URL(origin).protocol === 'https:', sameSite: 'Lax' })));
+    await context.addCookies(desired.map(cookie => ({ ...cookie, domain, path: '/', httpOnly: true, secure: site.protocol === 'https:', sameSite: 'Lax' })));
   } catch { throw new BackendError('upstream'); }
 }
 
@@ -177,13 +179,13 @@ export class BrowserSupervisor {
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('browserConfiguration');
     if (this.profile !== undefined ? typeof this.profile !== 'string' || !this.profile : typeof this.profileRoot !== 'string' || !this.profileRoot) throw new BackendError('browserConfiguration');
     let entry = this.#accounts.get(account);
-    if (entry && entry.headless !== headless) {
+    if (entry && entry.headless && !headless) {
       if (entry.users) throw new Error('An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.');
       await this.closeAccount(account);
       return this.#ensure(account, headless);
     }
     if (!entry) {
-      entry = { users: 0, context: null, timer: null, crashed: new Set(), closed: false, stopping: false, headless };
+      entry = { users: 0, context: null, timer: null, crashed: new Set(), closed: false, stopping: false, headless, credentials: new Map() };
       this.#accounts.set(account, entry);
       entry.starting = Promise.resolve().then(() => this.launch(this.profile ?? resolve(this.profileRoot, account), { ...this.options, headless })).then(async context => {
         entry.context = context;
@@ -229,7 +231,13 @@ export class BrowserSupervisor {
             signal?.addEventListener('abort', onAbort, { once: true });
           }),
           Promise.resolve().then(async () => {
-            if (auth !== undefined) await reconcileSessionCookies(context, auth.refresh, origin);
+            if (auth !== undefined) {
+              const key = new URL(origin).origin;
+              if (!entry.credentials.has(key) || entry.credentials.get(key) !== auth.refresh) {
+                await reconcileSessionCookies(context, auth.refresh, origin);
+                entry.credentials.set(key, auth.refresh);
+              }
+            }
             signal?.throwIfAborted();
             return operation(context, signal);
           }),
@@ -354,6 +362,15 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
     await close();
     throw error instanceof BackendError ? error : new BackendError('backendDown');
   }
+}
+
+// Visible turns use the same ordinary Chrome launcher as sign-in. The supervisor
+// owns the process and keeps it available for subsequent operations.
+export async function launchChatBrowserContext(profile, options) {
+  if (options.headless) return launchBrowserContext(profile, options);
+  const owned = await launchSignInBrowser(profile);
+  owned.context.close = owned.close;
+  return owned.context;
 }
 
 export async function browserRead(context, page, path, origin, signal, access) {

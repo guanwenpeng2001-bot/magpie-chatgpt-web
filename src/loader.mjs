@@ -20,7 +20,7 @@ export function makeLoader({ bridge, profileRoot, input }) {
           catch { throw new BackendError('invalidRequest'); }
           const prepared = prepare(request, init.headers ?? (resource instanceof Request ? resource.headers : undefined));
           const signal = init.signal ?? (resource instanceof Request ? resource.signal : undefined);
-          const visibleTurns = input?.magpie?.option(PROVIDER, 'visible-turns') === true;
+          const visibleTurns = input?.magpie?.option(PROVIDER, 'visible-turns') !== false;
           upstream = await bridge.open({ method: 'complete', auth: current, profileRoot, ...prepared, visibleTurns }, signal);
           const frames = [];
           let bytes = 0;

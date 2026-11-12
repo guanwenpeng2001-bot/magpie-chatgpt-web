@@ -127,7 +127,7 @@ test('one crash retries the operation and a second crash exhausts that turn only
   } finally { await browser.close(); }
 });
 
-test('visible turns replace an idle headless context and return to headless afterwards', async () => {
+test('visible turns replace an idle headless context and remain visible for background reads', async () => {
   const modes = [];
   let closes = 0;
   const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async (profile, options) => {
@@ -141,12 +141,12 @@ test('visible turns replace an idle headless context and return to headless afte
     await browser.run('fixture', async () => {});
     await browser.run('fixture', async () => {}, undefined, { visibleTurns: true });
     await browser.run('fixture', async () => {}, undefined, { visibleTurns: false });
-    assert.deepEqual(modes, [true, false, true]);
-    assert.equal(closes, 2);
+    assert.deepEqual(modes, [true, false]);
+    assert.equal(closes, 1);
   } finally { await browser.close(); }
 });
 
-for (const visibleTurns of [true, false]) test(`active operation rejects a switch to visibleTurns=${visibleTurns} with a local mode conflict`, async () => {
+for (const visibleTurns of [true]) test(`active operation rejects a switch to visibleTurns=${visibleTurns} with a local mode conflict`, async () => {
   const modes = [];
   const context = new EventEmitter();
   context.pages = () => [];
@@ -202,6 +202,18 @@ function cookieContext(initial) {
   };
   return context;
 }
+
+test('a reused browser preserves server-rotated cookies until the host supplies a new credential', async () => {
+  const context = cookieContext([]);
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => context });
+  const run = refresh => browser.run('fixture', async () => (await context.cookies())[0].value, undefined, { auth: { refresh } });
+  try {
+    assert.equal(await run('__Secure-next-auth.session-token=original'), 'original');
+    await context.addCookies([{ name: '__Secure-next-auth.session-token', value: 'server-rotated' }]);
+    assert.equal(await run('__Secure-next-auth.session-token=original'), 'server-rotated');
+    assert.equal(await run('__Secure-next-auth.session-token=host-renewed'), 'host-renewed');
+  } finally { await browser.close(); }
+});
 
 for (const [label, initial, refresh] of [
   ['rotation', [{ name: '__Secure-next-auth.session-token', value: 'prior' }], '__Secure-next-auth.session-token=current'],
