@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { translate, reconstruct } from '../src/wire/translate.mjs';
+import { translate, reconstruct, errorEvent } from '../src/wire/translate.mjs';
+import { BackendError } from '../backend/guard.mjs';
 import { parseSSE } from '../src/wire/sse.mjs';
 import { handoffFrames } from '../integrations/turn-fixture.mjs';
 
@@ -13,6 +14,15 @@ test('wire module owns AnswerStream', async () => {
   const answer = new wire.AnswerStream();
   assert.equal(answer.accept({ event: 'dom', data: { text: 'answer', complete: true } }), 'answer');
   assert.doesNotThrow(() => answer.finish());
+});
+
+test('semantic tool failures are request errors, not reconnect-triggering server errors', () => {
+  const toolFailure = JSON.parse(parseSSE(errorEvent(new BackendError('toolIncomplete'))).events[0].data);
+  assert.equal(toolFailure.error.type, 'invalid_request_error');
+  assert.equal(toolFailure.error.status, 400);
+  const upstreamFailure = JSON.parse(parseSSE(errorEvent(new BackendError('upstream'))).events[0].data);
+  assert.equal(upstreamFailure.error.type, 'api_error');
+  assert.equal(upstreamFailure.error.status, 502);
 });
 
 for (const missing of ['start', 'delta']) test(`reconstruct rejects missing ${missing} usage with a typed protocol error`, async () => {

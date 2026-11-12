@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.4.5`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.4.6`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -97,7 +97,7 @@ Visible browser turns read only the rendered DOM answer, so hidden intermediate 
 
 ## Release verification status
 
-For 0.4.5, Magpie 0.1.3930's native Desktop route completed a live `chatgpt-web/gpt-6` request while the plugin made no writes to the main Codex configuration. The earlier 0.4.4 custom-provider checks also completed `exec_command` on GPT-5.6 Pro and GPT-6 Pro, `apply_patch` followed by `exec_command` on GPT-6, a persisted-session resume, and per-round Magpie usage records. The current 330-tool Codex catalogue is bounded by the same preflight; larger client catalogues may still contain client-specific behavior beyond these tests.
+For 0.4.6, explicit project inspection phrases now force an Agent action while conceptual and explanatory questions remain text-only. The 0.4.5 Magpie native Desktop route completed a live `chatgpt-web/gpt-6` request without changing the main Codex configuration. Earlier custom-provider checks completed `exec_command` on GPT-5.6 Pro and GPT-6 Pro, `apply_patch` followed by `exec_command` on GPT-6, a persisted-session resume, and per-round Magpie usage records. The current 330-tool Codex catalogue is bounded by the same preflight; larger client catalogues may still contain client-specific behavior beyond these tests.
 
 For 0.4.0, ordinary GPT-6 Pro and GPT-5.6 Pro completed live source-backend turns; all eight Work IDs passed live UI selection checks and GPT-6 Luna Work completed a live saved-task turn. GPT-5.6 mini, GPT-5.6 Thinking mini and both experimental catalogue IDs passed live request-override and DOM-completion checks after their browser bundles were installed. ChatGPT Images generated and saved a valid PNG through the source backend. A representative 36-tool Claude-shaped request completed both through the source backend and the real Magpie `/v1/messages` route with HTTP 200 and the requested `tool_use`.
 
@@ -115,7 +115,7 @@ Unmeasured: live turn measurement was blocked by the durable verification challe
 
 ### Running host identity and bundle SHA-256
 
-Live verification for `0.4.5` ran against magpie `0.1.3930`, host bundle `host-e6801c6cb0f6.js`, 166 257 bytes, SHA-256 `e6801c6cb0f61553ca747c2b02209bfe87720183b37bb8840d08bcfb5352c5f3`, and Codex CLI `0.167.2`.
+Live verification for `0.4.6` ran against magpie `0.1.3930`, host bundle `host-e6801c6cb0f6.js`, 166 257 bytes, SHA-256 `e6801c6cb0f61553ca747c2b02209bfe87720183b37bb8840d08bcfb5352c5f3`, and Codex CLI `0.167.2`.
 
 ## Failure messages
 

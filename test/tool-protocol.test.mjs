@@ -37,6 +37,28 @@ test('ordinary questions containing action words remain text-eligible with tools
   assert.equal(events.some(event => event.content_block?.type === 'tool_use'), false);
 });
 
+test('explicit project inspection requests a tool while concept explanations stay text', () => {
+  const tools = [{ name: 'exec_command', input_schema: { type: 'object', properties: { cmd: { type: 'string' } } } }];
+  for (const content of [
+    '看一下这一个项目有一些什么东西。',
+    '请检查当前仓库并说明目录结构。',
+    '运行一个智能体检查这个项目。',
+    'Inspect this project and explain its structure.',
+    'Use a subagent to inspect this project.',
+  ]) {
+    const prepared = protocol.prepare(request({ messages: [{ role: 'user', content }], tools }));
+    assert.deepEqual(prepared.toolChoice, { type: 'any' }, content);
+  }
+  for (const content of [
+    'What does run mean in JavaScript?',
+    'Explain how to inspect a project.',
+    '这个项目是什么？',
+  ]) {
+    const prepared = protocol.prepare(request({ messages: [{ role: 'user', content }], tools }));
+    assert.equal(prepared.toolChoice.type, 'auto', content);
+  }
+});
+
 test('an exact tool name in the user turn requests that tool without using broad keyword matching', () => {
   const prepared = protocol.prepare(request({
     messages: [{ role: 'user', content: 'Use exec_command once, then report the result.' }],
