@@ -248,7 +248,7 @@ export class BrowserSupervisor {
         entry.users--;
         entry.crashed.delete(rejectCrash);
         signal?.removeEventListener('abort', onAbort);
-        if (!entry.users && this.#accounts.get(account) === entry && !this.#closed) {
+        if (this.idleMilliseconds !== null && !entry.users && this.#accounts.get(account) === entry && !this.#closed) {
           entry.timer = setTimeout(() => { this.closeAccount(account).catch(() => {}); }, this.idleMilliseconds);
         }
       }
@@ -282,10 +282,18 @@ export class LoginStates {
   clear(account) { this.#states.delete(account); }
 }
 
+export function browserProxy(env = process.env) {
+  for (const key of ['MAGPIE_HTTPS_PROXY', 'MAGPIE_HTTP_PROXY', 'MAGPIE_ALL_PROXY']) {
+    if (Object.hasOwn(env, key)) return env[key] || 'direct';
+  }
+  return env.HTTPS_PROXY || env.HTTP_PROXY || env.ALL_PROXY;
+}
+
 export function chromeArguments(profile, port, { proxy, env = process.env } = {}) {
-  proxy ??= env.MAGPIE_HTTPS_PROXY || env.MAGPIE_HTTP_PROXY || env.MAGPIE_ALL_PROXY;
+  proxy ??= browserProxy(env);
   const args = [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--no-first-run', '--no-default-browser-check'];
-  if (proxy) args.push(`--proxy-server=${proxy}`);
+  if (proxy === 'direct') args.push('--no-proxy-server');
+  else if (proxy) args.push(`--proxy-server=${proxy}`);
   return args;
 }
 

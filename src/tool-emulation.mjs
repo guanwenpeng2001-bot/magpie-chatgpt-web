@@ -1,5 +1,6 @@
 // Adapted from magpie-claudeweb2api 9fed093; see THIRD_PARTY_NOTICES.
 import { randomUUID } from 'node:crypto';
+import { Script } from 'node:vm';
 import { BackendError } from '../backend/guard.mjs';
 
 export const TOOL_PROTOCOL_TEMPLATE = '[Tool protocol]\nTools are executed by the client. To request a tool, emit {start}{"name":"tool_name","input":{...}}{end}. Use only these delimiters for new calls; previous calls in the transcript are historical. Do not invent tool results. Stop after emitting the requested calls. You may include normal text outside calls. Match each input_schema. Tool choice auto permits text or calls; any requires a call; tool requires the named tool; none forbids calls. When disable_parallel_tool_use is true, emit at most one call.';
@@ -7,12 +8,13 @@ export const TOOL_PROTOCOL_TEMPLATE = '[Tool protocol]\nTools are executed by th
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const reject = () => { throw new BackendError('toolSchema'); };
 const limit = () => { throw new BackendError('toolLimit'); };
-const invalid = () => { throw new BackendError('toolDefinition'); };
+const invalid = (reason = 'invalid-schema', keyword) => { throw Object.assign(new BackendError('toolDefinition'), { diagnostic: { reason, ...(keyword ? { keyword } : {}) } }); };
 const types = { object, array: Array.isArray, string: value => typeof value === 'string', number: value => typeof value === 'number' && Number.isFinite(value), integer: Number.isSafeInteger, boolean: value => typeof value === 'boolean', null: value => value === null };
-const annotations = ['title', 'description', 'default', 'examples', '$comment'];
+const annotations = ['title', 'description', 'default', 'examples', '$comment', '$schema', 'format'];
+const patternTest = new Script("new RegExp(pattern, 'u').test(value)");
 const bounds = ['minLength', 'maxLength', 'minProperties', 'maxProperties', 'minItems', 'maxItems'];
 const numeric = ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'];
-const supported = new Set([...annotations, ...bounds, ...numeric, '$ref', '$defs', 'definitions', 'type', 'const', 'enum', 'properties', 'required', 'additionalProperties', 'items', 'uniqueItems', 'allOf', 'anyOf', 'oneOf', 'not']);
+const supported = new Set([...annotations, ...bounds, ...numeric, 'pattern', '$ref', '$defs', 'definitions', 'type', 'const', 'enum', 'properties', 'required', 'additionalProperties', 'items', 'uniqueItems', 'allOf', 'anyOf', 'oneOf', 'not']);
 
 function reference(root, ref) {
   if (ref === '#') return root;
@@ -39,7 +41,13 @@ export function checkSchema(root) {
     if (!object(schema)) invalid();
     if (visited.has(schema)) return;
     visited.add(schema);
-    if (Object.keys(schema).some(key => !supported.has(key))) invalid();
+    const unsupportedKey = Object.keys(schema).find(key => !supported.has(key));
+    if (unsupportedKey) invalid('unsupported-keyword', ['$id','multipleOf','patternProperties','dependentRequired','dependentSchemas','unevaluatedProperties','prefixItems','contains','minContains','maxContains','if','then','else','propertyNames','contentEncoding','contentMediaType','additionalItems','nullable'].includes(unsupportedKey) ? unsupportedKey : 'other');
+    for (const key of ['$schema', 'format']) if (schema[key] !== undefined && typeof schema[key] !== 'string') invalid();
+    if (schema.pattern !== undefined) {
+      if (typeof schema.pattern !== 'string' || schema.pattern.length > 4096) invalid();
+      try { new RegExp(schema.pattern, 'u'); } catch { invalid('pattern-syntax'); }
+    }
     if (Object.hasOwn(schema, '$ref')) visit(reference(root, schema.$ref), depth + 1);
     if (schema.type !== undefined) {
       const wanted = Array.isArray(schema.type) ? schema.type : [schema.type];
@@ -73,6 +81,7 @@ function canonical(value, budget, depth = 0) {
 }
 
 export function validateInput(value, root) {
+  const deadline = Date.now() + 500;
   const budget = { remaining: 100_000 };
   const equal = (left, right) => canonical(left, budget) === canonical(right, budget);
   const matches = (value, schema, depth = 0) => {
@@ -93,6 +102,14 @@ export function validateInput(value, root) {
           schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum || schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum) return false;
     }
     if (typeof value === 'string') {
+      if (schema.pattern !== undefined) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) limit();
+        let match;
+        try { match = patternTest.runInNewContext({ pattern: schema.pattern, value }, { timeout: Math.min(25, remaining) }); }
+        catch (error) { if (error.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') limit(); invalid(); }
+        if (!match) return false;
+      }
       let length = 0;
       for (const char of value) length++;
       if (schema.minLength !== undefined && length < schema.minLength || schema.maxLength !== undefined && length > schema.maxLength) return false;
@@ -117,8 +134,8 @@ export function validateInput(value, root) {
 }
 
 export function checkToolDefinitions(tools) {
-  if (!Array.isArray(tools) || tools.length > 128 || tools.some(tool => !object(tool) || typeof tool.name !== 'string' || !tool.name || !object(tool.input_schema))) invalid();
-  if (new Set(tools.map(tool => tool.name)).size !== tools.length) invalid();
+  if (!Array.isArray(tools) || tools.length > 256 || tools.some(tool => !object(tool) || typeof tool.name !== 'string' || !tool.name || !object(tool.input_schema))) invalid('tool-shape-or-count');
+  if (new Set(tools.map(tool => tool.name)).size !== tools.length) invalid('duplicate-tool-name');
   for (const tool of tools) checkSchema(tool.input_schema);
 }
 

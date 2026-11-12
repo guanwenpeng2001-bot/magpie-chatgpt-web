@@ -28,7 +28,10 @@ function harness(options = {}) {
         closed: false, isClosed() { return this.closed; },
         async close() { this.closed = true; calls.push('close'); },
         async goto() { calls.push('navigate'); },
-        async evaluate(fn, value) { if (typeof value?.network === 'boolean') calls.push(['network', value.network]); },
+        async evaluate(fn, value) {
+          if (typeof value?.network === 'boolean') calls.push(['network', value.network]);
+          if (typeof value?.model === 'string') calls.push(['wire-model', value.model]);
+        },
         locator() { return { filter() { return this; }, async fill(text) { calls.push(['fill', text]); }, async press() { calls.push('submit'); } }; },
       };
       pages.push(page);
@@ -93,6 +96,27 @@ test('visible browser turns read the rendered answer without parsing hidden inte
   const h = harness();
   try {
     await h.complete(command({ visibleTurns: true }));
+    assert.deepEqual(h.calls.find(call => Array.isArray(call) && call[0] === 'network'), ['network', false]);
+  } finally { await h.driver.close(); }
+});
+
+test('request-only catalogue IDs reach the page harvester with their exact original model', async () => {
+  const h = harness();
+  try {
+    await h.complete(command({ model: 'gpt-5-6-mini' }));
+    assert.deepEqual(h.calls.find(call => Array.isArray(call) && call[0] === 'wire-model'), ['wire-model', 'gpt-5-6-mini']);
+  } finally { await h.driver.close(); }
+});
+
+test('Work models initialize the saved-task surface and never masquerade as temporary chats', async () => {
+  let initialized = 0;
+  const h = harness({ adapter: {
+    initializeWorkPage: async () => { initialized++; },
+    assertTemporaryChat: async () => assert.fail('Work must not claim temporary-chat semantics'),
+  } });
+  try {
+    await h.complete(command({ model: 'gpt-6-luna-wm' }));
+    assert.equal(initialized, 1);
     assert.deepEqual(h.calls.find(call => Array.isArray(call) && call[0] === 'network'), ['network', false]);
   } finally { await h.driver.close(); }
 });

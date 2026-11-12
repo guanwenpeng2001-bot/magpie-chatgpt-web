@@ -50,11 +50,17 @@ export function prepare(request, headers = new Headers()) {
       throw attachmentError('an unsupported content block');
     }).join('\n');
   }
-  const history = request.messages.map(message => {
-    if (!message || !['user', 'assistant'].includes(message.role)) throw new BackendError('invalidRequest');
+  const systems = request.system === undefined ? [] : [textContent(request.system, false, false)];
+  const history = request.messages.flatMap(message => {
+    if (!message || !['user', 'assistant', 'system'].includes(message.role)) throw new BackendError('invalidRequest');
+    if (message.role === 'system') {
+      systems.push(textContent(message.content, false, false));
+      return [];
+    }
     return { role: message.role, content: textContent(message.content) };
   });
-  const system = request.system === undefined ? '' : textContent(request.system, false, false);
+  if (!history.length) throw new BackendError('invalidRequest');
+  const system = systems.join('\n\n');
   const nonce = randomUUID().replaceAll('-', '');
   const session = new Headers(headers).get('x-chatgptweb-conversation');
   const supplied = request.conversation_id;

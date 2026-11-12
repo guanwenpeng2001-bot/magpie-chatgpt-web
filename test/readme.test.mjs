@@ -8,8 +8,8 @@ const publicCodes = `expired cooldown upstream requestBudget empty hidden trunca
 invalidRequest toolDefinition toolChoice toolUnknown toolJSON toolSchema toolChoiceViolation
  toolParallel toolIncomplete toolRequired toolDelimiter toolLimit binding temporary harvest protocol
  verification capacity browserDependency browserProfile browserConfiguration browserClosed backendDown
- signinTimeout missingComponent pickerMissing pickerAmbiguous modelNotOffered attachmentUnsupported
- imageRejected`.split(/\s+/);
+ signinTimeout missingComponent pickerMissing pickerAmbiguous modelUnsupported modelNotOffered attachmentUnsupported
+ imageRejected imageOutput`.split(/\s+/);
 
 test('README failure table covers every pinned public code with condition and recovery', () => {
   const section = readme.split('## Failure messages\n')[1]?.split('\n## ')[0];
@@ -23,7 +23,7 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.3\.1`\. Host verified against: magpie `0\.1\.1247`/);
+  assert.match(prose, /Plugin version: `0\.4\.0`\. Host verified against: magpie `0\.1\.1247`/);
 });
 
 test('README records the exact verified host identity with its evidence citation', () => {
@@ -78,7 +78,7 @@ test('README documents visible-by-default turns and explicit headless opt-out', 
   assert.match(prose, /visible by default/);
   assert.match(prose, /explicitly disable/);
   assert.match(prose, /Show browser during chats.*visible-turns/);
-  assert.match(prose, /Idle turn browser contexts close after \*\*5 minutes\*\*/);
+  assert.match(prose, /turns and background reads reuse it for the backend lifetime/);
 });
 
 test('README discloses privacy boundaries and emulated capabilities', () => {

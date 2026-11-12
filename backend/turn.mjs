@@ -1,16 +1,20 @@
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { BackendError } from './guard.mjs';
 import { BrowserSupervisor, launchChatBrowserContext } from './browser.mjs';
 import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
 import * as siteAdapter from './site-adapter/index.mjs';
 import { ADAPTER_VERSION, shape } from './site-adapter/selectors.mjs';
+import { wireModels, workModels } from './site-adapter/compatibility.mjs';
+import { IMAGE_MODEL } from './site-adapter/images.mjs';
 import { observeTurn } from './observe.mjs';
 import { compile } from './prompt.mjs';
 
 export class TurnDriver {
-  constructor({ profileRoot, profile, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now = Date.now, adapter = siteAdapter, observe = observeTurn, prompter = compile } = {}) {
+  constructor({ profileRoot, profile, artifactRoot, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, now = Date.now, adapter = siteAdapter, observe = observeTurn, prompter = compile } = {}) {
     this.origin = origin;
+    this.artifactRoot = artifactRoot ?? resolve(profileRoot ?? profile ?? '.', '..', 'chatgpt-web-artifacts');
     this.network = network;
     this.timeout = timeout;
     this.now = now;
@@ -18,7 +22,7 @@ export class TurnDriver {
     this.observe = observe;
     this.prompter = prompter;
     this.bindings = new Conversations({ now });
-    this.browser = new BrowserSupervisor({ profileRoot, profile, launch: launch ?? (async (profile, options) => {
+    this.browser = new BrowserSupervisor({ profileRoot, profile, idleMilliseconds: null, launch: launch ?? (async (profile, options) => {
       return launchChatBrowserContext(profile, { ...options, serviceWorkers: 'block' });
     }) });
     this.installed = new WeakSet();
@@ -37,6 +41,9 @@ export class TurnDriver {
     this.installed.add(context);
   }
   async complete(command, guard, identity, signal, emit) {
+    const workMode = Object.hasOwn(workModels, command.model);
+    const imageMode = command.model === IMAGE_MODEL;
+    const wireModel = Object.hasOwn(wireModels, command.model) ? command.model : undefined;
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(signal.reason);
     signal?.addEventListener('abort', forwardAbort, { once: true });
@@ -52,7 +59,12 @@ export class TurnDriver {
     let interrupt;
     const interrupted = new Promise((resolve, reject) => { interrupt = reject; });
     interrupted.catch(() => {});
-    const abort = () => { void closePage(); interrupt(activeSignal.reason); };
+    let stopPromise;
+    const stopPage = () => stopPromise ??= (async () => {
+      if ((workMode || imageMode) && page) await this.adapter.stopWork?.(page).catch(() => {});
+      await closePage();
+    })();
+    const abort = () => { void stopPage(); interrupt(activeSignal.reason); };
     activeSignal.addEventListener('abort', abort, { once: true });
     const wait = work => Promise.race([work, interrupted]);
     try {
@@ -73,13 +85,15 @@ export class TurnDriver {
           closePromise = undefined;
           if (activeSignal.aborted) { await closePage(); activeSignal.throwIfAborted(); }
           resumeFrom = 0;
-          await wait(page.goto(`${this.origin}/?temporary-chat=true`, { waitUntil: 'domcontentloaded', timeout: Math.max(1, deadline - this.now()) }));
-          if (command.visibleTurns && this.adapter.waitForReady) {
+          await wait(page.goto(workMode || imageMode ? this.origin : `${this.origin}/?temporary-chat=true`, { waitUntil: 'domcontentloaded', timeout: Math.max(1, deadline - this.now()) }));
+          if (workMode) await wait(this.adapter.initializeWorkPage(page, { budget: Math.max(1, deadline - this.now()) }));
+          if (imageMode) await wait(this.adapter.initializeImagePage(page, { budget: Math.max(1, deadline - this.now()) }));
+          if (!workMode && command.visibleTurns && this.adapter.waitForReady) {
             await wait(this.adapter.waitForReady(page, { signal: activeSignal, budget: Math.max(0, deadline - this.now()), requirePicker: true }));
           }
         }
         await wait(this.pageError(page, guard));
-        const temporary = await wait(this.adapter.assertTemporaryChat(page));
+        const temporary = workMode || imageMode ? true : await wait(this.adapter.assertTemporaryChat(page));
         await wait(this.pageError(page, guard));
         if (temporary !== true) throw new BackendError('temporary');
         this.assertResult(await wait(this.adapter.readComposer(page)), command.model);
@@ -89,11 +103,15 @@ export class TurnDriver {
         const prompt = this.prompter(command, resumeFrom);
         const run = { id: randomUUID(), queue: [] };
         this.turns.set(page, run);
-        await wait(page.evaluate(({ id, network }) => window.__chatgptHarvest.start(id, network), { id: run.id, network: this.network && !command.visibleTurns }));
+        const imageBaseline = imageMode ? await wait(page.locator('[data-testid="generated-image-preview"] img').evaluateAll(nodes => nodes.map(img => img.src))) : [];
+        await wait(page.evaluate(({ id, network, model }) => window.__chatgptHarvest.start(id, network, model), {
+          id: run.id, network: this.network && !command.visibleTurns && !workMode && !imageMode, model: wireModel,
+        }));
         const composer = page.locator(shape.composer).filter({ visible: true });
         await wait(composer.fill(prompt));
         activeSignal.throwIfAborted();
         await wait(composer.press('Enter'));
+        if (imageMode) return await wait(this.adapter.readGeneratedImages(page, { baseline: imageBaseline, budget: Math.max(1, deadline - this.now()), artifactRoot: this.artifactRoot, signal: activeSignal }));
         return await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: async () => {} }));
       }, activeSignal, { visibleTurns: command.visibleTurns, auth: command.auth, origin: this.origin }));
       activeSignal.throwIfAborted();
@@ -109,7 +127,7 @@ export class TurnDriver {
         else if (error?.message === 'An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.') failure = new BackendError('invalidRequest');
         else failure = new BackendError('upstream');
       }
-      await closePage();
+      await stopPage();
       if (binding) await this.bindings.failed(binding);
       throw failure;
     } finally {
@@ -131,6 +149,7 @@ export class TurnDriver {
       case 'composer-missing': throw new BackendError('pickerMissing', { values: { component: 'composer', selector: shape.composer, adapterVersion: ADAPTER_VERSION } });
       case 'picker-missing': throw new BackendError('pickerMissing', { values: detail });
       case 'picker-ambiguous': throw new BackendError('pickerAmbiguous', { values: { slug, count: detail.count } });
+      case 'model-unsupported': throw new BackendError('modelUnsupported', { values: { slug } });
       case 'model-not-offered': throw new BackendError('modelNotOffered', { values: { slug } });
       case 'attach-unavailable': throw new BackendError('attachmentUnsupported', { values: { kind: 'images without an upload control', maxCount: 4, maxBytes: '10 MiB' } });
       case 'image-rejected': throw new BackendError('imageRejected', { values: { detail: detail.reason } });

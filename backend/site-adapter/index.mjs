@@ -1,6 +1,11 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ADAPTER_VERSION, shape } from './selectors.mjs';
 import { BackendError } from '../guard.mjs';
+import { selectionPlans, unsupportedModels, workModels, wireModels } from './compatibility.mjs';
+import { selectWorkModel } from './work.mjs';
+export { initializeWorkPage, stopWork } from './work.mjs';
+import { IMAGE_MODEL, selectImageTool } from './images.mjs';
+export { initializeImagePage, readGeneratedImages } from './images.mjs';
 
 const visible = (page, selector) => page.locator(selector).filter({ visible: true });
 function failure(kind, detail) {
@@ -11,6 +16,15 @@ function failure(kind, detail) {
 
 export async function selectModel(page, slug) {
   if (slug === 'auto') return { ok: true };
+  if (Object.hasOwn(wireModels, slug)) return selectModel(page, wireModels[slug].uiModel);
+  if (slug === IMAGE_MODEL) {
+    const instant = await selectModel(page, 'gpt-6-instant');
+    if (!instant.ok) return instant;
+    return selectImageTool(page);
+  }
+  if (Object.hasOwn(workModels, slug)) return selectWorkModel(page, slug);
+  if (Object.hasOwn(unsupportedModels, slug)) return failure('model-unsupported', { slug });
+  const plan = Object.hasOwn(selectionPlans, slug) ? selectionPlans[slug] : undefined;
   const choose = async entries => {
     const matches = [];
     for (const entry of await entries.all()) if (await entry.getAttribute(shape.modelId) === slug) matches.push(entry);
@@ -42,12 +56,12 @@ export async function selectModel(page, slug) {
         for (const entry of await entries.all()) {
           const id = await entry.getAttribute(shape.modelId);
           const title = (await entry.innerText()).split('\n')[0].trim();
-          if (!id && (shape.titles[slug]?.includes(title) || (slug === 'gpt-5-6-pro' && title === 'GPT-5.6 Sol'))) matches.push(entry);
+          if (!id && (shape.titles[slug]?.includes(title) || (plan && title === plan.family))) matches.push(entry);
         }
         if (matches.length > 1) return failure('picker-ambiguous', { slug, count: matches.length });
         if (matches.length === 1) {
           await matches[0].click();
-          return slug === 'gpt-5-6-pro' ? await selectProEffort(page, picker) : { ok: true };
+          return plan ? await selectPickerEffort(page, picker, slug, plan) : { ok: true };
         }
         return failure('model-not-offered', { slug, stage: 'model-rows' });
       }
@@ -57,28 +71,37 @@ export async function selectModel(page, slug) {
   } finally { await page.keyboard.press('Escape'); }
 }
 
-async function selectProEffort(page, picker) {
+async function selectPickerEffort(page, picker, slug, plan) {
+  // Older pickers offer a base model directly without an effort surface.
+  // Only exact base IDs may use that contract; named effort variants must
+  // still prove their requested setting.
+  if (['gpt-5-6', 'gpt-6'].includes(slug) && await page.locator('[data-model-picker-power-slider]').count() === 0) return { ok: true };
   let control = visible(page, '[role="menu"] [data-reasoning-slider="true"]');
   if (!await control.count()) await picker.click();
   control = visible(page, '[role="menu"] [data-reasoning-slider="true"]');
-  if (await control.count() !== 1) return failure('picker-missing', { component: 'Pro effort control', selector: '[data-reasoning-slider="true"]' });
   const thumb = page.locator('[role="menu"] [data-model-picker-power-slider] [role="slider"]');
-  if (await thumb.count() !== 1) return failure('picker-missing', { component: 'Pro effort slider', selector: '[data-model-picker-power-slider] [role="slider"]' });
-  for (let step = 0; step < 6; step++) {
+  if (await control.count() !== 1 || await thumb.count() !== 1) return failure('picker-missing', { component: 'model effort control', selector: '[data-reasoning-slider="true"]' });
+  const matches = async () => {
+    const header = (await visible(page, shape.toggle).textContent() ?? '').replace(/\s+/g, '');
+    const selected = page.locator('[role="menu"] [role="menuitemradio"][aria-checked="true"]');
+    const family = await selected.count() === 1 ? (await selected.textContent()).trim() : '';
+    return family === plan.family && (header === plan.version + plan.effort || (plan.version === '6' && header === plan.effort));
+  };
+  let reachedMinimum = false;
+  for (let step = 0; step <= 12; step++) {
+    if (await matches()) return { ok: true };
     const value = await thumb.getAttribute('aria-valuenow');
     const maximum = await thumb.getAttribute('aria-valuemax');
-    if (!/^\d+$/.test(value ?? '') || !/^\d+$/.test(maximum ?? '') || Number(maximum) > 5) return failure('model-not-offered', { slug: 'gpt-5-6-pro', stage: 'pro-slider' });
-    if (value === maximum) break;
-    await control.press('ArrowRight');
+    if (!/^\d+$/.test(value ?? '') || !/^\d+$/.test(maximum ?? '') || Number(maximum) > 5 || Number(value) > Number(maximum)) break;
+    reachedMinimum ||= value === '0';
+    const right = plan.effort === 'Pro' || (plan.effort === 'Medium' && reachedMinimum);
+    if (step === 12 || (right ? value === maximum : value === '0')) break;
+    await control.press(right ? 'ArrowRight' : 'ArrowLeft');
     try {
       await page.waitForFunction(previous => document.querySelector('[role="menu"] [data-model-picker-power-slider] [role="slider"]')?.getAttribute('aria-valuenow') !== previous, value, { timeout: shape.transitionTimeout });
-    } catch { return failure('model-not-offered', { slug: 'gpt-5-6-pro', stage: 'pro-slider' }); }
+    } catch { break; }
   }
-  const header = await visible(page, shape.toggle).textContent();
-  const selected = page.locator('[role="menu"] [role="menuitemradio"][aria-checked="true"]');
-  const family = await selected.count() === 1 ? (await selected.textContent()).trim() : '';
-  if (family !== 'GPT-5.6 Sol' || !/^5\.6\s*Pro$/.test((header ?? '').trim())) return failure('model-not-offered', { slug: 'gpt-5-6-pro', stage: 'pro-slider' });
-  return { ok: true };
+  return failure('model-not-offered', { slug, stage: 'effort-verification' });
 }
 
 export async function assertTemporaryChat(page) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { checkSchema, validateInput } from '../src/tool-emulation.mjs';
 import { prepare } from '../src/wire/prepare.mjs';
 
-for (const keyword of ['$schema', '$id', 'pattern', 'format', 'multipleOf', 'patternProperties', 'dependentRequired', 'dependentSchemas', 'unevaluatedProperties', 'prefixItems', 'contains', 'minContains', 'maxContains', 'if', 'then', 'else', 'propertyNames', 'contentEncoding']) {
+for (const keyword of ['$id', 'multipleOf', 'patternProperties', 'dependentRequired', 'dependentSchemas', 'unevaluatedProperties', 'prefixItems', 'contains', 'minContains', 'maxContains', 'if', 'then', 'else', 'propertyNames', 'contentEncoding']) {
   test(`unsupported ${keyword} is rejected before dispatch`, () => {
     assert.throws(() => prepare({ model: 'auto', messages: [{ role: 'user', content: 'fixture' }], tools: [{ name: 'lookup', input_schema: { type: 'object', [keyword]: true } }] }), error => error.code === 'toolDefinition' && error.status === 400);
   });
@@ -39,7 +39,7 @@ test('annotation keywords are accepted without constraining arguments', () => {
   validateInput({}, true);
 });
 
-for (const schema of [{ type: 'bogus' }, { type: [] }, { required: [1] }, { enum: [] }, { minLength: -1 }, { maximum: '3' }, { uniqueItems: 'yes' }, { items: [] }, { anyOf: [] }, { properties: [] }, { $ref: 'https://example.invalid/schema' }, { $ref: '#/absent' }, { $ref: '#/%invalid' }, { $defs: { value: { pattern: 'x' } } }]) {
+for (const schema of [{ type: 'bogus' }, { type: [] }, { required: [1] }, { enum: [] }, { minLength: -1 }, { maximum: '3' }, { uniqueItems: 'yes' }, { items: [] }, { anyOf: [] }, { properties: [] }, { $ref: 'https://example.invalid/schema' }, { $ref: '#/absent' }, { $ref: '#/%invalid' }, { $defs: { value: { pattern: '[' } } }, { $schema: true }, { pattern: true }, { format: true }]) {
   test(`malformed schema ${JSON.stringify(schema)} is rejected in preflight`, () => assert.throws(() => checkSchema(schema), error => error.code === 'toolDefinition'));
 }
 

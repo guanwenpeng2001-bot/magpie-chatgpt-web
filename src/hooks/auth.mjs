@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { BackendError } from '../bridge.mjs';
-import { signinProfileClaim, releaseSigninProfileClaim, unlockSigninProfile, signinTimeoutWindow } from '../../backend/browser.mjs';
+import { signinProfileClaim, releaseSigninProfileClaim, unlockSigninProfile, signinTimeoutWindow, browserProxy } from '../../backend/browser.mjs';
 import { makeLoader } from '../loader.mjs';
 import { PROVIDER } from './config.mjs';
 
@@ -23,7 +23,7 @@ export function authHook(env) {
       async authorize() {
         const owner = Symbol('sign-in');
         const account = await signinProfileClaim(profileRoot, owner);
-        const proxy = process.env.MAGPIE_HTTPS_PROXY || process.env.MAGPIE_HTTP_PROXY || process.env.MAGPIE_ALL_PROXY;
+        const proxy = browserProxy();
         try { await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) }); }
         catch (error) { await unlockSigninProfile(profileRoot, owner); throw error; }
         return {

@@ -39,8 +39,10 @@ const definitions = Object.freeze(Object.fromEntries(Object.entries({
   missingComponent: [503, '{component} was not found. {remedy}'],
   pickerMissing: [502, 'The ChatGPT page changed: {component} was not found (selector {selector}, adapter {adapterVersion}). Update the plugin; if it is already latest, report this adapter version.'],
   pickerAmbiguous: [502, "The model picker shows {count} entries for {slug}; the plugin cannot choose safely. Retry, or select the model once by hand in a visible browser (enable 'visible-turns')."],
+  modelUnsupported: [400, 'The plugin cannot select {slug} in the current ChatGPT page yet. This does not indicate missing account access.'],
   modelNotOffered: [400, '{slug} is not offered to this ChatGPT account. Pick one of the listed models; refresh the model list if the account changed.'],
   attachmentUnsupported: [400, 'This message contains {kind}, which chatgpt-web cannot send. Remove it and retry. Images are supported up to {maxCount} files / {maxBytes} each.'],
+  imageOutput: [502, 'The generated image could not be saved locally. Open the saved chat in ChatGPT to retrieve it.'],
   imageRejected: [502, 'ChatGPT refused the image upload ({detail}). Retry; if it persists, send the message without the image.'],
 }).map(([code, entry]) => [code, Object.freeze(entry)])));
 

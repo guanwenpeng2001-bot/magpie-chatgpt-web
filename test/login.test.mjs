@@ -11,6 +11,13 @@ test('ordinary Chrome sign-in launch uses only the four prescribed arguments', (
   assert.equal(args.some(arg => /no-sandbox|enable-automation|headless/.test(arg)), false);
 });
 
+test('ordinary browser follows the host global proxy unless explicitly overridden', () => {
+  assert.equal(browserModule.browserProxy({ HTTPS_PROXY: 'http://127.0.0.1:7897' }), 'http://127.0.0.1:7897');
+  const args = browserModule.chromeArguments('profile', 1234, { env: { MAGPIE_HTTPS_PROXY: '', HTTPS_PROXY: 'http://127.0.0.1:7897' } });
+  assert.ok(args.includes('--no-proxy-server'));
+  assert.equal(args.some(arg => arg.startsWith('--proxy-server=')), false);
+});
+
 test('a restored non-blank page recovers without discarding its session', async () => {
   let location = 'about:blank#restored';
   const context = new EventEmitter();

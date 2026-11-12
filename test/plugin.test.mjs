@@ -12,7 +12,9 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
   const models = await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } });
   assert.deepEqual(Object.keys(models), ['auto', ...slugs.filter(slug => slug !== 'auto')]);
   for (const [index, slug] of slugs.entries()) {
-    const name = ['gpt-5-6-mini', 'gpt-6-mini'].includes(slug) ? `${titles[index]} (${slug})` : titles[index];
+    const name = slug === 'gpt-5-6-mini' ? 'GPT-5.6 Luna (mini)'
+      : slug === 'gpt-6-mini' ? `${titles[index]} (${slug}) [not yet supported]`
+        : titles[index];
     assert.deepEqual(models[slug], {
       name, api: { id: slug },
       limit: { context: 200000, output: 34834 },
