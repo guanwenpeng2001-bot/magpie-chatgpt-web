@@ -24,27 +24,27 @@ export function makeLoader({ bridge, profileRoot, input }) {
           const signal = init.signal ?? (resource instanceof Request ? resource.signal : undefined);
           const visibleTurns = input?.magpie?.option(PROVIDER, 'visible-turns') !== false;
           upstream = await bridge.open({ method: 'complete', auth: current, profileRoot, ...prepared, visibleTurns }, signal);
-          const frames = [];
-          let bytes = 0;
-          for await (const frame of upstream) {
-            signal?.throwIfAborted();
-            bytes += Buffer.byteLength(JSON.stringify(frame));
-            if (bytes > 8 << 20) throw new BackendError('protocol');
-            frames.push(frame);
-          }
-          if (!frames.length) throw new BackendError('empty');
-          if (frames.some(frame => frame.type === 'error')) await reconstruct(translate(frames, prepared));
           const headers = { 'x-magpie-sign-in': 'kept', 'cache-control': 'no-store' };
           if (upstream.metadata?.route) headers['x-chatgptweb-route'] = upstream.metadata.route;
           if (upstream.metadata?.degraded) {
             await input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'info', message: 'observationDegraded', extra: { ...upstream.metadata } } });
           }
-          const translated = translate(frames, prepared);
           if (request.stream === false) {
+            const frames = [];
+            let bytes = 0;
+            for await (const frame of upstream) {
+              signal?.throwIfAborted();
+              bytes += Buffer.byteLength(JSON.stringify(frame));
+              if (bytes > 8 << 20) throw new BackendError('protocol');
+              frames.push(frame);
+            }
+            if (!frames.length) throw new BackendError('empty');
+            const translated = translate(frames, prepared);
             const message = await reconstruct(translated);
             upstream.close();
             return Response.json(message, { headers });
           }
+          const translated = translate(upstream, prepared);
           const encoder = new TextEncoder();
           const body = new ReadableStream({
             async pull(controller) {

@@ -131,9 +131,16 @@ for (const stream of [true, false]) {
     } });
     const loader = await hooks.auth.loader(async () => auth);
     const response = await loader.fetch('https://chatgpt.com/backend-api/messages', { body: JSON.stringify({ model: 'auto', stream, messages: [{ role: 'user', content: 'hello' }] }) });
-    assert.equal(response.status, 429);
-    assert.equal(response.headers.get('retry-after'), '120');
-    assert.equal((await response.json()).error.retryAfter, '120');
+    if (stream) {
+      assert.equal(response.status, 200);
+      const body = await response.text();
+      assert.match(body, /event: error/);
+      assert.match(body, /"retryAfter":"120"/);
+    } else {
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get('retry-after'), '120');
+      assert.equal((await response.json()).error.retryAfter, '120');
+    }
   });
 }
 

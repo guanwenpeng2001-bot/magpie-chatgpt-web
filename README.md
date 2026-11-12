@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns are visible by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.4.2`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.4.3`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -66,7 +66,7 @@ Browser state is a sensitive login artifact. Use a trusted workstation and never
 
 ## Models, images and delivery
 
-The inline model picker is supported, including GPT-5.6 and GPT-6 default/Instant/Thinking/Pro selection with family and effort verification before Send. The 23-entry catalogue also contains eight Work models, four request-only mini/experimental IDs, and three entries that this account's current web surface cannot complete. Work models use the separate saved-task surface and never claim Temporary Chat semantics. Request-only IDs select a verified ordinary model as their UI bridge, then replace only the submitted JSON `model` field with the exact original ID. See [the full model audit](MODEL_SUPPORT.md). The three unsupported entries are marked `[not yet supported]` and fail as `modelUnsupported`, not as an account-permission claim.
+The inline model picker is supported, including GPT-5.6 and GPT-6 default/Instant/Thinking/Pro selection with family and effort verification before Send. The 23-entry catalogue also contains eight Work models, four request-only mini/experimental IDs, and three entries that this account's current web surface cannot complete. Work models use the separate saved-task surface and never claim Temporary Chat semantics. Request-only IDs select a verified ordinary model as their UI bridge, then replace only the submitted JSON `model` field with the exact original ID. See [the full model audit](MODEL_SUPPORT.md). The three unsupported entries are marked `[not yet supported]` and fail as `modelUnsupported`, not as an account-permission claim. Streaming requests expose the initial Anthropic SSE frame immediately and continue relaying browser turn frames as they arrive, so Codex receives progress instead of waiting for the complete browser turn.
 
 Image input is supported up to **4 images / 10 MiB each**; non-image attachments and over-cap input are rejected before submission. The catalogue-conditional **ChatGPT Images** entry uses the site's Create image tool, saves page-owned image blobs as local PNG/JPEG/WebP files under `~/.config/magpie/chatgpt-web-artifacts`, and returns local Markdown paths. That workflow creates a saved ordinary chat because Temporary Chat disables Create image. Video generation, web search, canvas, voice and quota display are not provided. Every catalogue model keeps `toolcall: false`, `reasoning: false` and `temperature: false`; request-level client-tool emulation is separate. Context and output limits of 200,000 and 34,834 are planning values, not verified subscription or generation guarantees. Usage is estimated from characters, not measured tokens or account quota.
 

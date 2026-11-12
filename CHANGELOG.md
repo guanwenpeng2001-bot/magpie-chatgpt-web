@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 — 2026-11-12
+
+- Stream translated frames as the browser turn produces them. The previous loader buffered every backend frame before returning an SSE response, which left Codex with only gateway keepalives and caused 300-second cancellations before the first model or tool event.
+
 ## 0.4.2 — 2026-11-12
 
 - Hand the completed sign-in Chrome context directly to the chat driver instead of closing it and starting a second process. The next visible turn reuses the same browser instance and account profile.

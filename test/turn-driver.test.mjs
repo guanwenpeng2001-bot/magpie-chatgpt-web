@@ -100,6 +100,24 @@ test('visible browser turns read the rendered answer without parsing hidden inte
   } finally { await h.driver.close(); }
 });
 
+test('browser observation emits incremental assistant deltas before finish', async () => {
+  const h = harness({
+    observe: async (page, { emit }) => {
+      await emit({ event: 'answer', data: { text: 'incremental ' } });
+      await emit({ event: 'answer', data: { text: 'answer' } });
+      return { text: 'incremental answer', route: 'dom' };
+    },
+  });
+  try {
+    const { frames } = await h.complete(command({ visibleTurns: true }));
+    assert.deepEqual(frames, [
+      { type: 'delta', index: 0, text: 'incremental ' },
+      { type: 'delta', index: 0, text: 'answer' },
+      { type: 'finish', reason: 'complete' },
+    ]);
+  } finally { await h.driver.close(); }
+});
+
 test('request-only catalogue IDs reach the page harvester with their exact original model', async () => {
   const h = harness();
   try {

@@ -21,7 +21,7 @@ test('unknown slugs remain available and capabilities require explicit evidence'
 
 test('published source has no placeholder domain and declares emulated wire honestly', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(pkg.version, '0.4.2');
+  assert.equal(pkg.version, '0.4.3');
   async function inspect(url) {
     const entries = await readdir(url, { withFileTypes: true });
     for (const entry of entries) {

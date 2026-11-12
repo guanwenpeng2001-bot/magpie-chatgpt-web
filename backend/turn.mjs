@@ -67,6 +67,20 @@ export class TurnDriver {
     const abort = () => { void stopPage(); interrupt(activeSignal.reason); };
     activeSignal.addEventListener('abort', abort, { once: true });
     const wait = work => Promise.race([work, interrupted]);
+    let streamedText = '';
+    let streamed = false;
+    const emitObservation = async observation => {
+      let next;
+      if (observation.event === 'dom' && typeof observation.data?.text === 'string') next = observation.data.text;
+      else if (observation.event === 'answer' && typeof observation.data?.text === 'string') next = streamedText + observation.data.text;
+      else return;
+      if (!next.startsWith(streamedText)) return;
+      const delta = next.slice(streamedText.length);
+      if (!delta) return;
+      streamedText = next;
+      streamed = true;
+      await emit({ type: 'delta', index: 0, text: delta });
+    };
     try {
       activeSignal.throwIfAborted();
       release = await guard.begin(activeSignal);
@@ -112,10 +126,14 @@ export class TurnDriver {
         activeSignal.throwIfAborted();
         await wait(composer.press('Enter'));
         if (imageMode) return await wait(this.adapter.readGeneratedImages(page, { baseline: imageBaseline, budget: Math.max(1, deadline - this.now()), artifactRoot: this.artifactRoot, signal: activeSignal }));
-        return await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: async () => {} }));
+        return await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: emitObservation }));
       }, activeSignal, { visibleTurns: command.visibleTurns, auth: command.auth, origin: this.origin }));
       activeSignal.throwIfAborted();
-      await wait(emit({ type: 'delta', index: 0, text: result.text }));
+      if (!streamed) {
+        await wait(emit({ type: 'delta', index: 0, text: result.text }));
+      } else if (result.text.startsWith(streamedText) && result.text.length > streamedText.length) {
+        await wait(emit({ type: 'delta', index: 0, text: result.text.slice(streamedText.length) }));
+      }
       await wait(emit({ type: 'finish', reason: 'complete' }));
       activeSignal.throwIfAborted();
       this.bindings.finish(binding, command, result.text);
