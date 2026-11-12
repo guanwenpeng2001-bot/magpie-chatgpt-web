@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectionPlans, unsupportedModels } from '../backend/site-adapter/compatibility.mjs';
+import { selectionPlans, unsupportedModels, wireModels, workModels } from '../backend/site-adapter/compatibility.mjs';
 import { selectModel } from '../backend/site-adapter/index.mjs';
 import { describeCatalogue } from '../src/models.mjs';
 import { requestShape } from '../src/loader.mjs';
 
 test('audited catalogue entries have distinct mapped or explicitly unsupported outcomes', async () => {
   assert.equal(Object.keys(selectionPlans).length, 8);
-  assert.equal(Object.keys(unsupportedModels).length, 15);
+  assert.equal(Object.keys(workModels).length, 8);
+  assert.equal(Object.keys(wireModels).length, 4);
+  assert.equal(Object.keys(unsupportedModels).length, 3);
   for (const slug of Object.keys(unsupportedModels)) {
     assert.equal(Object.hasOwn(selectionPlans, slug), false);
     assert.match(describeCatalogue({ models: [{ slug, title: 'Fixture' }] })[slug].name, /not yet supported/);

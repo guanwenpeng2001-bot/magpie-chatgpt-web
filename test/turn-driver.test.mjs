@@ -97,6 +97,19 @@ test('visible browser turns read the rendered answer without parsing hidden inte
   } finally { await h.driver.close(); }
 });
 
+test('Work models initialize the saved-task surface and never masquerade as temporary chats', async () => {
+  let initialized = 0;
+  const h = harness({ adapter: {
+    initializeWorkPage: async () => { initialized++; },
+    assertTemporaryChat: async () => assert.fail('Work must not claim temporary-chat semantics'),
+  } });
+  try {
+    await h.complete(command({ model: 'gpt-6-luna-wm' }));
+    assert.equal(initialized, 1);
+    assert.deepEqual(h.calls.find(call => Array.isArray(call) && call[0] === 'network'), ['network', false]);
+  } finally { await h.driver.close(); }
+});
+
 for (const [kind, code, detail] of [
   ['picker-missing', 'pickerMissing', { component: 'picker', selector: '[picker]', adapterVersion: 'fixture' }],
   ['picker-ambiguous', 'pickerAmbiguous', { slug: 'model', count: 2 }],

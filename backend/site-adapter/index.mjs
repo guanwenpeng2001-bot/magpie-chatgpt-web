@@ -1,7 +1,11 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ADAPTER_VERSION, shape } from './selectors.mjs';
 import { BackendError } from '../guard.mjs';
-import { selectionPlans, unsupportedModels } from './compatibility.mjs';
+import { selectionPlans, unsupportedModels, workModels, wireModels } from './compatibility.mjs';
+import { selectWorkModel } from './work.mjs';
+export { initializeWorkPage, stopWork } from './work.mjs';
+import { IMAGE_MODEL, selectImageTool } from './images.mjs';
+export { initializeImagePage, readGeneratedImages } from './images.mjs';
 
 const visible = (page, selector) => page.locator(selector).filter({ visible: true });
 function failure(kind, detail) {
@@ -12,6 +16,13 @@ function failure(kind, detail) {
 
 export async function selectModel(page, slug) {
   if (slug === 'auto') return { ok: true };
+  if (Object.hasOwn(wireModels, slug)) return selectModel(page, wireModels[slug].uiModel);
+  if (slug === IMAGE_MODEL) {
+    const instant = await selectModel(page, 'gpt-6-instant');
+    if (!instant.ok) return instant;
+    return selectImageTool(page);
+  }
+  if (Object.hasOwn(workModels, slug)) return selectWorkModel(page, slug);
   if (Object.hasOwn(unsupportedModels, slug)) return failure('model-unsupported', { slug });
   const plan = Object.hasOwn(selectionPlans, slug) ? selectionPlans[slug] : undefined;
   const choose = async entries => {

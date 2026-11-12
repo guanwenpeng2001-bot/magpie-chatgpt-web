@@ -42,6 +42,7 @@ export const errors = Object.freeze({
   modelUnsupported: { status: 400, template: 'The plugin cannot select {slug} in the current ChatGPT page yet. This does not indicate missing account access.' },
   modelNotOffered: { status: 400, template: '{slug} is not offered to this ChatGPT account. Pick one of the listed models; refresh the model list if the account changed.' },
   attachmentUnsupported: { status: 400, template: 'This message contains {kind}, which chatgpt-web cannot send. Remove it and retry. Images are supported up to {maxCount} files / {maxBytes} each.' },
+  imageOutput: { status: 502, template: 'The generated image could not be saved locally. Open the saved chat in ChatGPT to retrieve it.' },
   imageRejected: { status: 502, template: 'ChatGPT refused the image upload ({detail}). Retry; if it persists, send the message without the image.' },
 });
 

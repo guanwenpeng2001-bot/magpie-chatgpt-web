@@ -43,7 +43,9 @@ export class Bridge {
   }
   async #launch() {
     const env = {};
-    for (const key of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LOCALAPPDATA']) if (process.env[key]) env[key] = process.env[key];
+    for (const key of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LOCALAPPDATA', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'MAGPIE_HTTPS_PROXY', 'MAGPIE_HTTP_PROXY', 'MAGPIE_ALL_PROXY']) {
+      if (process.env[key] !== undefined) env[key] = process.env[key];
+    }
     let child;
     try { child = this.spawnProcess('node', [this.backend], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env }); }
     catch { throw new BackendError('backendDown'); }

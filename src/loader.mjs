@@ -66,7 +66,7 @@ export function makeLoader({ bridge, profileRoot, input }) {
           upstream?.close();
           const error = failure instanceof BackendError ? failure : new BackendError('upstream');
           if (preflight) {
-            try { await input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'error', message: 'preflightRejected ' + JSON.stringify(requestShape(request, error.code)) } }); } catch {}
+            try { await input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'error', message: 'preflightRejected ' + JSON.stringify(requestShape(request, error.code, error.diagnostic)) } }); } catch {}
           }
           return Response.json({ error: error.toJSON() }, { status: error.status, headers: error.headers });
         }
@@ -76,7 +76,7 @@ export function makeLoader({ bridge, profileRoot, input }) {
 }
 
 // Structural diagnostics only: never record prompts, schemas, tool names or credentials.
-export function requestShape(request, code) {
+export function requestShape(request, code, definitionFailure) {
   const schemaKeys = new Set();
   let nodes = 0;
   const walk = (value, depth = 0) => {
@@ -88,7 +88,7 @@ export function requestShape(request, code) {
   };
   const tools = Array.isArray(request?.tools) ? request.tools : [];
   for (const tool of tools) walk(tool?.input_schema ?? tool?.function?.parameters);
-  return { code, hasModel: typeof request?.model === 'string', messagesArray: Array.isArray(request?.messages),
+  return { code, definitionFailure, hasModel: typeof request?.model === 'string', messagesArray: Array.isArray(request?.messages),
     messageCount: request?.messages?.length ?? null, roles: [...new Set((Array.isArray(request?.messages) ? request.messages : []).map(m => ['user','assistant','system','tool'].includes(m?.role) ? m.role : 'other'))],
     contentTypes: [...new Set((Array.isArray(request?.messages) ? request.messages : []).flatMap(m => Array.isArray(m?.content) ? m.content.map(b => ['text','image','tool_use','tool_result','thinking','redacted_thinking','tool_reference'].includes(b?.type) ? b.type : 'other') : [typeof m?.content]))],
     toolCount: tools.length, missingInputSchemas: tools.filter(t => !t?.input_schema).length,

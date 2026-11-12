@@ -15,8 +15,8 @@ export function installHarvest() {
     run.pending = run.pending.then(() => window.__chatgptHarvestEvent({ turn: run.id, ...value })).catch(error => { run.failed ||= describeCause(error); });
   };
   const state = window.__chatgptHarvest = {
-    start(id, network = true) {
-      active = { id, network, pending: Promise.resolve(), readers: new Set(), baseline: new Set([...document.querySelectorAll(assistantSelector), ...document.querySelectorAll(legacySelector)]) };
+    start(id, network = true, model) {
+      active = { id, network, model: typeof model === 'string' ? model : undefined, pending: Promise.resolve(), readers: new Set(), baseline: new Set([...document.querySelectorAll(assistantSelector), ...document.querySelectorAll(legacySelector)]) };
     },
     stop() {
       const run = active;
@@ -72,9 +72,27 @@ export function installHarvest() {
     finally { run.readers.delete(reader); reader.cancel().catch(() => {}); }
   }
   const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
+  window.fetch = async function (...originalArgs) {
     const run = active;
-    const relevant = run && conversation(args[0]);
+    const relevant = run && conversation(originalArgs[0]);
+    let args = originalArgs;
+    if (relevant && run.model) {
+      try {
+        const [input, init] = originalArgs;
+        if (init && typeof init.body === 'string') {
+          const body = JSON.parse(init.body);
+          if (typeof body.model !== 'string') throw new Error('No JSON model field');
+          args = [input, { ...init, body: JSON.stringify({ ...body, model: run.model }) }];
+        } else if (input instanceof Request && (!init || init.method?.toUpperCase() !== 'GET')) {
+          const body = await input.clone().json();
+          if (typeof body.model !== 'string') throw new Error('No JSON model field');
+          args = [new Request(input, { body: JSON.stringify({ ...body, model: run.model }) }), init];
+        } else throw new Error('Unsupported request body');
+      } catch (error) {
+        send({ kind: 'failure', code: 'protocol', cause: describeCause(error) });
+        throw error;
+      }
+    }
     let response;
     try { response = await originalFetch.apply(this, args); }
     catch (error) { if (relevant && active === run) send({ kind: 'failure', code: 'upstream', cause: describeCause(error) }); throw error; }

@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns are visible by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.3.2`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.4.0`. Host verified against: magpie `0.1.1247` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Requirements and installation
 
@@ -66,9 +66,9 @@ Browser state is a sensitive login artifact. Use a trusted workstation and never
 
 ## Models, images and delivery
 
-The inline model picker is supported, including GPT-5.6 and GPT-6 default/Instant/Thinking/Pro selection with family and effort verification before Send. See [the full model audit](MODEL_SUPPORT.md) for all 23 catalogue IDs. Known unsupported entries are marked `[not yet supported]` and fail as `modelUnsupported`, not as an account-permission claim. The model list comes from the signed-in account's full catalogue. Unknown slugs remain listed and are attempted; compatibility annotations are not an allowlist. Listing a model does not prove entitlement, picker compatibility or successful generation. Refresh the list after changing accounts. Duplicate mini-model titles include their slug to distinguish them.
+The inline model picker is supported, including GPT-5.6 and GPT-6 default/Instant/Thinking/Pro selection with family and effort verification before Send. The 23-entry catalogue also contains eight Work models, four request-only mini/experimental IDs, and three entries that this account's current web surface cannot complete. Work models use the separate saved-task surface and never claim Temporary Chat semantics. Request-only IDs select a verified ordinary model as their UI bridge, then replace only the submitted JSON `model` field with the exact original ID. See [the full model audit](MODEL_SUPPORT.md). The three unsupported entries are marked `[not yet supported]` and fail as `modelUnsupported`, not as an account-permission claim.
 
-Image input is supported up to **4 images / 10 MiB each**; non-image attachments and over-cap input are rejected before submission. A model advertises image input only when verified for that model. Every model keeps `toolcall: false`, `reasoning: false` and `temperature: false`. Reasoning controls/traces, native tool calling, web search, canvas, image generation, voice and quota display are not provided. Context and output limits of 200,000 and 34,834 are planning values, not verified subscription or generation guarantees. Usage is estimated from characters, not measured tokens or account quota.
+Image input is supported up to **4 images / 10 MiB each**; non-image attachments and over-cap input are rejected before submission. The catalogue-conditional **ChatGPT Images** entry uses the site's Create image tool, saves page-owned image blobs as local PNG/JPEG/WebP files under `~/.config/magpie/chatgpt-web-artifacts`, and returns local Markdown paths. That workflow creates a saved ordinary chat because Temporary Chat disables Create image. Video generation, web search, canvas, voice and quota display are not provided. Every catalogue model keeps `toolcall: false`, `reasoning: false` and `temperature: false`; request-level client-tool emulation is separate. Context and output limits of 200,000 and 34,834 are planning values, not verified subscription or generation guarantees. Usage is estimated from characters, not measured tokens or account quota.
 
 The provider declares `npm: '@ai-sdk/anthropic'` for **Anthropic-wire emulation**: magpie sends Messages-shaped requests and receives translated responses. Requests are served through the ChatGPT web session, not the Anthropic service; this declaration does not establish native Anthropic semantics or capabilities.
 
@@ -76,7 +76,9 @@ Visible browser turns read only the rendered DOM answer, so hidden intermediate 
 
 ## Release verification status
 
-For 0.3.2, all eight mapped model IDs passed live UI selection checks, and GPT-6 Pro completed a live source-backend turn. [MODEL_SUPPORT.md](MODEL_SUPPORT.md) covers every one of the 23 catalogue entries. The Claude Desktop 400 report is a separate request/tool-schema compatibility investigation; no full Claude Desktop tool workflow is claimed as verified.
+For 0.4.0, ordinary GPT-6 Pro and GPT-5.6 Pro completed live source-backend turns; all eight Work IDs passed live UI selection checks and GPT-6 Luna Work completed a live saved-task turn. GPT-5.6 mini, GPT-5.6 Thinking mini and both experimental catalogue IDs passed live request-override and DOM-completion checks after their browser bundles were installed. ChatGPT Images generated and saved a valid PNG through the source backend. A representative 36-tool Claude-shaped request completed both through the source backend and the real Magpie `/v1/messages` route with HTTP 200 and the requested `tool_use`.
+
+The larger Claude Desktop catalogue seen in logs contains up to 255 tools; a unit regression now accepts up to 256. This does not claim that every Claude Desktop tool workflow succeeds: client-specific limits, research, browser/computer tools and site-side behavior remain outside the verified scope.
 
 For 0.3.1, two consecutive live `auto` turns completed through both the source backend and the installed backend on Windows, returning `BROWSER_OK_1` and `BROWSER_OK_2` over the DOM route without a manual verification click. Explicit `gpt-5-6-pro` selection also completed a live source-backend turn. The final automated suite passed 600 tests; its one default skip, the real-Chrome launch gate, passed separately. Visible turns use DOM-only observation after earlier stream-based probes exposed empty/hidden intermediate responses. These are short functional checks, not a guarantee against future site verification or a benchmark; other accounts and model families remain unverified. Historical acceptance records below describe the earlier build, not the current browser-session checks.
 
@@ -137,12 +139,13 @@ Each row names a public error code, its condition and an action the user can tak
 | `modelNotOffered` | The requested slug is not offered to this account. | Pick a listed model; refresh the model list if the account changed. |
 | `attachmentUnsupported` | Input is not an image or exceeds 4 images / 10 MiB each. | Remove unsupported or excess files, reduce image size, then retry. |
 | `imageRejected` | ChatGPT refused an image upload. | Retry; if it persists, send the message without the image. |
+| `imageOutput` | A generated image was present in the page but could not be saved locally. | Open the saved chat in ChatGPT and retrieve the image; Retry after updating the plugin. |
 
 ## Dormant prompt-level tool emulation
 
 The dormant emulation layer is retained for explicitly supplied client tools and verification; no advertised model has passed the tool-compliance bar. It asks for nonce-delimited JSON in ordinary model text, validates it and renders synthetic `tool_use` blocks. It never executes tools and is not a native tool channel. Argument objects arrive in one `input_json_delta`; the wire format makes no promise about live answer cadence. Tool history preserves IDs, results and error flags as text in a fresh temporary conversation.
 
-The bounded schema subset supports boolean child schemas, `type` unions, `const`, `enum`, `properties`, `required`, `additionalProperties`, `items`, `uniqueItems`, `allOf`, `anyOf`, `oneOf`, `not`, local `$ref`, `$defs`, `definitions`, numeric bounds, length bounds, property-count bounds and item-count bounds. `title`, `description`, `default`, `examples` and `$comment` are annotations. Other keywords, including `$schema`, `pattern`, `format`, remote references, conditionals and tuple schemas, are rejected. Preflight is limited to 10,000 nodes and depth 32, validation to 100,000 operations and depth 32, each call to 1 MiB JSON, and each request to 128 tools.
+The bounded schema subset supports boolean child schemas, `type` unions, `const`, `enum`, `properties`, `required`, `additionalProperties`, `items`, `uniqueItems`, `allOf`, `anyOf`, `oneOf`, `not`, local `$ref`, `$defs`, `definitions`, numeric bounds, length bounds, property-count bounds and item-count bounds. `title`, `description`, `default`, `examples`, `$comment`, `$schema` and `format` are annotations. `pattern` is validated as an ECMA-262 regular expression with a bounded per-value timeout. Other keywords, remote references, conditionals and tuple schemas are rejected. Preflight is limited to 10,000 nodes and depth 32, validation to 100,000 operations and depth 32, each call to 1 MiB JSON, and each request to 256 tools. Trailing `system` messages are merged into the system prompt; a request with no user or assistant message remains invalid.
 
 Invalid definitions fail before dispatch. Streaming failures produce an error event without a successful `message_stop`. A successful text reply does not prove tool compliance.
 

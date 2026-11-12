@@ -14,6 +14,7 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
   let domObserved = false;
   let domBehind = false;
   let harvestFailure;
+  let emptyCompletions = 0;
   const log = data => emit({ event: 'log', data });
   const publish = async (next, source) => {
     if (source === 'sse' && domObserved) return;
@@ -81,11 +82,15 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
     const domComplete = state.complete && snapshot.nodes > 0;
     const streamComplete = !streamFailed && !stream.handedOff && !partial && !domBehind && stream.complete;
     if (domComplete || streamComplete) {
-      if (!text.trim()) throw new BackendError('empty');
-      await emit({ event: '', data: { type: 'message_stream_complete' } });
-      return { text, route: route(), ...(degraded ? { degraded } : {}) };
-    }
-    if (eof && !streamFailed && !stream.handedOff && !domObserved) throw new BackendError('truncated');
+      if (text.trim()) {
+        await emit({ event: '', data: { type: 'message_stream_complete' } });
+        return { text, route: route(), ...(degraded ? { degraded } : {}) };
+      }
+      // Terminal state can render before its text child. Confirm an empty
+      // result on the next normal observation rather than failing that frame.
+      if (++emptyCompletions >= 2) throw new BackendError('empty');
+    } else emptyCompletions = 0;
+    if (eof && !streamFailed && !stream.handedOff && !domObserved && !emptyCompletions) throw new BackendError('truncated');
     await delay(Math.min(500, Math.max(0, deadline - Date.now())), undefined, { signal });
   }
   throw harvestFailure ?? new BackendError('truncated');
