@@ -161,6 +161,9 @@ function compactSchemaForPrompt(schema, level, depth = 0) {
   if (schema.items !== undefined) summary.items = compactSchemaForPrompt(schema.items, level, depth + 1);
   for (const key of ['$ref', '$defs', 'definitions', 'allOf', 'anyOf', 'oneOf', 'not']) {
     if (schema[key] === undefined) continue;
+    // Compaction can remove any target (depth, union or definition limits).
+    // References are validation-only in the abbreviated prompt schema.
+    if (key === '$ref') continue;
     if (level >= 3 && ['$defs', 'definitions', 'allOf', 'anyOf', 'oneOf', 'not'].includes(key)) continue;
     if (Array.isArray(schema[key])) {
       summary[key] = schema[key].slice(0, 64).map(child => compactSchemaForPrompt(child, level, depth + 1));
@@ -168,7 +171,7 @@ function compactSchemaForPrompt(schema, level, depth = 0) {
       summary[key] = Object.fromEntries(
         Object.entries(schema[key]).slice(0, 64).map(([name, child]) => [name, compactSchemaForPrompt(child, level, depth + 1)]),
       );
-    } else summary[key] = schema[key];
+    } else summary[key] = compactSchemaForPrompt(schema[key], level, depth + 1);
   }
   return summary;
 }
@@ -274,13 +277,19 @@ export function normalizeAssistantContent(prepared, text) {
   if (!prepared?.tools?.length) return text;
   const parser = new ToolParser(prepared);
   const content = [];
+  let calls = 0;
+  const choice = prepared.toolChoice ?? prepared.choice ?? { type: 'auto' };
   for (const item of parser.items(text, true)) {
     if (item.text) content.push(item.text);
-    else if (item.tool) content.push(`[Previous tool call]\n${JSON.stringify({
+    else if (item.tool) {
+      if (++calls > 1 && choice.disable_parallel_tool_use) throw new BackendError('toolParallel');
+      content.push(`[Previous tool call]\n${JSON.stringify({
       id: item.tool.id,
       name: item.tool.name,
       input: item.tool.input,
-    })}`);
+      })}`);
+    }
   }
+  if (['any', 'tool'].includes(choice.type) && !calls) throw new BackendError('toolRequired');
   return content.join('\n');
 }

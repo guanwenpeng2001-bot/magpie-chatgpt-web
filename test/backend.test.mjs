@@ -4,6 +4,7 @@ import { PassThrough } from 'node:stream';
 import { serve } from '../backend/main.mjs';
 import { BackendError } from '../backend/guard.mjs';
 import { LoginStates } from '../backend/browser.mjs';
+import { Conversations } from '../backend/conversations.mjs';
 
 function harness(options) {
   const input = new PassThrough();
@@ -29,6 +30,35 @@ function harness(options) {
     },
   };
 }
+
+test('session-token rotation preserves conversation ownership, other profiles stay isolated', async t => {
+  const bindings = new Conversations();
+  const resumes = [];
+  const server = harness({
+    readClient: options => ({ guard: options.guard, credential: options.cookie }),
+    turnDriver: { async complete(command, guard, identity, signal, emit) {
+      const taken = await bindings.take(command, identity);
+      resumes.push(taken.resumeFrom);
+      taken.page = { isClosed: () => false, close: async () => {} };
+      bindings.finish(taken, command, 'answer');
+      await emit({ type: 'delta', index: 0, text: 'answer' });
+      await emit({ type: 'finish', reason: 'complete' });
+    }, close: async () => bindings.close() },
+  });
+  t.after(async () => { server.input.end(); await server.work; });
+  const history = [{ role: 'user', content: 'first' }];
+  for (const [id, token, profile] of [['first', 'old', 'profile-a'], ['rotated', 'new', 'profile-a'], ['other', 'new', 'profile-b']]) {
+    server.send({ id, method: 'complete', profileRoot: '/fixture', model: 'auto', system: '', conversationKey: 'stable', history: [...history],
+      auth: { refresh: `__Secure-next-auth.session-token=${token}`, profile, accountId: 'fixture@example.test' } });
+    await server.until(frames => frames.some(frame => frame.id === id && ['done', 'error'].includes(frame.event)));
+    if (id !== 'other') {
+      assert.equal(server.frames.some(frame => frame.id === id && frame.event === 'error'), false);
+      history.push({ role: 'assistant', content: 'answer' }, { role: 'user', content: 'next' });
+    }
+  }
+  assert.deepEqual(resumes, [0, 2]);
+  assert.equal(server.frames.find(frame => frame.id === 'other' && frame.event === 'error').error.status, 409);
+});
 
 test('model dispatch passes access tokens and replaces clients after token renewal', async t => {
   const tokens = [];

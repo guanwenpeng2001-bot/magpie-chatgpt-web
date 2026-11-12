@@ -12,38 +12,33 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
   let layout;
   let streamFailed = false;
   let domObserved = false;
-  let domBehind = false;
+  let streamStarted = false;
+  let streamEnded = false;
+  let partial = false;
   let harvestFailure;
   let emptyCompletions = 0;
   const log = data => emit({ event: 'log', data });
   const publish = async (next, source) => {
-    if (source === 'sse' && domObserved && !(stream.text.startsWith(text) && stream.text.length > text.length)) return;
     if (source === 'dom') {
       domObserved = true;
-      domBehind ||= next.length < stream.text.length;
     }
     carrier = source;
     if (next === text) return;
-    const delta = source === 'dom' ? next : next.slice(text.length);
+    const append = source === 'sse' && next.startsWith(text);
+    const delta = append ? next.slice(text.length) : next;
     text = next;
-    await emit(source === 'dom' ? { event: 'dom', data: { text } } : { event: 'answer', data: { text: delta } });
+    await emit(append ? { event: 'answer', data: { text: delta } } : { event: 'dom', data: { text, source } });
   };
   const route = () => streamFailed || stream.handedOff ? 'dom' : carrier;
-  while (Date.now() < deadline) {
-    signal?.throwIfAborted();
-    if (page.isClosed()) throw new BackendError('browserClosed');
-    const error = await adapter.probePageError(page);
-    if (error?.kind === 'challenge') throw new BackendError('verification');
-    if (error?.kind === 'rate-limit') throw new BackendError('cooldown', { retryAfter: guard.observe(429) });
-    if (error?.kind === 'sign-in') { guard.observe(401); throw new BackendError('expired'); }
-    if (run.failure) throw run.failure;
+  const drain = async () => {
     let eof = false;
-    let partial = false;
     for (const item of run.queue.splice(0)) {
+      if (item.kind === 'status' || item.kind === 'frame') streamStarted = true;
       if (item.kind === 'status' && (item.status < 200 || item.status >= 300)) throw responseFailure(item.status, item, guard, item.retryAfter);
       if (item.kind === 'eof') {
         partial ||= item.partial;
         eof = true;
+        streamEnded = true;
       }
       if (item.kind === 'fallback') {
         degraded = { clone: 'clone-unavailable', xhr: 'xhr-submit', disabled: 'network-disabled' }[item.reason];
@@ -67,8 +62,20 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
         }
       }
     }
+    return eof;
+  };
+  while (Date.now() < deadline) {
+    signal?.throwIfAborted();
+    if (page.isClosed()) throw new BackendError('browserClosed');
+    const error = await adapter.probePageError(page);
+    if (error?.kind === 'challenge') throw new BackendError('verification');
+    if (error?.kind === 'rate-limit') throw new BackendError('cooldown', { retryAfter: guard.observe(429) });
+    if (error?.kind === 'sign-in') { guard.observe(401); throw new BackendError('expired'); }
+    if (run.failure) throw run.failure;
+    let eof = await drain();
     const state = await adapter.completionState(page);
     const snapshot = await page.evaluate(layout => window.__chatgptHarvest.snapshot(layout), state.layout);
+    domObserved ||= Boolean(snapshot.text);
     if (state.layout !== layout) {
       layout = state.layout;
       await log({ kind: 'observationLayout', layout });
@@ -78,14 +85,21 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
       streamFailed = true;
       await log({ kind: 'observationFailure', code: 'harvest', cause: snapshot.failed });
     }
-    if (!streamFailed && !domObserved) await publish(stream.text, 'sse');
-    if (snapshot.text) await publish(snapshot.text, 'dom');
+    // Harvest delivery may arrive while DOM reads are awaited. Reconcile it
+    // before accepting that snapshot's terminal state or publishing its text.
+    if (run.queue.length) eof = (await drain()) || eof;
+    const healthy = !streamFailed && !stream.handedOff;
+    const activeStream = healthy && streamStarted && !streamEnded && !stream.complete;
     const domComplete = state.complete && snapshot.nodes > 0;
-    const streamComplete = !streamFailed && !stream.handedOff && !partial && !domBehind && stream.complete;
-    if (domComplete || streamComplete) {
-      if (domComplete && !streamFailed && stream.text.startsWith(text) && stream.text.length > text.length) {
-        await publish(stream.text, 'sse');
-      }
+    // While the network owns this answer, DOM markdown rendering cannot replace
+    // its text or finish the turn. Full snapshots preserve un-emitted revisions.
+    if (healthy && stream.text) await publish(stream.text, 'sse');
+    else if (!activeStream && snapshot.text && (!run.networkExpected || !healthy || streamEnded || domComplete)) await publish(snapshot.text, 'dom');
+    const streamComplete = healthy && !partial && stream.complete;
+    if (streamComplete || (domComplete && !activeStream)) {
+      if (healthy && stream.complete && !partial && stream.text) {
+        await publish(stream.text, snapshot.text === stream.text ? 'dom' : 'sse');
+      } else if (snapshot.text) await publish(snapshot.text, 'dom');
       if (text.trim()) {
         await emit({ event: '', data: { type: 'message_stream_complete' } });
         return { text, route: route(), ...(degraded ? { degraded } : {}) };

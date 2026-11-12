@@ -11,7 +11,7 @@ import { wireModels, workSelectionPlans } from './site-adapter/compatibility.mjs
 import { IMAGE_MODEL } from './site-adapter/images.mjs';
 import { observeTurn } from './observe.mjs';
 import { compile } from './prompt.mjs';
-import { normalizeAssistantContent } from '../src/tool-emulation.mjs';
+import { normalizeAssistantContent, ToolParser } from '../src/tool-emulation.mjs';
 
 const challengeText = new RegExp(shape.challengeCard, 'i');
 
@@ -84,18 +84,26 @@ export class TurnDriver {
     activeSignal.addEventListener('abort', abort, { once: true });
     const wait = work => Promise.race([work, interrupted]);
     let streamedText = '';
-    let streamed = false;
+    let observedText = '';
     const emitObservation = async observation => {
       let next;
       if (observation.event === 'dom' && typeof observation.data?.text === 'string') next = observation.data.text;
-      else if (observation.event === 'answer' && typeof observation.data?.text === 'string') next = streamedText + observation.data.text;
+      else if (observation.event === 'answer' && typeof observation.data?.text === 'string') next = observedText + observation.data.text;
       else return;
       if (challengeText.test(next)) return;
-      if (!next.startsWith(streamedText)) return;
+      observedText = next;
+      // The client cannot retract text. Hold every envelope (including a split
+      // opening marker) until the canonical final answer has been validated.
+      if (command.tools?.length) {
+        const parser = new ToolParser(command);
+        const marker = next.indexOf(command.start);
+        parser.feed(marker >= 0 ? next.slice(0, marker + command.start.length) : next);
+        next = marker >= 0 ? next.slice(0, marker) : next.slice(0, next.length - parser.buffer.length);
+      }
+      if (!next.startsWith(streamedText)) throw new BackendError('protocol');
       const delta = next.slice(streamedText.length);
       if (!delta) return;
       streamedText = next;
-      streamed = true;
       await emit({ type: 'delta', index: 0, text: delta });
     };
     try {
@@ -232,6 +240,7 @@ export class TurnDriver {
           }
         };
         const startHarvest = async () => {
+          run.networkExpected = this.network && !command.visibleTurns && !workMode && !imageMode;
           this.turns.set(page, run);
           await wait(page.evaluate(({ id, network, model }) => window.__chatgptHarvest.start(id, network, model), {
             id: run.id, network: this.network && !command.visibleTurns && !workMode && !imageMode, model: wireModel,
@@ -241,21 +250,22 @@ export class TurnDriver {
         const repairIncompleteAction = async result => {
           if (!command.tools?.length || typeof command.start !== 'string' || typeof command.end !== 'string' ||
               command.toolChoice?.type === 'none' ||
-              typeof result?.text !== 'string' || result.text.trim() !== command.start) return undefined;
+              typeof result?.text !== 'string') return undefined;
+          const parser = new ToolParser(command);
+          parser.feed(result.text);
+          if (!parser.inside || parser.jsonEnd >= 0) return undefined;
+          const prefix = result.text.slice(0, result.text.length - parser.buffer.length - command.start.length);
           const names = (command.promptTools ?? command.tools).map(tool => tool.name).join(', ');
           for (let attempt = 0; attempt < 2; attempt++) {
             activeSignal.throwIfAborted();
             run = { id: randomUUID(), queue: [] };
-            this.turns.set(page, run);
-            await wait(page.evaluate(({ id, network, model }) => window.__chatgptHarvest.start(id, network, model), {
-              id: run.id, network: this.network && !command.visibleTurns && !workMode && !imageMode, model: wireModel,
-            }));
+            await startHarvest();
             await ensurePageError();
             await waitForOrdinaryReady();
             this.assertResult(await wait(this.adapter.readComposer(page)), command.model);
             const composer = page.locator(shape.composer).filter({ visible: true });
             await wait(composer.fill([
-              'Your previous answer stopped immediately after the opening client-action marker and omitted the required JSON.',
+              'Your previous answer stopped inside a client-action envelope and omitted the required JSON or left it incomplete.',
               'Do not repeat or explain that marker.',
               'Reply now with only one JSON object using one action listed earlier and matching its input_schema.',
               `The allowed action names are: ${names}.`,
@@ -279,13 +289,14 @@ export class TurnDriver {
               }));
             } catch (error) {
               if (activeSignal.aborted) throw error;
+              if (['expired', 'cooldown', 'verification', 'browserClosed'].includes(error?.code)) throw error;
               continue;
             }
             const text = typeof repair?.text === 'string' ? repair.text.trim() : '';
             const first = text.indexOf('{');
             const last = text.lastIndexOf('}');
             if (first < 0 || last <= first) continue;
-            const candidate = `${result.text}${text.slice(first, last + 1)}${command.end}`;
+            const candidate = `${prefix}${command.start}${text.slice(first, last + 1)}${command.end}`;
             try {
               normalizeAssistantContent(command, candidate);
             } catch {
@@ -322,7 +333,9 @@ export class TurnDriver {
               await wait(this.adapter.selectModel(page, command.selectionModel ?? command.model)),
               command.selectionModel ?? command.model,
             );
-            if (command.images?.length) this.assertResult(await wait(this.adapter.attachImages(page, command.images)), command.model);
+            const images = (command.images ?? []).filter((image, index) =>
+              resumeFrom === 0 || (command.imageHistoryIndices?.[index] ?? Infinity) >= resumeFrom);
+            if (images.length) this.assertResult(await wait(this.adapter.attachImages(page, images)), command.model);
             activeSignal.throwIfAborted();
             if (!run) {
               run = { id: randomUUID(), queue: [] };
@@ -350,12 +363,6 @@ export class TurnDriver {
             if (imageMode) return await wait(this.adapter.readGeneratedImages(page, { baseline: imageBaseline, budget: Math.max(1, deadline - this.now()), artifactRoot: this.artifactRoot, signal: activeSignal }));
             const first = await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: emitObservation }));
             const repaired = await wait(repairIncompleteAction(first));
-            if (repaired) {
-              const suffix = repaired.text.slice(first.text.length);
-              if (suffix) await wait(emit({ type: 'delta', index: 0, text: suffix }));
-              streamedText = repaired.text;
-              streamed = true;
-            }
             return repaired ?? first;
           } catch (error) {
             if (error?.code !== 'verification') throw error;
@@ -367,15 +374,15 @@ export class TurnDriver {
         }
       }, activeSignal, { visibleTurns: effectiveVisible, auth: command.auth, origin: this.origin }));
       activeSignal.throwIfAborted();
-      if (!streamed) {
-        await wait(emit({ type: 'delta', index: 0, text: result.text }));
-      } else if (result.text.startsWith(streamedText) && result.text.length > streamedText.length) {
+      const assistantContent = normalizeAssistantContent(command, result.text);
+      if (!result.text.startsWith(streamedText)) throw new BackendError('protocol');
+      if (result.text.length > streamedText.length) {
         await wait(emit({ type: 'delta', index: 0, text: result.text.slice(streamedText.length) }));
       }
       await wait(emit({ type: 'finish', reason: 'complete' }));
       activeSignal.throwIfAborted();
       delete binding.pendingChallenge;
-      this.bindings.finish(binding, command, result.text, normalizeAssistantContent(command, result.text));
+      this.bindings.finish(binding, command, result.text, assistantContent);
       return result;
     } catch (error) {
       let failure = error;

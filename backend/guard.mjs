@@ -15,15 +15,15 @@ const definitions = Object.freeze(Object.fromEntries(Object.entries({
   invalidRequest: [400, 'The request is invalid.'],
   toolDefinition: [400, 'The tool definitions are invalid or use unsupported schema keywords.'],
   toolChoice: [400, 'The tool choice is invalid or names an undefined tool.'],
-  toolUnknown: [400, 'ChatGPT requested an undefined tool.'],
-  toolJSON: [400, 'ChatGPT returned malformed tool-call JSON.'],
-  toolSchema: [400, 'ChatGPT tool arguments do not match the input schema.'],
-  toolChoiceViolation: [400, 'ChatGPT did not follow the requested tool choice.'],
-  toolParallel: [400, 'ChatGPT emitted multiple tool calls when parallel calls were disabled.'],
-  toolIncomplete: [400, 'ChatGPT ended the reply inside an incomplete tool call.'],
-  toolRequired: [400, 'ChatGPT did not produce the required tool call.'],
-  toolDelimiter: [400, 'ChatGPT returned a malformed tool-call delimiter.'],
-  toolLimit: [400, 'The tool call or schema validation exceeded its complexity limit.'],
+  toolUnknown: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT requested an undefined tool.'],
+  toolJSON: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT returned malformed tool-call JSON.'],
+  toolSchema: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT tool arguments do not match the input schema.'],
+  toolChoiceViolation: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT did not follow the requested tool choice.'],
+  toolParallel: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT emitted multiple tool calls when parallel calls were disabled.'],
+  toolIncomplete: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT ended the reply inside an incomplete tool call.'],
+  toolRequired: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT did not produce the required tool call.'],
+  toolDelimiter: [502, 'The tool call, written as text, was cut short by output validation: ChatGPT returned a malformed tool-call delimiter.'],
+  toolLimit: [502, 'The tool call, written as text, was cut short by output validation: The tool call or schema validation exceeded its complexity limit.'],
   binding: [409, 'The conversation belongs to another account or its history was replayed or changed.'],
   temporary: [502, 'Temporary chat could not be confirmed; no message was sent.'],
   pageShape: [502, 'The ChatGPT page or model picker changed; update the plugin.'],
@@ -48,6 +48,10 @@ const definitions = Object.freeze(Object.fromEntries(Object.entries({
 }).map(([code, entry]) => [code, Object.freeze(entry)])));
 
 export const errorTable = definitions;
+
+// Magpie gateway/routing.go cutWords -> failCut -> restAfterMarked(By: off).
+// 'kept' alone only protects sign-in state (provider/plugins.go), not cooldowns.
+const outputErrors = new Set(['toolUnknown', 'toolJSON', 'toolSchema', 'toolChoiceViolation', 'toolParallel', 'toolIncomplete', 'toolRequired', 'toolDelimiter', 'toolLimit']);
 
 function renderMessage(template, values) {
   return values ? template.replace(/\{(\w+)\}/g, (slot, key) => (Object.hasOwn(values, key) ? values[key] : slot)) : template;
@@ -83,6 +87,7 @@ export class BackendError extends Error {
     const clean = new BackendError(this.code, { retryAfter: this.retryAfter, values: this.#values });
     return {
       status: clean.status,
+      ...(outputErrors.has(clean.code) ? { code: clean.code } : {}),
       message: clean.message,
       ...(clean.#values ? { code: this.code, values: { ...clean.#values } } : {}),
       ...(clean.retryAfter ? { retryAfter: clean.retryAfter } : {}),
@@ -91,10 +96,11 @@ export class BackendError extends Error {
   }
   get headers() {
     const clean = this.toJSON();
-    return { ...(clean.signIn ? { 'x-magpie-sign-in': clean.signIn } : {}), ...(clean.retryAfter ? { 'retry-after': clean.retryAfter } : {}) };
+    return { ...(clean.signIn ? { 'x-magpie-sign-in': clean.signIn } : outputErrors.has(this.code) ? { 'x-magpie-sign-in': 'kept' } : {}), ...(clean.retryAfter ? { 'retry-after': clean.retryAfter } : {}) };
   }
   static fromEnvelope(envelope) {
-    if (typeof envelope?.code === 'string' && Object.hasOwn(definitions, envelope.code) && envelope.values && typeof envelope.values === 'object' && !Array.isArray(envelope.values)) {
+    if (typeof envelope?.code === 'string' && Object.hasOwn(definitions, envelope.code) &&
+        (!slotValues(envelope.code).length || envelope.values && typeof envelope.values === 'object' && !Array.isArray(envelope.values))) {
       try {
         return new BackendError(envelope.code, { retryAfter: envelope.retryAfter, values: envelope.values });
       } catch { /* fall through to the template-match path */ }

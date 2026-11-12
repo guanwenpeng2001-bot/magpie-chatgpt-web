@@ -59,8 +59,13 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const cookie = command.auth?.refresh;
     if (typeof cookie !== 'string' || !cookie) throw new BackendError('expired');
     const session = cookie.split(';').map(pair => pair.trim()).filter(pair => /^__Secure-next-auth\.session-token(?:\.\d+)?=/.test(pair)).sort().join(';');
-    const identity = createHash('sha256').update(session || cookie).digest('hex');
-    const key = createHash('sha256').update(cookie).update('\0').update(String(command.origin)).update('\0').update(String(command.auth?.access ?? '')).digest('hex');
+    // Browser credentials rotate; a conversation belongs to the account/profile.
+    // Legacy read-only callers without either still use credential isolation.
+    const stable = command.auth?.profile || command.auth?.accountId
+      ? JSON.stringify([command.profileRoot ?? '', command.auth?.profile ?? '', command.auth?.accountId ?? ''])
+      : session || cookie;
+    const identity = createHash('sha256').update(stable).digest('hex');
+    const key = createHash('sha256').update(identity).update('\0').update(cookie).update('\0').update(String(command.origin)).update('\0').update(String(command.auth?.access ?? '')).digest('hex');
     if (!clients.has(key)) {
       const guard = guards.get(identity) ?? new AccountGuard();
       const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, access: command.auth?.access, guard,

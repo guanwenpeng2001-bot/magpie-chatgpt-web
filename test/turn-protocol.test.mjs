@@ -16,10 +16,12 @@ test('wire module owns AnswerStream', async () => {
   assert.doesNotThrow(() => answer.finish());
 });
 
-test('semantic tool failures are request errors, not reconnect-triggering server errors', () => {
+test('semantic tool failures retain their code and use the gateway no-rest marker', () => {
   const toolFailure = JSON.parse(parseSSE(errorEvent(new BackendError('toolIncomplete'))).events[0].data);
-  assert.equal(toolFailure.error.type, 'invalid_request_error');
-  assert.equal(toolFailure.error.status, 400);
+  assert.equal(toolFailure.error.type, 'api_error');
+  assert.equal(toolFailure.error.status, 502);
+  assert.equal(toolFailure.error.code, 'toolIncomplete');
+  assert.match(toolFailure.error.message, /tool call, written as text, was cut short/);
   const upstreamFailure = JSON.parse(parseSSE(errorEvent(new BackendError('upstream'))).events[0].data);
   assert.equal(upstreamFailure.error.type, 'api_error');
   assert.equal(upstreamFailure.error.status, 502);

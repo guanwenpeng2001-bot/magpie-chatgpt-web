@@ -137,14 +137,83 @@ test('a marker-only Web action is repaired in the same ChatGPT page before compl
     assert.equal(result.repaired, true);
     assert.equal(result.text, `${prepared.start}{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}${prepared.end}`);
     assert.deepEqual(frames, [
-      { type: 'delta', index: 0, text: prepared.start },
-      { type: 'delta', index: 0, text: `{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}${prepared.end}` },
+      { type: 'delta', index: 0, text: `${prepared.start}{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}${prepared.end}` },
       { type: 'finish', reason: 'complete' },
     ]);
     assert.equal(h.calls.filter(call => call === 'submit').length, 2);
   } finally {
     await h.driver.close();
   }
+});
+
+for (const partial of ['', '{"name":"exec_command","input":{"cmd":"BROKEN']) test(`repair preserves prose and replaces unfinished JSON: ${partial.length}`, async () => {
+  const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: 'Inspect files.' }],
+    tools: [{ name: 'exec_command', input_schema: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } }], conversation_id: 'partial-repair' });
+  let attempts = 0;
+  const h = harness({ observe: async (page, { emit }) => {
+    if (++attempts === 1) {
+      const text = `I will inspect. ${prepared.start}${partial}`;
+      await emit({ event: 'dom', data: { text } });
+      return { text };
+    }
+    // The first correction violates the original schema, so the second is needed.
+    return { text: attempts === 2 ? '{"name":"exec_command","input":{"cmd":7}}' : '{"name":"exec_command","input":{"cmd":"dir"}}' };
+  } });
+  try {
+    const { frames, result } = await h.complete(command(prepared));
+    assert.equal(attempts, 3);
+    assert.equal(result.text, `I will inspect. ${prepared.start}{"name":"exec_command","input":{"cmd":"dir"}}${prepared.end}`);
+    assert.equal(frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join(''), result.text);
+    assert.equal(frames.at(-1).type, 'finish');
+    assert.equal(result.text.includes('BROKEN'), false);
+  } finally { await h.driver.close(); }
+});
+
+test('a revised buffered envelope is emitted once with its canonical arguments', async () => {
+  const p = prepare({ model: 'auto', messages: [{ role: 'user', content: 'Inspect.' }], tools: [{ name: 'run', input_schema: { type: 'object' } }] });
+  const full = `Prose. ${p.start}{"name":"run","input":{"new":true}}${p.end}`;
+  const h = harness({ observe: async (page, { emit }) => {
+    await emit({ event: 'dom', data: { text: `Prose. ${p.start}{"old":` } });
+    await emit({ event: 'dom', data: { text: `Prose. ${p.start}{"name":"missing","input":{}}${p.end}` } });
+    await emit({ event: 'dom', data: { text: full } });
+    return { text: full };
+  } });
+  try {
+    const { frames } = await h.complete(command(p));
+    assert.deepEqual(frames.filter(frame => frame.type === 'delta').map(frame => frame.text), ['Prose. ', full.slice(7)]);
+  } finally { await h.driver.close(); }
+});
+
+test('failed tool validation emits no successful finish and releases binding', async () => {
+  const p = prepare({ model: 'auto', messages: [{ role: 'user', content: 'Inspect.' }], tools: [{ name: 'run', input_schema: { type: 'object', required: ['cmd'] } }], conversation_id: 'invalid-output' });
+  const h = harness({ observe: async () => ({ text: `${p.start}{"name":"run","input":{}}${p.end}` }) });
+  const frames = [];
+  try {
+    await assert.rejects(h.driver.complete(command(p), guard(), 'fixture', new AbortController().signal, frame => frames.push(frame)), { code: 'toolSchema' });
+    assert.equal(frames.some(frame => frame.type === 'finish'), false);
+    assert.equal(h.driver.bindings.entries.has('invalid-output'), false);
+  } finally { await h.driver.close(); }
+});
+
+test('incremental image turns upload only suffix images; a closed page replays all', async () => {
+  const image = value => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from(value).toString('base64') } });
+  const first = { role: 'user', content: [image('old')] };
+  const second = { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'fixture', content: [image('new')] }] };
+  const messages = [first];
+  const prepareImages = () => prepare({ model: 'auto', conversation_id: 'images-resume', messages: [...messages] });
+  const h = harness();
+  try {
+    await h.complete(command(prepareImages()));
+    messages.push({ role: 'assistant', content: 'answer' }, second);
+    const next = prepareImages();
+    assert.deepEqual(next.imageHistoryIndices, [0, 2]);
+    await h.complete(command(next));
+    assert.deepEqual(h.calls.filter(call => Array.isArray(call) && call[0] === 'images').map(call => call[1].map(image => Buffer.from(image.dataBase64, 'base64').toString())), [['old'], ['new']]);
+    await h.pages[0].close();
+    messages.push({ role: 'assistant', content: 'answer' }, { role: 'user', content: 'continue' });
+    await h.complete(command(prepareImages()));
+    assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'images').at(-1)[1].length, 2);
+  } finally { await h.driver.close(); }
 });
 
 test('a failed first action repair gets one bounded second correction attempt', async () => {

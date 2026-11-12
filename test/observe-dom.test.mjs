@@ -165,7 +165,7 @@ browserTest('whitespace-tail eof yields to a DOM-confirmed answer', async t => {
 });
 
 for (const ordering of ['SSE first', 'DOM first']) {
-  browserTest(`rendered DOM supersedes markdown in both carriers: ${ordering}`, async t => {
+  browserTest(`complete SSE preserves markdown in both carriers: ${ordering}`, async t => {
     const { page, options, events, eof } = await fixture(t, { html: current('Here is <b>bold</b> text', 'in-progress'), conversation: (req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(sse('delta', visibleMessage('Here is **bold** text')) + terminator('[DONE]'));
@@ -180,8 +180,7 @@ for (const ordering of ['SSE first', 'DOM first']) {
       events.push(event);
       if (event.event === 'dom' && events.filter(item => item.event === 'dom').length === 1) await finish();
     };
-    assert.deepEqual(await observeTurn(page, options), { text: 'Here is bold text', route: 'dom' });
-    assert.equal(events.filter(event => event.event === 'dom').at(-1).data.text, 'Here is bold text');
+    assert.deepEqual(await observeTurn(page, options), { text: 'Here is **bold** text', route: 'sse' });
     assert.equal(events.at(-1).event, '');
   });
 }
@@ -244,7 +243,7 @@ for (const shape of ['matching DOM with lagging turn-state', 'empty complete DOM
   });
 }
 
-browserTest('complete stream waits for a rendered prefix to become the full answer', async t => {
+browserTest('complete stream supplies the full answer when DOM still renders a prefix', async t => {
   const fullText = 'First half and second half';
   const { page, options, events, eof } = await fixture(t, { html: current('First half', 'in-progress'), conversation: (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -252,17 +251,8 @@ browserTest('complete stream waits for a rendered prefix to become the full answ
   } });
   await page.evaluate(() => fetch('/backend-api/conversation'));
   await eof;
-  options.emit = async event => {
-    events.push(event);
-    if (event.event === 'dom' && event.data.text === 'First half') {
-      await page.evaluate(text => {
-        document.querySelector('article section div').innerText = text;
-        document.querySelector('article').dataset.talvtTurnState = 'complete';
-      }, fullText);
-    }
-  };
-  assert.deepEqual(await observeTurn(page, options), { text: fullText, route: 'dom' });
-  assert.deepEqual(events.filter(event => event.event === 'dom').map(event => event.data.text), ['First half', fullText]);
+  assert.deepEqual(await observeTurn(page, options), { text: fullText, route: 'sse' });
+  assert.equal(events.filter(event => event.event === 'answer').map(event => event.data.text).join(''), fullText);
   assert.equal(events.filter(event => event.event === '').length, 1);
   assert.equal(events.at(-1).event, '');
 });
@@ -279,14 +269,9 @@ browserTest('a complete SSE action recovers a DOM answer that rendered only its 
   });
   await page.evaluate(() => fetch('/backend-api/conversation'));
   await eof;
-  setTimeout(() => {
-    page.evaluate(() => {
-      document.querySelector('article').dataset.talvtTurnState = 'complete';
-    }).catch(() => {});
-  }, 700);
   assert.deepEqual(await observeTurn(page, options), { text: fullText, route: 'sse' });
   assert.equal(events.filter(event => event.event === '').length, 1);
-  assert.ok(events.some(event => event.event === 'dom' && event.data.text === marker));
+  assert.equal(events.some(event => event.event === 'dom' && event.data.text === marker), false);
   assert.ok(events.some(event => event.event === 'answer' && event.data.text.includes('"exec_command"')));
 });
 

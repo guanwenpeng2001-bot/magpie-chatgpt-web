@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.8 — 2026-11-13
+
+- Repair an unfinished text-form tool call wherever it appears: prose before the action marker is kept, only the unfinished envelope is replaced by the bounded JSON-only correction, and the corrected call is validated against its schema. Previously only a reply consisting of the bare marker was repaired, so live `gpt-6` `max` turns failed with `toolIncomplete`.
+- Reconcile SSE and rendered DOM text into one canonical reply, keep non-prefix revisions instead of silently dropping them, and stop accepting DOM completion while a healthy SSE stream is still open.
+- Validate and repair tool calls before emitting the final `finish` frame.
+- Report model output-format failures (`toolIncomplete`, `toolJSON`, …) with their explicit code as Magpie's "tool call, written as text, was cut short" contract (502, `x-magpie-sign-in: kept`), so the gateway retries without resting the account.
+- Bind conversations to the stable account/profile identity, so a rotated session cookie no longer breaks an open conversation with `binding` 409.
+- Await the first backend frame before answering a streamed request, so an immediate logout returns the sign-in-expired status instead of `200` + `kept`; streamed expiry is typed `authentication_error`.
+- Keep `$defs`/`definitions` whenever a compacted tool schema still contains `$ref`.
+- Honor `stop_sequences` and `max_tokens` with matching stop reasons.
+- Upload only the new suffix's images when continuing an existing conversation.
+
 ## 0.4.7 — 2026-11-13
 
 - Present the account catalogue through Magpie's native model-variant contract: two Chat base families with five verified efforts and eight Work base families with six verified efforts, instead of duplicate effort model cards.
