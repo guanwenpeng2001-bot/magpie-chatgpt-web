@@ -19,6 +19,17 @@ const methodFor = (bridge, profileRoot) => _internal.createHooks({ bridge, profi
 const source = relative => readFile(new URL(relative, import.meta.url), 'utf8');
 const lifecycle = () => import('../backend/browser.mjs');
 
+test('sign-in lock addresses fit macOS and retain Windows/Linux transports', async () => {
+  const { signinLockAddress } = await lifecycle();
+  const root = '/a/very/long/root/'.repeat(30);
+  const mac = signinLockAddress(root, 'darwin');
+  assert.ok(Buffer.byteLength(mac) < 104);
+  assert.match(mac.replaceAll('\\', '/'), /^\/tmp\/ms-[a-f0-9]{64}\.sock$/);
+  assert.ok(signinLockAddress(root, 'linux').startsWith('\0magpie-signin-'));
+  assert.ok(signinLockAddress(root, 'win32').startsWith('\\\\.\\pipe\\magpie-signin-'));
+  assert.notEqual(mac, signinLockAddress(root + 'other', 'darwin'));
+});
+
 function claimant(root) {
   return spawn(process.execPath, ['--input-type=module', '-e', `
     const { signinProfileClaim } = await import(process.argv[2]);
@@ -44,18 +55,13 @@ async function claimInProcess(root) {
 async function foreignBind(root) {
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { createServer } from 'node:net';
-    import { createHash } from 'node:crypto';
     import { resolve } from 'node:path';
-    const root = resolve(process.argv[1]);
-    const identity = createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex');
-    const slash = String.fromCharCode(92);
-    const address = process.platform === 'win32'
-      ? slash + slash + '.' + slash + 'pipe' + slash + 'magpie-signin-' + identity
-      : String.fromCharCode(0) + 'magpie-signin-' + identity;
+    const { signinLockAddress } = await import(process.argv[2]);
+    const address = signinLockAddress(resolve(process.argv[1]));
     const server = createServer();
     server.once('error', error => console.log(error.code));
     server.listen(address, () => server.close(() => console.log('released')));
-  `, root], { stdio: ['ignore', 'pipe', 'pipe'] });
+  `, root, new URL('../backend/browser.mjs', import.meta.url).href], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', chunk => { output += chunk; });
   assert.equal((await once(child, 'exit'))[0], 0);
