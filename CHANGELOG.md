@@ -7,7 +7,7 @@
 - Adapt four verified request-only catalogue IDs: GPT-5.6 Luna mini, GPT-5.6 Luna Thinking mini, and both experimental multisys IDs. Replace only the conversation request's model field and keep the selected family as the visible UI bridge.
 - Add a catalogue-conditional ChatGPT Images entry that uses the ordinary Create image workflow and saves generated image blobs as local files.
 - Accept Claude-shaped requests with trailing system messages, up to 256 tools, `$schema`/`format` annotations, and bounded ECMA-262 `pattern` validation. Record only structural preflight diagnostics without prompts or tool payloads.
-- Pass the host's global proxy settings into the backend and ordinary Chrome, with an explicit direct override.
+- Pass the host environment into the backend while leaving ordinary Chrome on its system proxy unless the plugin-specific `MAGPIE_*_PROXY` override is set. This avoids invalidating an existing site clearance with a forced `--proxy-server`.
 - Keep the account's Chrome context resident for the backend lifetime so sequential turns do not reset state or trigger a fresh site check after five idle minutes.
 - Keep GPT-6 mini, GPT-6 Thinking mini and research explicitly unsupported because this account's current web submission returned empty/hidden results or no research canvas.
 

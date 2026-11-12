@@ -11,8 +11,9 @@ test('ordinary Chrome sign-in launch uses only the four prescribed arguments', (
   assert.equal(args.some(arg => /no-sandbox|enable-automation|headless/.test(arg)), false);
 });
 
-test('ordinary browser follows the host global proxy unless explicitly overridden', () => {
-  assert.equal(browserModule.browserProxy({ HTTPS_PROXY: 'http://127.0.0.1:7897' }), 'http://127.0.0.1:7897');
+test('ordinary browser keeps the system proxy unless the plugin proxy is explicitly overridden', () => {
+  assert.equal(browserModule.browserProxy({ HTTPS_PROXY: 'http://127.0.0.1:7897' }), undefined);
+  assert.equal(browserModule.browserProxy({ MAGPIE_HTTPS_PROXY: 'http://127.0.0.1:9123' }), 'http://127.0.0.1:9123');
   const args = browserModule.chromeArguments('profile', 1234, { env: { MAGPIE_HTTPS_PROXY: '', HTTPS_PROXY: 'http://127.0.0.1:7897' } });
   assert.ok(args.includes('--no-proxy-server'));
   assert.equal(args.some(arg => arg.startsWith('--proxy-server=')), false);
