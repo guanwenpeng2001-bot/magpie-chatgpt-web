@@ -4,6 +4,16 @@ Use your ChatGPT web session as a magpie provider. Sign-in always opens visible 
 
 Plugin version: `0.4.8`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
+## Native tools mode
+
+Windows x64: the `native-tools` sign-in option is on by default. Successful setup adds `native/<profile>/<model>` models under the same `chatgpt-web` provider, ahead of the existing text models. These use Responses and the pinned `codex-chatgpt-web` **v6.1.18 Full-mode daemon**, with native MCP tools over an OpenAI tunnel. Setup may require signing into OpenAI Platform and granting tunnel/connector access. A failed setup is non-fatal; turn off `native-tools` or select an existing text model to use text mode.
+
+The first setup downloads SHA-256-verified Windows releases (daemon v6.1.18, tunnel-client v0.0.16 including cloudflared) into `~/.config/magpie/chatgpt-web-native/`. Account storage states, runtime keys and configuration stay under that directory; protect it like your signed-in browser profile. POSIX files use mode 0600; Windows access follows the parent directory ACL. Existing mismatching installations are refused. The daemon uses its own isolated Codex state and does not configure the user's launcher. The installer and account API accept an explicit root for isolated tests.
+
+Compaction always uses a plain text summary, because structured Full-mode compaction requires the reference launcher. An unavailable or unhealthy native account falls back to the text engine; after native submission, failures are returned without replaying tool actions. Native model context limits follow the reference's standard account catalog (Bigger Context is disabled). The reference `/v1/models` passthrough requires a separate Codex credential, so the plugin derives browser model rows locally. Metadata capture requires Magpie's plugin hooks and middleware. Fake-only tests cover this integration; live native tool execution is not yet verified.
+
+中文：`native-tools` 默认开启；登录后配置成功会在同一提供商下增加 `native/<profile>/<model>` 模型，使用固定版本的 Full-mode 守护进程，通过 OpenAI 隧道原生调用 MCP 工具。可能需要登录 OpenAI Platform 并授权隧道及连接器。配置失败仍可使用原有文本模型；也可关闭此选项。运行文件、登录状态和密钥保存在上述独立目录。压缩请求使用纯文本摘要；原生请求提交后不会自动重放工具。当前仅通过离线模拟测试，尚未验证真实原生工具调用。
+
 ## Requirements and installation
 
 Install magpie, Node.js 20 or later, Google Chrome and Git. No browser or runtime is bundled, and Edge fallback is not implemented. The backend runs under Node.js and drives Chrome through `playwright-core`, its sole dependency.

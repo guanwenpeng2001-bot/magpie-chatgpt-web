@@ -15,7 +15,8 @@ export function authHook(env) {
     provider: PROVIDER,
     refreshLead: 24 * 3600_000,
     options: [{ key: 'visible-turns', label: 'Show browser during chats',
-      description: 'Keep installed Chrome visible during chats. Leave this off for background chats; verification automatically reveals the same Chrome window for recovery.', default: false }],
+      description: 'Keep installed Chrome visible during chats. Leave this off for background chats; verification automatically reveals the same Chrome window for recovery.', default: false },
+      { key: 'native-tools', label: 'Native tools mode', description: 'Set up the Full-mode daemon and OpenAI tunnel for native Codex tools. Text mode remains available.', default: true }],
     async refresh(auth) { return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot }); },
     loader: makeLoader(env),
     methods: [{
@@ -34,6 +35,13 @@ export function authHook(env) {
               for (;;) {
                 const result = await bridge.call({ method: 'loginStatus', account });
                 if (result.state === 'signed-in') {
+                  if (env.native && (env.input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
+                    try { await env.native.provision(result.credential); }
+                    catch {
+                      // Provisioning diagnostics can contain one-time secrets. Log only a fixed event.
+                      try { await env.input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'warn', message: 'nativeSetupFailed: text mode remains available' } }); } catch {}
+                    }
+                  }
                   await releaseSigninProfileClaim(profileRoot, owner);
                   return { ...result.credential, type: 'success' };
                 }

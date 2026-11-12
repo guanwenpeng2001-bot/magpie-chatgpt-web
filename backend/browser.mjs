@@ -386,11 +386,7 @@ export function sessionCredential(session, refresh, profile) {
   return { type: 'oauth', refresh, access: session.accessToken, expires, accountId: typeof session.user?.email === 'string' ? session.user.email : 'chatgpt-web', profile, persona: 'chatgpt-paid' };
 }
 
-export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates, background = false } = {}) {
-  if (!chromium) {
-    try { ({ chromium } = await import('playwright-core')); }
-    catch { throw new BackendError('browserDependency'); }
-  }
+export async function findChromeExecutable(candidates) {
   candidates ??= process.platform === 'win32'
     ? ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', resolve(process.env.LOCALAPPDATA ?? '.', 'Google/Chrome/Application/chrome.exe')]
     : process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'];
@@ -399,6 +395,19 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
     try { await access(candidate); executable = candidate; break; } catch {}
   }
   if (!executable) throw new BrowserComponentError();
+  return executable;
+}
+
+export async function exportStorageState(context) {
+  return context.storageState();
+}
+
+export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates, background = false } = {}) {
+  if (!chromium) {
+    try { ({ chromium } = await import('playwright-core')); }
+    catch { throw new BackendError('browserDependency'); }
+  }
+  const executable = await findChromeExecutable(candidates);
   await mkdir(profile, { recursive: true });
   const listener = createServer();
   const port = await new Promise((resolvePort, reject) => {

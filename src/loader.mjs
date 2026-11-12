@@ -5,18 +5,21 @@ import { requireAuth } from './hooks/auth.mjs';
 import { compile } from '../backend/prompt.mjs';
 import { compactToolDefinitions } from './tool-emulation.mjs';
 import { API, PROVIDER } from './hooks/config.mjs';
+import { nativeRoute } from './native/models.mjs';
+import { restore } from './native/provenance.mjs';
+import { isCompaction, textFallback } from './native/fallback.mjs';
 import {
   assertPreparedInputFits,
   estimatePreparedInput,
 } from './usage/context.mjs';
 
-export function makeLoader({ bridge, profileRoot, input }) {
+export function makeLoader({ bridge, profileRoot, input, native }) {
   return async getAuth => {
     const auth = await getAuth();
     if (!auth) return {};
     requireAuth(auth);
-    return {
-      baseURL: API, apiKey: 'managed-locally',
+    const loader = {
+      baseURL: native ? 'http://127.0.0.1:1/v1' : API, apiKey: 'managed-locally',
       async fetch(resource, init = {}) {
         let upstream;
         let request;
@@ -26,6 +29,35 @@ export function makeLoader({ bridge, profileRoot, input }) {
           const current = requireAuth(await getAuth());
           try { request = JSON.parse(init.body ?? (resource instanceof Request ? await resource.text() : '')); }
           catch { throw new BackendError('invalidRequest'); }
+          signal = init.signal ?? (resource instanceof Request ? resource.signal : undefined);
+          signal?.throwIfAborted();
+          const path = new URL(resource instanceof Request ? resource.url : resource).pathname;
+          if (/\/responses(?:\/compact)?$/.test(path)) {
+            const headers = init.headers ?? (resource instanceof Request ? resource.headers : undefined);
+            const compact = isCompaction(request, path);
+            if (path.endsWith('/responses/compact') && request.stream === undefined) request.stream = false;
+            const route = nativeRoute(request.model);
+            if (route && route.profile !== current.profile) throw new BackendError('invalidRequest');
+            if (!compact && route && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
+              let runtime;
+              try { runtime = await native.runtime(current); } catch { /* use text when startup failed */ }
+              if (runtime && await runtime.health(signal)) {
+                try { restore(request, current.profile, PROVIDER); }
+                catch { throw new BackendError('invalidRequest'); }
+                preflight = false;
+                // Once submitted, never replay a failed native turn through text:
+                // native tools may already have executed.
+                return await runtime.responses({ ...request, model: route.model }, headers, signal);
+              }
+            }
+            preflight = false;
+            const fallbackHeaders = new Headers(headers);
+            const effort = request.reasoning?.effort ?? (route ? route.slug.endsWith('-pro') ? 'max' : route.slug.endsWith('-instant') || route.slug.endsWith('-luna') ? 'low' : 'high' : undefined);
+            if (effort) fallbackHeaders.set('x-magpie-effort', effort);
+            return await textFallback(request, compact, text => loader.fetch(`${API}/messages`, {
+              body: JSON.stringify(text), headers: fallbackHeaders, signal,
+            }), signal);
+          }
           const prepared = prepare(request, init.headers ?? (resource instanceof Request ? resource.headers : undefined));
           let inputEstimate = estimatePreparedInput(prepared);
           for (const level of [1, 2, 3, 4]) {
@@ -121,6 +153,7 @@ export function makeLoader({ bridge, profileRoot, input }) {
         }
       },
     };
+    return loader;
   };
 }
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — Unreleased
+
+- Add opt-in/out `native-tools` setup (enabled by default), account-scoped Responses models, and the pinned v6.1.18 Full-mode daemon with tunnel-client v0.0.16 and cloudflared.
+- Verify release and installed-file checksums; isolate browser state, runtime keys, named pipes, ports, and Codex/tunnel state per account. Supervise startup, shutdown and crash retries with bounded backoff.
+- Restore native item metadata through Magpie request hooks and provider middleware, preserving top-level client metadata and checking account/route provenance.
+- Keep the text engine available, translate fallback results to Responses, and route compaction to tool-free plain summaries. Never replay a submitted native tool turn through the fallback engine.
+- Add offline installer, daemon, provisioning-interface, catalog, provenance and routing tests. Live native MCP/tunnel operation remains unverified. Package version remains 0.4.8 pending release.
+- Recheck a challenge card painted between the DOM probe and a queued HTTP 403 before expiring the account; cover this timing race in the fallback observer tests.
+
 ## 0.4.8 — 2026-11-13
 
 - Repair an unfinished text-form tool call wherever it appears: prose before the action marker is kept, only the unfinished envelope is replaced by the bounded JSON-only correction, and the corrected call is validated against its schema. Previously only a reply consisting of the bare marker was repaired, so live `gpt-6` `max` turns failed with `toolIncomplete`.

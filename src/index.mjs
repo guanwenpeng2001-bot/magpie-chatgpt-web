@@ -7,6 +7,7 @@ import { providerHook } from './hooks/provider.mjs';
 import { chatHeadersHook } from './hooks/chat-headers.mjs';
 import { describeCatalogue } from './models.mjs';
 import { makeLoader } from './loader.mjs';
+import { nativeClient } from './native/index.mjs';
 
 function createHooks(env) {
   return { config: configHook(), auth: authHook(env), provider: providerHook(env), 'chat.headers': chatHeadersHook() };
@@ -15,11 +16,13 @@ function createHooks(env) {
 export default {
   id: PROVIDER,
   async server(input) {
-    return createHooks({
+    const env = {
       input,
       bridge: new Bridge(),
       profileRoot: resolve(homedir(), '.config', 'magpie', 'chatgpt-web-profile'),
-    });
+    };
+    env.native = nativeClient(env);
+    return createHooks(env);
   },
 };
 export const _internal = { createHooks, mapModels: describeCatalogue, describeCatalogue, makeLoader };
