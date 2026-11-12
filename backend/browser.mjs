@@ -425,58 +425,68 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
     return await button.count() > 0 && await button.first().isVisible();
   },
 } = {}) {
-  return async (account, signal, profileRoot, { proxy } = {}) => {
+  return async (account, signal, profileRoot, { proxy, browser: sharedBrowser } = {}) => {
     let owned;
     let closed = false;
+    let keepContext = false;
     let closePromise;
-    const close = () => closePromise ??= Promise.resolve().then(() => owned?.close());
+    const close = () => closePromise ??= Promise.resolve().then(() => sharedBrowser ? sharedBrowser.closeAccount(account) : owned?.close());
     let interrupt;
     const interrupted = new Promise((resolve, reject) => { interrupt = reject; });
     interrupted.catch(() => {});
     const wait = work => Promise.race([interrupted, work]);
     const onClose = () => { closed = true; interrupt(new BackendError('browserClosed')); };
     const abort = () => { interrupt(signal.reason); close().catch(() => {}); };
+    const run = async context => {
+      context.once('close', onClose);
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        signal?.throwIfAborted();
+        let page;
+        try {
+          for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
+          page = context.pages()[0] ?? await wait(context.newPage());
+          await wait(page.goto(origin));
+        } catch (error) {
+          throw new Error('The sign-in page could not be loaded. Check the network/proxy and retry sign-in.', { cause: error });
+        }
+        while (!closed && !page.isClosed()) {
+          signal?.throwIfAborted();
+          if (await wait(probeSignedIn(page))) {
+            const cookies = await wait(context.cookies(origin));
+            if (cookies.some(cookie => /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/.test(cookie.name))) {
+              const result = await wait(browserRead(context, page, '/api/auth/session', origin, signal));
+              signal?.throwIfAborted();
+              if (closed || page.isClosed()) return { state: 'cancelled' };
+              keepContext = Boolean(sharedBrowser);
+              return { state: 'signed-in', credential: sessionCredential(result.value, result.cookies, account) };
+            }
+          }
+          if (!closed && !page.isClosed()) await wait(delay(pollMilliseconds, undefined, { signal }));
+        }
+        signal?.throwIfAborted();
+        return { state: 'cancelled' };
+      } finally {
+        signal?.removeEventListener('abort', abort);
+        context.removeListener('close', onClose);
+      }
+    };
     try {
       if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account) || typeof profileRoot !== 'string' || !profileRoot) throw new BackendError('browserConfiguration');
       signal?.throwIfAborted();
+      if (sharedBrowser) return await sharedBrowser.run(account, run, signal, { visibleTurns: true });
       owned = await launch(resolve(profileRoot, account), signal, { proxy });
-      const context = owned.context;
-      context.once('close', onClose);
-      signal?.addEventListener('abort', abort, { once: true });
-      signal?.throwIfAborted();
-      let page;
-      try {
-        for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
-        page = context.pages()[0] ?? await wait(context.newPage());
-        await wait(page.goto(origin));
-      } catch (error) { throw new Error('The sign-in page could not be loaded. Check the network/proxy and retry sign-in.', { cause: error }); }
-      while (!closed && !page.isClosed()) {
-        signal?.throwIfAborted();
-        if (await wait(probeSignedIn(page))) {
-          const cookies = await wait(context.cookies(origin));
-          if (cookies.some(cookie => /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/.test(cookie.name))) {
-            const result = await wait(browserRead(context, page, '/api/auth/session', origin, signal));
-            signal?.throwIfAborted();
-            if (closed || page.isClosed()) return { state: 'cancelled' };
-            return { state: 'signed-in', credential: sessionCredential(result.value, result.cookies, account) };
-          }
-        }
-        if (!closed && !page.isClosed()) await wait(delay(pollMilliseconds, undefined, { signal }));
-      }
-      signal?.throwIfAborted();
-      return { state: 'cancelled' };
+      return await run(owned.context);
     } catch (error) {
       const cause = signal?.aborted ? signal.reason : error;
       if (cause?.code === 'signinTimeout') {
         return { state: 'timeout', reason: cause.message, error: cause };
       }
       if (signal?.aborted && cause?.name === 'AbortError') return { state: 'cancelled' };
-      if (!signal?.aborted && (closed || owned?.context.pages().every(page => page.isClosed()))) return { state: 'cancelled' };
+      if (!signal?.aborted && (closed || (owned && owned.context.pages().every(page => page.isClosed())))) return { state: 'cancelled' };
       return { state: 'failed', reason: cause instanceof BackendError ? cause.toJSON().message : cause?.message || 'Sign-in failed. Start sign-in again.', error: cause };
     } finally {
-      signal?.removeEventListener('abort', abort);
-      owned?.context.removeListener('close', onClose);
-      await close();
+      if (!keepContext) await close();
     }
   };
 }

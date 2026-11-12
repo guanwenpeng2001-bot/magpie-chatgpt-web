@@ -64,7 +64,10 @@ test('login acknowledges and forwards the proxy to the flow', async t => {
   } });
   const reply = await server.request('login', { account: 'fixture', profileRoot: '/profiles', proxy: 'http://localhost:8080' });
   assert.deepEqual(reply.find(frame => frame.event === 'data').data, { ok: true });
-  assert.deepEqual(received.slice(2), ['/profiles', { proxy: 'http://localhost:8080' }]);
+  assert.equal(received[2], '/profiles');
+  assert.equal(received[3].proxy, 'http://localhost:8080');
+  assert.equal(typeof received[3].browser.run, 'function');
+  assert.equal(typeof received[3].browser.closeAccount, 'function');
   const status = await server.request('loginStatus', { account: 'fixture' });
   assert.equal(status.find(frame => frame.event === 'data').data.state, 'signed-in');
 });
