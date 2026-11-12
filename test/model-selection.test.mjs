@@ -35,5 +35,17 @@ test('model selection identifies only the requested model', async t => {
         assert.equal(await page.evaluate(() => window.selected), selected);
       } finally { await page.close(); }
     });
+    await t.test('current navigation-target picker without legacy markers', async () => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(`
+          <button data-composer-navigation-target="reasoning" aria-haspopup="menu" onclick="document.querySelector('[role=menu]').hidden=false">Choose model</button>
+          <div role="menu" hidden>
+            <div role="menuitemradio" data-model-id="gpt-6" onclick="window.selected='gpt-6'">GPT-6</div>
+          </div>`);
+        assert.deepEqual(await selectModel(page, 'gpt-6'), { ok: true });
+        assert.equal(await page.evaluate(() => window.selected), 'gpt-6');
+      } finally { await page.close(); }
+    });
   } finally { await browser.close(); }
 });

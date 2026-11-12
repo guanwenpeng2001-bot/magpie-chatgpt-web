@@ -17,6 +17,17 @@ test('prepare accepts image blocks and records decoded size before dispatch', ()
   assert.equal(prepared.history[0].content.includes('aGk='), false);
 });
 
+test('prepare preserves the original-detail hint for conservative image accounting', () => {
+  const detailed = image();
+  detailed.source.detail = 'original';
+  assert.deepEqual(prepare(request([detailed])).images, [{
+    mediaType: 'image/png',
+    dataBase64: 'aGk=',
+    bytes: 2,
+    detail: 'original',
+  }]);
+});
+
 for (const [name, content] of [
   ['document', [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'aGk=' } }]],
   ['image count', Array.from({ length: 5 }, () => image())],
@@ -41,9 +52,15 @@ test('absent conversation id falls back to the header hash', () => {
   assert.equal(prepare(request('hello')).conversationKey, undefined);
 });
 
-test('tool definitions and tool history suppress caller conversation binding', () => {
-  assert.equal(prepare({ ...request('hello'), conversation_id: 'caller', tools: [{ name: 'lookup', input_schema: { type: 'object' } }] }).conversationKey, undefined);
-  assert.equal(prepare({ ...request([{ type: 'tool_result', tool_use_id: 'call', content: 'result' }]), conversation_id: 'caller' }).conversationKey, undefined);
+test('tool definitions and tool history retain caller conversation binding', () => {
+  assert.equal(prepare({ ...request('hello'), conversation_id: 'caller', tools: [{ name: 'lookup', input_schema: { type: 'object' } }] }).conversationKey, 'caller');
+  assert.equal(prepare({ ...request([{ type: 'tool_result', tool_use_id: 'call', content: 'result' }]), conversation_id: 'caller' }).conversationKey, 'caller');
+});
+
+test('Codex environment context does not force a tool call for a text-only turn', () => {
+  const tools = [{ name: 'lookup', input_schema: { type: 'object' } }];
+  const content = '<environment_context><cwd>C:\\workspace</cwd><shell>powershell</shell><filesystem><workspace_roots><root>C:\\workspace</root></workspace_roots></filesystem></environment_context>\nReply with exactly TEXT_ONLY.';
+  assert.equal(prepare({ ...request(content), tools }).toolChoice.type, 'auto');
 });
 
 test('backend dispatch renders the image size limit in MiB', { timeout: 5000 }, async t => {

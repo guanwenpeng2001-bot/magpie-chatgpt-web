@@ -2,7 +2,13 @@ import { BackendError } from './bridge.mjs';
 import { prepare } from './wire/prepare.mjs';
 import { translate, reconstruct, errorEvent } from './wire/translate.mjs';
 import { requireAuth } from './hooks/auth.mjs';
+import { compile } from '../backend/prompt.mjs';
+import { compactToolDefinitions, selectToolDefinitionsForPrompt } from './tool-emulation.mjs';
 import { API, PROVIDER } from './hooks/config.mjs';
+import {
+  assertPreparedInputFits,
+  estimatePreparedInput,
+} from './usage/context.mjs';
 
 export function makeLoader({ bridge, profileRoot, input }) {
   return async getAuth => {
@@ -15,14 +21,26 @@ export function makeLoader({ bridge, profileRoot, input }) {
         let upstream;
         let request;
         let preflight = true;
+        let signal;
         try {
           const current = requireAuth(await getAuth());
           try { request = JSON.parse(init.body ?? (resource instanceof Request ? await resource.text() : '')); }
           catch { throw new BackendError('invalidRequest'); }
           const prepared = prepare(request, init.headers ?? (resource instanceof Request ? resource.headers : undefined));
+          let inputEstimate = estimatePreparedInput(prepared);
+          for (const level of [1, 2, 3, 4]) {
+            if (!prepared.tools?.length || inputEstimate.inputTokens < Math.floor(inputEstimate.contextLimit * 0.5)) break;
+            const selected = selectToolDefinitionsForPrompt(prepared.tools, prepared);
+            prepared.promptTools = compactToolDefinitions(selected, level);
+            prepared.toolCompaction = { level, toolCount: prepared.tools.length, exposedToolCount: selected.length };
+            prepared.prompt = compile(prepared);
+            inputEstimate = estimatePreparedInput(prepared);
+          }
+          prepared.usageEstimate = inputEstimate;
+          assertPreparedInputFits(prepared, inputEstimate);
           preflight = false;
-          const signal = init.signal ?? (resource instanceof Request ? resource.signal : undefined);
-          const visibleTurns = input?.magpie?.option(PROVIDER, 'visible-turns') !== false;
+          signal = init.signal ?? (resource instanceof Request ? resource.signal : undefined);
+          const visibleTurns = input?.magpie?.option?.(PROVIDER, 'visible-turns') ?? false;
           upstream = await bridge.open({ method: 'complete', auth: current, profileRoot, ...prepared, visibleTurns }, signal);
           const headers = { 'x-magpie-sign-in': 'kept', 'cache-control': 'no-store' };
           if (upstream.metadata?.route) headers['x-chatgptweb-route'] = upstream.metadata.route;
@@ -51,21 +69,35 @@ export function makeLoader({ bridge, profileRoot, input }) {
               try {
                 signal?.throwIfAborted();
                 const next = await translated.next();
-                if (next.done) { controller.close(); upstream.close(); }
-                else controller.enqueue(encoder.encode(next.value));
+                if (next.done) {
+                  controller.close();
+                  upstream.close();
+                } else {
+                  controller.enqueue(encoder.encode(next.value));
+                }
               } catch (error) {
                 if (signal?.aborted) controller.error(signal.reason);
                 else { controller.enqueue(encoder.encode(errorEvent(error))); controller.close(); }
                 upstream.close();
               }
             },
-            async cancel() { upstream.close(); await translated.return(); },
+            async cancel() {
+              upstream.close();
+              await translated.return();
+            },
           });
           return new Response(body, { headers: { ...headers, 'content-type': 'text/event-stream' } });
         } catch (failure) {
           upstream?.close();
-          const error = failure instanceof BackendError ? failure : new BackendError('upstream');
+          const cancelled = signal?.aborted === true;
+          const error = cancelled
+            ? new BackendError('upstream')
+            : failure instanceof BackendError ? failure : new BackendError('upstream');
           if (preflight) {
+            console.error(JSON.stringify({
+              event: 'preflightRejected',
+              shape: requestShape(request, error.code, error.diagnostic),
+            }));
             try { await input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'error', message: 'preflightRejected ' + JSON.stringify(requestShape(request, error.code, error.diagnostic)) } }); } catch {}
           }
           return Response.json({ error: error.toJSON() }, { status: error.status, headers: error.headers });

@@ -133,7 +133,9 @@ for (const network of [false, true]) test(`present DOM ${network ? 'handoff' : '
   const frames = [];
   try {
     await assert.doesNotReject(driver.complete({ ...prepared, auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' } }, new AccountGuard(), 'fixture', new AbortController().signal, frame => frames.push(frame)));
-    assert.deepEqual(frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    const deltas = frames.filter(frame => frame.type === 'delta').map(frame => frame.text);
+    assert.ok(deltas.length > 1, 'DOM snapshots are delivered incrementally');
+    assert.equal(deltas.join(''), expected);
     assert.equal(frames.at(-1).type, 'finish');
     const chunks = [];
     for await (const chunk of translate(frames, prepared)) chunks.push(chunk);

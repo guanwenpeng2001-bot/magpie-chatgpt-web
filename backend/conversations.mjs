@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto';
 import { BackendError } from './guard.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function fingerprint(request) {
+  return {
+    toolsDigest: digest(request.tools ?? []),
+    choiceDigest: digest(request.toolChoice ?? request.choice ?? { type: 'auto' }),
+    imageSignatures: (request.images ?? []).map(image => digest(image)),
+  };
+}
 export class Conversations {
   entries = new Map();
   constructor({ now = Date.now, idleMilliseconds = 1800000 } = {}) {
@@ -15,7 +22,18 @@ export class Conversations {
     let entry = key && this.entries.get(key);
     if (entry) {
       if (entry.account !== account || entry.busy || entry.model !== request.model || entry.system !== request.system) throw new BackendError('binding');
-      if (entry.history && (request.history.length <= entry.resumeIndex || digest(request.history.slice(0, entry.resumeIndex)) !== entry.contextDigest)) {
+      const current = fingerprint(request);
+      const pending = Boolean(entry.pendingChallenge);
+      const imagesMatch = pending || !entry.history
+        ? current.imageSignatures.length === entry.fingerprint.imageSignatures.length &&
+          current.imageSignatures.every((value, index) => value === entry.fingerprint.imageSignatures[index])
+        : current.imageSignatures.length >= entry.fingerprint.imageSignatures.length &&
+          entry.fingerprint.imageSignatures.every((value, index) => value === current.imageSignatures[index]);
+      const shapeMismatch = current.toolsDigest !== entry.fingerprint.toolsDigest ||
+        current.choiceDigest !== entry.fingerprint.choiceDigest || !imagesMatch;
+      const pendingMismatch = pending && digest(request.history) !== entry.pendingChallenge.historyDigest;
+      if (pendingMismatch || shapeMismatch ||
+          entry.history && (request.history.length <= entry.resumeIndex || digest(request.history.slice(0, entry.resumeIndex)) !== entry.contextDigest)) {
         closing.push(this.discard(key).catch(() => {}));
         entry = undefined;
       }
@@ -26,7 +44,15 @@ export class Conversations {
         if (!victim) throw new BackendError('capacity');
         closing.push(this.discard(victim[0]).catch(() => {}));
       }
-      entry = { key, account, model: request.model, system: request.system, used: this.now(), resumeIndex: 0 };
+      entry = {
+        key,
+        account,
+        model: request.model,
+        system: request.system,
+        fingerprint: fingerprint(request),
+        used: this.now(),
+        resumeIndex: 0,
+      };
       // Preserve direct-entry callers while supporting the new destructuring seam.
       Object.defineProperty(entry, 'entry', { get() { return this; } });
       if (key) this.entries.set(key, entry);
@@ -39,8 +65,8 @@ export class Conversations {
     await Promise.all(closing);
     return entry;
   }
-  finish(entry, request, text) {
-    entry.history = structuredClone([...request.history, { role: 'assistant', content: text }]);
+  finish(entry, request, text, assistantContent = text) {
+    entry.history = structuredClone([...request.history, { role: 'assistant', content: assistantContent }]);
     entry.contextDigest = digest(entry.history);
     entry.resumeIndex = entry.history.length;
     entry.used = this.now();

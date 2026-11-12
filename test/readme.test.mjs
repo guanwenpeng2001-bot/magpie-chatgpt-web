@@ -9,7 +9,7 @@ invalidRequest toolDefinition toolChoice toolUnknown toolJSON toolSchema toolCho
  toolParallel toolIncomplete toolRequired toolDelimiter toolLimit binding temporary harvest protocol
  verification capacity browserDependency browserProfile browserConfiguration browserClosed backendDown
  signinTimeout missingComponent pickerMissing pickerAmbiguous modelUnsupported modelNotOffered attachmentUnsupported
- imageRejected imageOutput`.split(/\s+/);
+ contextLength imageRejected imageOutput`.split(/\s+/);
 
 test('README failure table covers every pinned public code with condition and recovery', () => {
   const section = readme.split('## Failure messages\n')[1]?.split('\n## ')[0];
@@ -23,18 +23,16 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.4\.3`\. Host verified against: magpie `0\.1\.1247`/);
+  assert.match(prose, /Plugin version: `0\.4\.4`\. Host verified against: magpie `0\.1\.3930`/);
 });
 
 test('README records the exact verified host identity with its evidence citation', () => {
   const section = readme.split('### Running host identity and bundle SHA-256\n')[1]?.split('\n## ')[0];
   assert.ok(section, 'host identity section exists');
   for (const value of [
-    'magpie `0.1.1247`', '`host-79c61aeda399.js`', '91 864 bytes',
-    '`79c61aeda399c1baa3edbe0b41af0403013ec95224724e5a92126e9f69ba2646`',
-    'verification/verify-live-acceptance.md:148-156',
-    '`…/home/.cache/magpie/plugin-host/host-79c61aeda399.js`',
-    'verification/verify-live-acceptance-r3.md:283-286',
+    'magpie `0.1.3930`', '`host-e6801c6cb0f6.js`', '166 257 bytes',
+    '`e6801c6cb0f61553ca747c2b02209bfe87720183b37bb8840d08bcfb5352c5f3`',
+    'Codex CLI `0.167.2`',
   ]) assert.ok(section.includes(value), `host identity needs ${value}`);
 });
 
@@ -73,12 +71,14 @@ test('README makes no unmeasured progressive delivery claim', () => {
   }
 });
 
-test('README documents visible-by-default turns and explicit headless opt-out', () => {
+test('README documents background-by-default turns and explicit visible override', () => {
   assert.match(prose, /Sign-in always opens (?:a )?visible Chrome/);
-  assert.match(prose, /visible by default/);
-  assert.match(prose, /explicitly disable/);
+  assert.match(prose, /background by default/);
+  assert.match(prose, /explicitly enable/);
   assert.match(prose, /Show browser during chats.*visible-turns/);
-  assert.match(prose, /turns and background reads reuse it for the backend lifetime/);
+  assert.match(prose, /same persistent account profile/);
+  assert.match(prose, /verification automatically reveals the same window, page and browser context/);
+  assert.match(prose, /deadline expires first.*page stays visible.*conversation binding intact/);
 });
 
 test('README discloses privacy boundaries and emulated capabilities', () => {
@@ -86,7 +86,8 @@ test('README discloses privacy boundaries and emulated capabilities', () => {
   assert.match(prose, /Neither operation erases the plugin-owned Chrome profile/);
   assert.match(prose, /Anthropic-wire emulation/);
   assert.match(prose, /toolcall: false/);
-  assert.match(prose, /dormant emulation layer/i);
+  assert.match(prose, /prompt-level client tool emulation/i);
+  assert.match(prose, /outer Agent executes those tools/i);
   assert.match(prose, /4 images \/ 10 MiB each/);
 });
 

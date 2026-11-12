@@ -78,7 +78,9 @@ test('a post-handoff reader failure does not abort a turn the DOM route complete
   const turn = await runFixtureTurn({ mode: 'present-handoff-failure' });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
-    assert.deepEqual(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    const deltas = turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text);
+    assert.ok(deltas.length > 1, 'DOM snapshots are delivered incrementally');
+    assert.equal(deltas.join(''), expected);
     assert.equal(turn.frames.at(-1).type, 'finish');
     const failure = turn.harvestEvents.find(item => item.kind === 'failure');
     assert.equal(failure?.code, 'harvest', 'the reader must have reported its own failure');
@@ -98,7 +100,7 @@ test('a post-handoff reader failure survives a DOM answer that arrives only afte
   const turn = await runFixtureTurn({ mode: 'present-handoff-failure', answerDelayMs: 2500 });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
-    assert.deepEqual(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    assert.equal(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join(''), expected);
     assert.equal(turn.frames.at(-1).type, 'finish');
     const failure = turn.harvestEvents.find(item => item.kind === 'failure');
     assert.equal(failure?.code, 'harvest');
@@ -116,7 +118,7 @@ test('a stream completion frame after the handoff does not end the turn before t
   const turn = await runFixtureTurn({ mode: 'present-handoff-done', answerDelayMs: 1000 });
   try {
     assert.equal(turn.failure?.code ?? null, null, `turn must complete, got ${turn.failure?.code}: ${turn.failure?.message}`);
-    assert.deepEqual(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text), [expected]);
+    assert.equal(turn.frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join(''), expected);
     assert.equal(turn.frames.at(-1).type, 'finish');
   } finally { await turn.close(); }
 });

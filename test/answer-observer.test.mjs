@@ -42,9 +42,9 @@ test('answer observer captures exact fixture text, terminal and timed deltas; re
     const result = await observeAnswer(driver, command(), new AccountGuard(), 'fixture', new AbortController().signal);
     assert.equal(result.verified, true);
     assert.equal(result.text, fixture.batches.join(''));
-    assert.equal(result.deltas.length, 1);
-    assert.equal(result.deltas[0].text, result.text);
-    assert.ok(result.deltas[0].milliseconds >= 3 * 450);
+    assert.ok(result.deltas.length > 1, 'DOM snapshots are delivered incrementally');
+    assert.equal(result.deltas.map(delta => delta.text).join(''), result.text);
+    assert.ok(result.deltas.at(-1).milliseconds >= 3 * 450);
     console.log(JSON.stringify({ observer: 'offline exact answer verified', ...result }));
   } finally { await driver.close(); await fixture.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
 });

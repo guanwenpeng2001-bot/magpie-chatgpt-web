@@ -1,8 +1,9 @@
 import { BackendError } from '../guard.mjs';
 import { workModels } from './compatibility.mjs';
+import { ADAPTER_VERSION } from './selectors.mjs';
 
 const pickerSelector = 'button[data-composer-navigation-target="reasoning"][aria-haspopup="menu"]';
-const missing = component => new BackendError('pickerMissing', { values: { component, selector: pickerSelector, adapterVersion: '2026-11-12.3' } });
+const missing = component => new BackendError('pickerMissing', { values: { component, selector: pickerSelector, adapterVersion: ADAPTER_VERSION } });
 
 export async function initializeWorkPage(page, { budget }) {
   const mode = page.getByRole('button', { name: /^(Work|工作)$/, exact: true });

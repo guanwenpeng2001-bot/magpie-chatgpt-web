@@ -25,13 +25,16 @@ for (const available of [true, false]) test(`inline model picker verifies ${base
           if(!['ArrowRight','ArrowLeft'].includes(e.key))return;
           const thumb=document.querySelector('[role=slider]');
           const next=Math.max(0,Math.min(4,Number(thumb.getAttribute('aria-valuenow'))+(e.key==='ArrowRight'?1:-1)));
-          setTimeout(()=>{window.steps++;thumb.setAttribute('aria-valuenow',next);
-            document.querySelector('[data-model-picker-view-toggle]').textContent='${version}'+(${available} ? ['Instant','Medium','High','Extended','Pro'][next] : 'Unavailable');},20);
+          window.steps++;thumb.setAttribute('aria-valuenow',next);
+          document.querySelector('[data-model-picker-view-toggle]').textContent='${version}'+(${available} ? ['即时','中','高','极高','Pro'][next] : 'Unavailable');
         };
       </script>`);
     const result = await selectModel(page, slug);
     assert.equal(result.ok, available);
     if (!available) assert.equal(result.kind, 'model-not-offered');
-    if (available) assert.equal(await page.locator('[data-model-picker-view-toggle]').textContent(), version + effort);
+    if (available) {
+      const value = { Instant: '0', Medium: '1', Pro: '4' }[effort];
+      assert.equal(await page.locator('[role="slider"]').getAttribute('aria-valuenow'), value);
+    }
   } finally { await browser.close(); }
 });

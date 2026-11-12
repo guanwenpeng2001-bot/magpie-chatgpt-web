@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installHarvest } from '../backend/harvest.mjs';
+import { wireModels } from '../backend/site-adapter/compatibility.mjs';
 
 test('hidden catalogue IDs replace only the submitted JSON model field', async () => {
   const sent = [];
@@ -18,7 +19,9 @@ test('hidden catalogue IDs replace only the submitted JSON model field', async (
   globalThis.XMLHttpRequest.prototype.open = () => {};
   globalThis.XMLHttpRequest.prototype.send = () => {};
   installHarvest();
-  window.__chatgptHarvest.start('turn', false, 'gpt-5-6-mini');
-  await window.fetch('/backend-api/conversation', { method: 'POST', body: JSON.stringify({ model: 'gpt-5-6-instant', messages: [{ role: 'user', content: 'fixture' }] }) });
-  assert.equal(sent.find(item => item.model)?.model, 'gpt-5-6-mini');
+  for (const [slug, plan] of Object.entries(wireModels)) {
+    window.__chatgptHarvest.start('turn', false, slug);
+    await window.fetch('/backend-api/conversation', { method: 'POST', body: JSON.stringify({ model: plan.uiModel, messages: [{ role: 'user', content: 'fixture' }] }) });
+    assert.equal(sent.filter(item => item.model).at(-1).model, slug);
+  }
 });

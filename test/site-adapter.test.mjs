@@ -35,6 +35,14 @@ test('adapter fixtures exercise page boundaries', async t => {
       assert.equal((await adapter.probePageError(page))?.kind, composer === 'none' ? 'sign-in' : undefined);
       await page.close();
     });
+    await t.test('composer submission prefers the visible send button', async () => {
+      const page = await browser.newPage();
+      await page.setContent('<div id="prompt-textarea" contenteditable="true">prompt</div><button data-testid="send-button" onclick="window.sendClicks=(window.sendClicks||0)+1">Send</button>');
+      const composer = page.locator('#prompt-textarea[contenteditable="true"]');
+      assert.deepEqual(await adapter.submitPrompt(page, composer), { ok: true });
+      assert.equal(await page.evaluate(() => window.sendClicks), 1);
+      await page.close();
+    });
     for (const layout of ['current', 'legacy']) for (const complete of [true, false]) await t.test(`${layout} ${complete}`, async () => {
       const page = await browser.newPage();
       await page.setContent(siteAdapterHtml({ layout, complete }));

@@ -81,22 +81,26 @@ async function selectPickerEffort(page, picker, slug, plan) {
   control = visible(page, '[role="menu"] [data-reasoning-slider="true"]');
   const thumb = page.locator('[role="menu"] [data-model-picker-power-slider] [role="slider"]');
   if (await control.count() !== 1 || await thumb.count() !== 1) return failure('picker-missing', { component: 'model effort control', selector: '[data-reasoning-slider="true"]' });
-  const matches = async () => {
-    const header = (await visible(page, shape.toggle).textContent() ?? '').replace(/\s+/g, '');
+  const maximum = Number(await thumb.getAttribute('aria-valuemax'));
+  if (!Number.isInteger(maximum) || maximum < 1 || maximum > 5) return failure('model-not-offered', { slug, stage: 'effort-verification' });
+  const target = plan.effort === 'Instant' ? 0 : plan.effort === 'Pro' ? maximum : Math.min(1, maximum);
+  const selectedState = async () => {
     const selected = page.locator('[role="menu"] [role="menuitemradio"][aria-checked="true"]');
     const family = await selected.count() === 1 ? (await selected.textContent()).trim() : '';
-    return family === plan.family && (header === plan.version + plan.effort || (plan.version === '6' && header === plan.effort));
+    const value = Number(await thumb.getAttribute('aria-valuenow'));
+    const header = (await visible(page, shape.toggle).textContent() ?? '').replace(/\s+/g, '');
+    return { accepted: family === plan.family && value === target && !/unavailable|notavailable|locked|不可用|無法使用|已锁定|已鎖定/i.test(header), value };
   };
-  let reachedMinimum = false;
-  for (let step = 0; step <= 12; step++) {
-    if (await matches()) return { ok: true };
-    const value = await thumb.getAttribute('aria-valuenow');
-    const maximum = await thumb.getAttribute('aria-valuemax');
-    if (!/^\d+$/.test(value ?? '') || !/^\d+$/.test(maximum ?? '') || Number(maximum) > 5 || Number(value) > Number(maximum)) break;
-    reachedMinimum ||= value === '0';
-    const right = plan.effort === 'Pro' || (plan.effort === 'Medium' && reachedMinimum);
-    if (step === 12 || (right ? value === maximum : value === '0')) break;
-    await control.press(right ? 'ArrowRight' : 'ArrowLeft');
+  for (let step = 0; step <= 10; step++) {
+    const { accepted, value } = await selectedState();
+    if (!Number.isInteger(value) || value < 0 || value > maximum) break;
+    if (accepted) {
+      await delay(shape.pollInterval);
+      if ((await selectedState()).accepted) return { ok: true };
+      continue;
+    }
+    if (step === 10) break;
+    await control.press(value < target ? 'ArrowRight' : 'ArrowLeft');
     try {
       await page.waitForFunction(previous => document.querySelector('[role="menu"] [data-model-picker-power-slider] [role="slider"]')?.getAttribute('aria-valuenow') !== previous, value, { timeout: shape.transitionTimeout });
     } catch { break; }
@@ -143,6 +147,21 @@ export async function readComposer(page) {
   if (await visible(page, shape.composer).count() === 1) return { ok: true };
   failure('composer-missing', { component: 'composer', selector: shape.composer });
   return { ok: false, kind: 'composer-missing' };
+}
+
+export async function submitPrompt(page, composer) {
+  const candidates = [
+    visible(page, shape.send),
+    page.getByRole('button', { name: /^(send|发送)$/i }).filter({ visible: true }),
+  ];
+  for (const candidate of candidates) {
+    if (await candidate.count() && await candidate.last().isEnabled()) {
+      await candidate.last().click();
+      return { ok: true };
+    }
+  }
+  await composer.press('Enter');
+  return { ok: true };
 }
 
 // DOMContentLoaded can precede the site's own checks and hydrated composer.

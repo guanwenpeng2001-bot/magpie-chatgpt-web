@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BackendError } from '../../backend/guard.mjs';
 import { ToolParser } from '../tool-emulation.mjs';
 import { errors } from '../errors.mjs';
+import { estimateTextTokens } from '../usage/context.mjs';
 import { parseSSE, encodeSSE } from './sse.mjs';
 
 const answerPath = '/message/content/parts/0';
@@ -13,6 +14,7 @@ export class AnswerStream {
   handedOff = false;
   assistant = false;
   visible = false;
+  hidden = false;
   operation = 'add';
   path = '';
   accept(frame) {
@@ -49,7 +51,10 @@ export class AnswerStream {
     if (patch.p === '' && patch.v?.message) {
       const message = patch.v.message;
       const assistant = message.author?.role === 'assistant';
-      if (assistant && message.metadata?.is_visually_hidden_from_conversation === true) throw new BackendError('hidden');
+      if (assistant && message.metadata?.is_visually_hidden_from_conversation === true) {
+        this.hidden = true;
+        return;
+      }
       if (assistant && message.recipient === 'all' && (!message.channel || message.channel === 'final')) {
         if (this.visible && this.text) throw new BackendError('protocol');
         this.visible = true;
@@ -61,7 +66,10 @@ export class AnswerStream {
       return;
     }
     if (typeof patch.p !== 'string' || !patch.p.startsWith('/message/')) throw new BackendError('protocol');
-    if (this.assistant && patch.p === '/message/metadata/is_visually_hidden_from_conversation' && patch.v === true) throw new BackendError('hidden');
+    if (this.assistant && patch.p === '/message/metadata/is_visually_hidden_from_conversation' && patch.v === true) {
+      this.hidden = true;
+      return;
+    }
     if (!this.visible) return;
     if (patch.p === answerPath) {
       if (typeof patch.v !== 'string') throw new BackendError('protocol');
@@ -79,7 +87,7 @@ export class AnswerStream {
   }
   finish() {
     if (!this.complete) throw new BackendError('truncated');
-    if (!this.text.trim()) throw new BackendError('empty');
+    if (!this.text.trim()) throw new BackendError(this.hidden ? 'hidden' : 'empty');
   }
 }
 
@@ -88,21 +96,23 @@ const event = value => encodeSSE({ event: value.type, data: value });
 export async function* translate(source, prepared) {
   const parser = prepared.tools?.length ? new ToolParser(prepared) : null;
   const choice = prepared.toolChoice ?? prepared.choice;
-  let index = 0, textOpen = false, calls = 0, outputChars = 0, complete = false, usage, visibleText = false;
-  yield event({ type: 'message_start', message: { id: `msg_${randomUUID()}`, type: 'message', role: 'assistant', model: prepared.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: Math.ceil((prepared.prompt?.length ?? JSON.stringify(prepared.history ?? []).length) / 4), output_tokens: 0 } } });
+  let index = 0, textOpen = false, calls = 0, outputText = '', complete = false, usage, visibleText = false;
+  const inputTokens = prepared.usageEstimate?.inputTokens
+    ?? estimateTextTokens(prepared.prompt ?? JSON.stringify(prepared.history ?? []));
+  yield event({ type: 'message_start', message: { id: `msg_${randomUUID()}`, type: 'message', role: 'assistant', model: prepared.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } } });
   function* emit(items) {
     for (const item of items) {
       if (item.text) {
         if (!textOpen) { yield event({ type: 'content_block_start', index, content_block: { type: 'text', text: '' } }); textOpen = true; }
         visibleText ||= !!item.text.trim();
-        outputChars += [...item.text].length;
+        outputText += item.text;
         yield event({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: item.text } });
       } else if (item.tool) {
         if (++calls > 1 && choice.disable_parallel_tool_use) throw new BackendError('toolParallel');
         if (textOpen) { yield event({ type: 'content_block_stop', index: index++ }); textOpen = false; }
         const { input, ...block } = item.tool;
         const json = JSON.stringify(input);
-        outputChars += [...json].length;
+        outputText += json;
         yield event({ type: 'content_block_start', index, content_block: { ...block, input: {} } });
         yield event({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json } });
         yield event({ type: 'content_block_stop', index: index++ });
@@ -141,7 +151,7 @@ export async function* translate(source, prepared) {
   if (['any', 'tool'].includes(choice?.type) && !calls) throw new BackendError('toolRequired');
   if (!visibleText && !calls) throw new BackendError('empty');
   if (textOpen) yield event({ type: 'content_block_stop', index });
-  yield event({ type: 'message_delta', delta: { stop_reason: calls ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: usage ?? { output_tokens: Math.ceil(outputChars / 4) } });
+  yield event({ type: 'message_delta', delta: { stop_reason: calls ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: usage ?? { output_tokens: estimateTextTokens(outputText) } });
   yield event({ type: 'message_stop' });
 }
 
