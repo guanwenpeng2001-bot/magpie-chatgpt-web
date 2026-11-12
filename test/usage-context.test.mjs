@@ -77,6 +77,20 @@ test('context limits follow the conservative browser mode rather than the picker
   }
 });
 
+test('preflight follows the Magpie effort selected on a public base family', () => {
+  const request = effort => ({
+    model: 'gpt-6',
+    messages: [{ role: 'user', content: 'hello' }],
+    stream: false,
+  });
+  const instant = prepare(request('low'), { 'x-magpie-effort': 'low' });
+  const reasoning = prepare(request('high'), { 'x-magpie-effort': 'high' });
+  const pro = prepare(request('max'), { 'x-magpie-effort': 'max' });
+  assert.equal(estimatePreparedInput(instant).contextLimit, CHATGPT_WEB_INSTANT_CONTEXT_LIMIT);
+  assert.equal(estimatePreparedInput(reasoning).contextLimit, CHATGPT_WEB_REASONING_CONTEXT_LIMIT);
+  assert.equal(estimatePreparedInput(pro).contextLimit, CHATGPT_WEB_PRO_CONTEXT_LIMIT);
+});
+
 test('over-context is rejected as a typed, actionable error before browser dispatch', () => {
   const prepared = prepare({
     model: 'gpt-6',

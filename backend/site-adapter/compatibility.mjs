@@ -1,14 +1,40 @@
 export const selectionPlans = Object.freeze(Object.fromEntries(
   [['gpt-5-6', 'GPT-5.6 Sol', '5.6'], ['gpt-6', 'GPT-6', '6']].flatMap(([base, family, version]) =>
-    [['', 'Medium'], ['-instant', 'Instant'], ['-thinking', 'Medium'], ['-pro', 'Pro']].map(([suffix, effort]) =>
+    [
+      ['', 'Medium'], ['-instant', 'Instant'], ['-thinking', 'Medium'],
+      ['-high', 'High'], ['-extra-high', 'Extra High'], ['-pro', 'Pro'],
+    ].map(([suffix, effort]) =>
       [base + suffix, Object.freeze({ family, version, effort })]))));
 
-export const workModels = Object.freeze({
+const baseWorkModels = Object.freeze({
   'gpt-5.6-sol-wm': 'GPT-5.6 Sol', 'gpt-6-sol-wm': 'GPT-6 Sol',
   'gpt-6-luna-wm': 'GPT-6 Luna', 'gpt-6.1-sol-wm': 'GPT-6.1 Sol',
   'gpt-5.6-terra-wm': 'GPT-5.6 Terra', 'gpt-5.6-luna-wm': 'GPT-5.6 Luna',
   'gpt-6-astra-wm': 'GPT-6 Astra', 'gpt-6.1-terra-wm': 'GPT-6.1 Terra',
 });
+
+export const workEfforts = Object.freeze(['Light', 'Medium', 'High', 'Extra High', 'Max', 'Ultra']);
+const workEffortSlugs = Object.freeze({
+  Light: 'low',
+  Medium: 'medium',
+  High: 'high',
+  'Extra High': 'xhigh',
+  Max: 'max',
+  Ultra: 'ultra',
+});
+
+export const workSelectionPlans = Object.freeze(Object.fromEntries(
+  Object.entries(baseWorkModels).flatMap(([slug, family]) => workEfforts.map(effort => {
+    const variant = effort === 'Medium' ? slug : `${slug}-${workEffortSlugs[effort]}`;
+    return [variant, Object.freeze({ family, effort })];
+  })),
+));
+
+export const workModels = Object.freeze(Object.fromEntries(
+  Object.entries(workSelectionPlans)
+    .filter(([, plan]) => plan.effort === 'Medium')
+    .map(([slug, plan]) => [slug, plan.family]),
+));
 
 export const wireModels = Object.freeze({
   'gpt-5-6-mini': { uiModel: 'gpt-5-6-instant', name: 'GPT-5.6 Luna (mini)' },

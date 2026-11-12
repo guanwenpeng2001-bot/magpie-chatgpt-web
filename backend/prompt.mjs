@@ -21,11 +21,11 @@ export function compile(prepared, resumeFrom = 0) {
   if (tools?.length) {
     const choice = prepared.toolChoice ?? prepared.choice;
     const required = ['any', 'tool'].includes(choice?.type);
-    parts.push(`[Client action reminder]\n${required ? 'Emit at least one required action envelope now.' : 'If this turn needs a listed app-side action, encode it now.'} This is the response serialization format; do not claim that the workspace or client action is unavailable because the host executes the envelope after your response.`);
+    parts.push(`[Client action reminder]\n${required ? 'Emit at least one required action envelope now.' : 'If this turn needs a listed app-side action, encode it now.'} This is the response serialization format; do not claim that the workspace or client action is unavailable because the host executes the envelope after your response. For local files, commands, tests, tools or agents, prefer the listed action when the user explicitly asks you to operate on them.`);
   }
   if (history.at(-1)?.role === 'user' && typeof history.at(-1)?.content === 'string' &&
       history.at(-1).content.startsWith('[Tool result]')) {
-    parts.push('[Client continuation]\nThe preceding client action has completed. Do not repeat it. Return the final answer unless the result explicitly requires one different, necessary action; if another action is required, emit exactly one complete envelope and no text after it.');
+    parts.push('[Client continuation]\nThe preceding client action has completed. Do not repeat it. Re-read the original user request and its ordered requirements. If any requested action or dependent step remains, emit exactly one complete envelope now and no text. Only return the final answer after every requested action is complete.');
   }
   return parts.join('\n\n');
 }

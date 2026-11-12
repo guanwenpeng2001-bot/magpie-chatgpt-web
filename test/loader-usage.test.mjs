@@ -192,7 +192,10 @@ test('a large tool catalogue is compacted dynamically before dispatch and keeps 
     bridge: {
       async open(value) {
         command = value;
-        return upstream('catalog accepted');
+        return upstream(`${value.start}${JSON.stringify({
+          name: 'host_tool_0',
+          input: { command: 'Get-Content package.json' },
+        })}${value.end}`);
       },
     },
     profileRoot: '.',
@@ -200,12 +203,16 @@ test('a large tool catalogue is compacted dynamically before dispatch and keeps 
   const client = await load(auth);
   const response = await client.fetch('https://chatgpt-web.invalid/v1/messages', {
     method: 'POST',
-    body: JSON.stringify(request({ model: 'gpt-5-6-pro', tools })),
+    body: JSON.stringify(request({
+      model: 'gpt-5-6-pro',
+      tools,
+      messages: [{ role: 'user', content: 'Inspect this project and its files.' }],
+    })),
   });
   assert.equal(response.status, 200);
   assert.equal(command.tools.length, 330);
-  assert.ok(command.promptTools.length < 330);
-  assert.ok(command.toolCompaction.exposedToolCount <= 64);
+  assert.equal(command.promptTools.length, 330);
+  assert.equal(command.toolCompaction.exposedToolCount, 330);
   assert.ok(command.toolCompaction.level >= 1);
   assert.ok(command.usageEstimate.inputTokens < command.usageEstimate.contextLimit);
   assert.ok(command.prompt.length < JSON.stringify(tools).length);
@@ -215,6 +222,37 @@ test('a large tool catalogue is compacted dynamically before dispatch and keeps 
     description: verbose,
     minLength: 1,
   });
+});
+
+test('a compacted all-tool catalogue that still exceeds context fails before browser dispatch', async () => {
+  const properties = Object.fromEntries(Array.from({ length: 18 }, (_, index) => [
+    `property_${index}_${'x'.repeat(80)}`,
+    { type: 'string' },
+  ]));
+  const tools = Array.from({ length: 512 }, (_, index) => ({
+    name: `host_tool_${index}`,
+    input_schema: {
+      type: 'object',
+      properties,
+      required: Object.keys(properties),
+    },
+  }));
+  let opened = false;
+  const load = makeLoader({
+    bridge: { async open() { opened = true; throw new Error('must not open'); } },
+    profileRoot: '.',
+  });
+  const client = await load(auth);
+  const response = await client.fetch('https://chatgpt-web.invalid/v1/messages', {
+    method: 'POST',
+    body: JSON.stringify(request({
+      messages: [{ role: 'user', content: 'Inspect everything.' }],
+      tools,
+    })),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'contextLength');
+  assert.equal(opened, false);
 });
 
 test('successive tool-round requests each emit their own stream usage', async () => {

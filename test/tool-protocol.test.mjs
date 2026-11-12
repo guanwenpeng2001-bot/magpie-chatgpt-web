@@ -5,8 +5,8 @@ import { prepare } from '../src/wire/prepare.mjs';
 import { reconstruct, translate } from '../src/wire/translate.mjs';
 import {
   ToolParser,
+  compactToolDefinitions,
   normalizeAssistantContent,
-  selectToolDefinitionsForPrompt,
 } from '../src/tool-emulation.mjs';
 import { parseSSE } from '../src/wire/sse.mjs';
 const protocol = { prepare, translate, ToolParser };
@@ -20,7 +20,9 @@ const collect = async (source, prepared) => { const events = []; for await (cons
 
 test('prepare accepts client tools and injects a fresh prompt-level protocol', () => {
   let prepared;
-  assert.doesNotThrow(() => { prepared = protocol.prepare(request()); });
+  assert.doesNotThrow(() => {
+    prepared = protocol.prepare(request({ messages: [{ role: 'user', content: 'Look up this project in the tool.' }] }));
+  });
   assert.match(prepared.prompt, /\[Client action format\]/);
   assert.match(prepared.start, /^\[MAGPIE_TOOL_[a-f0-9]{32}\]$/);
   assert.ok(prepared.prompt.includes(prepared.start));
@@ -37,26 +39,89 @@ test('ordinary questions containing action words remain text-eligible with tools
   assert.equal(events.some(event => event.content_block?.type === 'tool_use'), false);
 });
 
-test('explicit project inspection requests a tool while concept explanations stay text', () => {
+test('automatic tool choice preserves tools unless the host explicitly forbids them', () => {
+  const tools = [{ name: 'exec_command', input_schema: { type: 'object', properties: { cmd: { type: 'string' } } } }];
+  const text = protocol.prepare(request({ messages: [{ role: 'user', content: 'Explain why recursion terminates.' }], tools }));
+  assert.equal(text.toolExposure, 'available');
+  assert.equal(text.toolExposureReason, 'host-auto');
+  assert.equal(text.promptTools, undefined);
+  assert.match(text.prompt, /\[Client action format\]/);
+
+  const exactReply = protocol.prepare(request({ messages: [{ role: 'user', content: 'Reply exactly TEXT_OK and nothing else.' }], tools }));
+  assert.equal(exactReply.toolExposure, 'available');
+  assert.equal(exactReply.promptTools, undefined);
+  assert.match(exactReply.prompt, /\[Client action format\]/);
+
+  const ambiguous = protocol.prepare(request({ messages: [{ role: 'user', content: 'Continue with the next step.' }], tools }));
+  assert.equal(ambiguous.toolExposure, 'available');
+  assert.equal(ambiguous.promptTools, undefined);
+  assert.match(ambiguous.prompt, /\[Client action format\]/);
+
+  const politeAmbiguous = protocol.prepare(request({ messages: [{ role: 'user', content: 'Can you help me edit a file?' }], tools }));
+  assert.equal(politeAmbiguous.toolExposure, 'available');
+  assert.equal(politeAmbiguous.promptTools, undefined);
+
+  const action = protocol.prepare(request({ messages: [{ role: 'user', content: 'Use exec_command to inspect this project.' }], tools }));
+  assert.equal(action.toolExposure, 'selected');
+  assert.equal(action.toolExposureReason, 'explicit-named-action');
+  assert.equal(action.promptTools, undefined);
+  assert.match(action.prompt, /\[Client action format\]/);
+
+  const forbidden = protocol.prepare(request({
+    messages: [{ role: 'user', content: 'Answer with text only.' }],
+    tools,
+    tool_choice: { type: 'none' },
+  }));
+  assert.equal(forbidden.toolExposure, 'none');
+  assert.equal(forbidden.toolExposureReason, 'host-choice');
+  assert.deepEqual(forbidden.promptTools, []);
+  assert.doesNotMatch(forbidden.prompt, /\[Client action format\]/);
+});
+
+test('ambiguous and indirect Agent requests fail open to model-selected tools', () => {
   const tools = [{ name: 'exec_command', input_schema: { type: 'object', properties: { cmd: { type: 'string' } } } }];
   for (const content of [
     '看一下这一个项目有一些什么东西。',
     '请检查当前仓库并说明目录结构。',
-    '运行一个智能体检查这个项目。',
+    '运行检查这个项目。',
     'Inspect this project and explain its structure.',
-    'Use a subagent to inspect this project.',
+    'Can you fix the bug in auth?',
+    'Could you run the tests?',
+    'Would you inspect this project and update the README?',
+    'Do you mind fixing this file?',
+    'Explain the bug and fix it.',
+    'What is wrong? Then fix this file.',
+    'How does this work? Update the README.',
+    'Please explain the error and then run the tests.',
+    'Why is this failing? Please patch it.',
+    'Summarize this repository and identify risky code.',
+    'Run a risk analysis on this plan.',
+    'The repo seems broken; take care of it.',
+    '先解释一下；然后修改这个文件。',
+    'Can you investigate what changed here?',
   ]) {
     const prepared = protocol.prepare(request({ messages: [{ role: 'user', content }], tools }));
-    assert.deepEqual(prepared.toolChoice, { type: 'any' }, content);
+    assert.equal(prepared.toolChoice.type, 'auto', content);
+    assert.equal(prepared.toolExposure, 'available', content);
+    assert.equal(prepared.toolExposureReason, 'host-auto', content);
   }
   for (const content of [
     'What does run mean in JavaScript?',
     'Explain how to inspect a project.',
-    '这个项目是什么？',
+    'How do I fix this?',
+    'Explain how to fix this.',
+    'Compare read and write performance.',
+    'Explain unit and test coverage.',
+    'What are read and write throughput differences?',
   ]) {
     const prepared = protocol.prepare(request({ messages: [{ role: 'user', content }], tools }));
     assert.equal(prepared.toolChoice.type, 'auto', content);
+    assert.equal(prepared.toolExposure, 'available', content);
   }
+  const chinese = protocol.prepare(request({ messages: [{ role: 'user', content: '这个项目是什么？' }], tools }));
+  assert.equal(chinese.toolChoice.type, 'auto');
+  assert.equal(chinese.toolExposure, 'available');
+  assert.match(chinese.prompt, /inspect or change local files/);
 });
 
 test('an exact tool name in the user turn requests that tool without using broad keyword matching', () => {
@@ -67,47 +132,47 @@ test('an exact tool name in the user turn requests that tool without using broad
   assert.deepEqual(prepared.toolChoice, { type: 'tool', name: 'exec_command' });
 });
 
+test('an ordered multi-tool request forces the first named tool', () => {
+  const prepared = protocol.prepare(request({
+    messages: [{ role: 'user', content: 'Use apply_patch to edit the file, then call exec_command to read it.' }],
+    tools: [
+      { name: 'exec_command', input_schema: { type: 'object', properties: { cmd: { type: 'string' } } } },
+      { name: 'apply_patch', input_schema: { type: 'object', properties: { patch: { type: 'string' } } } },
+    ],
+  }));
+  assert.deepEqual(prepared.toolChoice, { type: 'tool', name: 'apply_patch' });
+});
+
 test('mentioning or explicitly excluding a tool name never forces a call', () => {
   const tools = [{ name: 'exec_command', input_schema: { type: 'object' } }];
   for (const content of [
     'Explain what exec_command means.',
     'Do not call exec_command for this question.',
+    'Can I use exec_command to inspect a repository?',
+    'How can an agent invoke exec_command?',
   ]) {
     const prepared = protocol.prepare(request({ messages: [{ role: 'user', content }], tools }));
     assert.equal(prepared.toolChoice.type, 'auto', content);
   }
 });
 
-test('large client catalogues retain core controls and the tools named by the current turn', () => {
-  const support = {
-    history: [{ role: 'user', content: 'Use exec_command, then inspect an image with image_gen.' }],
-  };
-  const tools = [
-    { name: 'exec_command', input_schema: { type: 'object' } },
-    { name: 'write_stdin', input_schema: { type: 'object' } },
-    { name: 'image_gen__imagegen', input_schema: { type: 'object' } },
-    ...Array.from({ length: 330 }, (_, index) => ({ name: `ext__unrelated_${index}`, input_schema: { type: 'object' } })),
-  ];
-  const selected = selectToolDefinitionsForPrompt(tools, support).map(tool => tool.name);
-  assert.ok(selected.includes('exec_command'));
-  assert.ok(selected.includes('write_stdin'));
-  assert.ok(selected.includes('image_gen__imagegen'));
-  assert.ok(selected.length <= 64);
-});
-
-test('a forced tool remains exposed even when it ranks beyond the first 64 tools', () => {
-  const tools = Array.from({ length: 100 }, (_, index) => ({ name: `ext__tool_${index}`, input_schema: { type: 'object' } }));
-  const selected = selectToolDefinitionsForPrompt(tools, {
-    history: [{ role: 'user', content: 'no named tool' }],
-    toolChoice: { type: 'tool', name: 'ext__tool_99' },
-  });
-  assert.equal(selected.length, 64);
-  assert.equal(selected[0].name, 'ext__tool_99');
-});
-
-test('small tool catalogues are not filtered', () => {
-  const tools = Array.from({ length: 64 }, (_, index) => ({ name: `tool_${index}`, input_schema: { type: 'object' } }));
-  assert.equal(selectToolDefinitionsForPrompt(tools, request()).length, 64);
+test('tool compaction preserves every tool name and required input property', () => {
+  const tools = Array.from({ length: 330 }, (_, index) => ({
+    name: `tool_${index}`,
+    description: `Tool ${index} description`,
+    input_schema: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+  }));
+  for (const level of [1, 2, 3, 4]) {
+    const compacted = compactToolDefinitions(tools, level);
+    assert.equal(compacted.length, tools.length);
+    assert.deepEqual(compacted.map(tool => tool.name), tools.map(tool => tool.name));
+    assert.deepEqual(compacted[0].input_schema.required, ['command']);
+    assert.equal(compacted[0].input_schema.properties.command.type, 'string');
+  }
 });
 
 test('parser survives every offset inside opening and closing ASCII delimiters', () => {

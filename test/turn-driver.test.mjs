@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { Bridge } from '../src/bridge.mjs';
 import { serve } from '../backend/main.mjs';
+import { prepare } from '../src/wire/prepare.mjs';
 
 const command = (extra = {}) => ({ auth: { profile: 'fixture', refresh: 'next-auth.session-token=fixture' }, model: 'auto', history: [{ role: 'user', content: 'first' }], ...extra });
 const guard = () => new AccountGuard({ sleep: async () => {} });
@@ -99,6 +100,185 @@ test('rendered DOM supersedes stream markdown in AnswerStream', () => {
   answer.accept({ event: 'dom', data: { text: 'bold', complete: true } });
   answer.finish();
   assert.equal(answer.text, 'bold');
+});
+
+test('a marker-only Web action is repaired in the same ChatGPT page before completion', async () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [{ role: 'user', content: 'Inspect this project.' }],
+    tools: [{
+      name: 'exec_command',
+      input_schema: {
+        type: 'object',
+        properties: { cmd: { type: 'string' } },
+        required: ['cmd'],
+        additionalProperties: false,
+      },
+    }],
+    conversation_id: 'repair-action',
+  });
+  let observations = 0;
+  const h = harness({
+    observe: async (page, { emit }) => {
+      observations++;
+      if (observations === 1) {
+        await emit({ event: 'dom', data: { text: prepared.start } });
+        return { text: prepared.start, route: 'dom' };
+      }
+      assert.match(h.calls.filter(call => Array.isArray(call) && call[0] === 'fill').at(-1)[1], /omitted the required JSON/);
+      return {
+        text: '{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}',
+        route: 'dom',
+      };
+    },
+  });
+  try {
+    const { frames, result } = await h.complete(command(prepared));
+    assert.equal(result.repaired, true);
+    assert.equal(result.text, `${prepared.start}{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}${prepared.end}`);
+    assert.deepEqual(frames, [
+      { type: 'delta', index: 0, text: prepared.start },
+      { type: 'delta', index: 0, text: `{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}${prepared.end}` },
+      { type: 'finish', reason: 'complete' },
+    ]);
+    assert.equal(h.calls.filter(call => call === 'submit').length, 2);
+  } finally {
+    await h.driver.close();
+  }
+});
+
+test('a failed first action repair gets one bounded second correction attempt', async () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [{ role: 'user', content: 'Inspect this project.' }],
+    tools: [{
+      name: 'exec_command',
+      input_schema: {
+        type: 'object',
+        properties: { cmd: { type: 'string' } },
+        required: ['cmd'],
+      },
+    }],
+    conversation_id: 'repair-action-retry',
+  });
+  let observations = 0;
+  const h = harness({
+    observe: async () => {
+      observations++;
+      if (observations === 1) return { text: prepared.start, route: 'dom' };
+      if (observations === 2) throw new BackendError('empty');
+      return { text: '{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}', route: 'dom' };
+    },
+  });
+  try {
+    const { result } = await h.complete(command(prepared));
+    assert.equal(result.repaired, true);
+    assert.equal(h.calls.filter(call => call === 'submit').length, 3);
+    assert.match(
+      h.calls.filter(call => Array.isArray(call) && call[0] === 'fill').at(-1)[1],
+      /Return the JSON object itself/,
+    );
+  } finally {
+    await h.driver.close();
+  }
+});
+
+test('tool repair never overrides an explicit no-tool choice', async () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [{ role: 'user', content: 'Answer without a tool.' }],
+    tools: [{
+      name: 'exec_command',
+      input_schema: { type: 'object', properties: { cmd: { type: 'string' } } },
+    }],
+    tool_choice: { type: 'none' },
+    conversation_id: 'repair-none',
+  });
+  let observations = 0;
+  const h = harness({
+    observe: async () => {
+      observations++;
+      return { text: prepared.start, route: 'dom' };
+    },
+  });
+  try {
+    await assert.rejects(h.complete(command(prepared)), { code: 'toolIncomplete' });
+    assert.equal(observations, 1);
+    assert.equal(h.calls.filter(call => call === 'submit').length, 1);
+  } finally {
+    await h.driver.close();
+  }
+});
+
+test('cancellation interrupts an in-flight action repair and releases the binding', async () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [{ role: 'user', content: 'Inspect this project.' }],
+    tools: [{
+      name: 'exec_command',
+      input_schema: { type: 'object', properties: { cmd: { type: 'string' } } },
+    }],
+    conversation_id: 'repair-cancel',
+  });
+  let repairStarted;
+  const started = new Promise(resolve => { repairStarted = resolve; });
+  let observations = 0;
+  const h = harness({
+    observe: async (page, { signal }) => {
+      observations++;
+      if (observations === 1) return { text: prepared.start, route: 'dom' };
+      repairStarted();
+      await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    },
+  });
+  const controller = new AbortController();
+  const request = h.complete(command(prepared), guard(), controller.signal);
+  const rejected = assert.rejects(request, { code: 'upstream' });
+  try {
+    await started;
+    controller.abort();
+    await rejected;
+    assert.equal(h.pages[0].isClosed(), true);
+    assert.equal(h.driver.bindings.entries.has('repair-cancel'), false);
+  } finally {
+    await h.driver.close();
+  }
+});
+
+test('a concurrent request cannot take the same conversation while repair is running', async () => {
+  const prepared = prepare({
+    model: 'auto',
+    messages: [{ role: 'user', content: 'Inspect this project.' }],
+    tools: [{
+      name: 'exec_command',
+      input_schema: { type: 'object', properties: { cmd: { type: 'string' } } },
+    }],
+    conversation_id: 'repair-busy',
+  });
+  let repairStarted;
+  let releaseRepair;
+  const started = new Promise(resolve => { repairStarted = resolve; });
+  const held = new Promise(resolve => { releaseRepair = resolve; });
+  let observations = 0;
+  const h = harness({
+    observe: async () => {
+      observations++;
+      if (observations === 1) return { text: prepared.start, route: 'dom' };
+      repairStarted();
+      await held;
+      return { text: '{"name":"exec_command","input":{"cmd":"Get-ChildItem"}}', route: 'dom' };
+    },
+  });
+  const first = h.complete(command(prepared));
+  try {
+    await started;
+    await assert.rejects(h.complete(command(prepared)), { code: 'binding' });
+    releaseRepair();
+    assert.equal((await first).result.repaired, true);
+  } finally {
+    releaseRepair();
+    await h.driver.close();
+  }
 });
 
 test('driver compiles history, attaches images and returns normalized rendered output', async () => {

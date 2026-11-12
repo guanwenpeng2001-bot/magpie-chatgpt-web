@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ADAPTER_VERSION, shape } from './selectors.mjs';
 import { BackendError } from '../guard.mjs';
-import { selectionPlans, unsupportedModels, workModels, wireModels } from './compatibility.mjs';
+import { selectionPlans, unsupportedModels, workSelectionPlans, wireModels } from './compatibility.mjs';
 import { selectWorkModel } from './work.mjs';
 export { initializeWorkPage, stopWork } from './work.mjs';
 import { IMAGE_MODEL, selectImageTool } from './images.mjs';
@@ -22,7 +22,7 @@ export async function selectModel(page, slug) {
     if (!instant.ok) return instant;
     return selectImageTool(page);
   }
-  if (Object.hasOwn(workModels, slug)) return selectWorkModel(page, slug);
+  if (Object.hasOwn(workSelectionPlans, slug)) return selectWorkModel(page, slug);
   if (Object.hasOwn(unsupportedModels, slug)) return failure('model-unsupported', { slug });
   const plan = Object.hasOwn(selectionPlans, slug) ? selectionPlans[slug] : undefined;
   const choose = async entries => {
@@ -83,7 +83,11 @@ async function selectPickerEffort(page, picker, slug, plan) {
   if (await control.count() !== 1 || await thumb.count() !== 1) return failure('picker-missing', { component: 'model effort control', selector: '[data-reasoning-slider="true"]' });
   const maximum = Number(await thumb.getAttribute('aria-valuemax'));
   if (!Number.isInteger(maximum) || maximum < 1 || maximum > 5) return failure('model-not-offered', { slug, stage: 'effort-verification' });
-  const target = plan.effort === 'Instant' ? 0 : plan.effort === 'Pro' ? maximum : Math.min(1, maximum);
+  const targets = { Instant: 0, Medium: 1, High: 2, 'Extra High': 3, Pro: 4 };
+  const target = targets[plan.effort];
+  if (!Number.isInteger(target) || maximum < target) {
+    return failure('model-not-offered', { slug, stage: 'effort-verification' });
+  }
   const selectedState = async () => {
     const selected = page.locator('[role="menu"] [role="menuitemradio"][aria-checked="true"]');
     const family = await selected.count() === 1 ? (await selected.textContent()).trim() : '';

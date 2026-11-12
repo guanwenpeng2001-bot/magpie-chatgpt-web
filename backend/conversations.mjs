@@ -5,7 +5,7 @@ const digest = value => createHash('sha256').update(JSON.stringify(value)).diges
 function fingerprint(request) {
   return {
     toolsDigest: digest(request.tools ?? []),
-    choiceDigest: digest(request.toolChoice ?? request.choice ?? { type: 'auto' }),
+    choiceDigest: digest(request.bindingChoice ?? request.toolChoice ?? request.choice ?? { type: 'auto' }),
     imageSignatures: (request.images ?? []).map(image => digest(image)),
   };
 }
@@ -21,7 +21,10 @@ export class Conversations {
     const key = request.conversationKey;
     let entry = key && this.entries.get(key);
     if (entry) {
-      if (entry.account !== account || entry.busy || entry.model !== request.model || entry.system !== request.system) throw new BackendError('binding');
+      if (entry.account !== account || entry.busy || entry.model !== request.model ||
+          entry.selectionModel !== (request.selectionModel ?? request.model) || entry.system !== request.system) {
+        throw new BackendError('binding');
+      }
       const current = fingerprint(request);
       const pending = Boolean(entry.pendingChallenge);
       const imagesMatch = pending || !entry.history
@@ -48,6 +51,7 @@ export class Conversations {
         key,
         account,
         model: request.model,
+        selectionModel: request.selectionModel ?? request.model,
         system: request.system,
         fingerprint: fingerprint(request),
         used: this.now(),

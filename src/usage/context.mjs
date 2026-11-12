@@ -2,7 +2,7 @@ import { BackendError } from '../../backend/guard.mjs';
 import {
   selectionPlans,
   wireModels,
-  workModels,
+  workSelectionPlans,
 } from '../../backend/site-adapter/compatibility.mjs';
 
 // These ceilings include the hidden product reserve below. They follow the measured browser
@@ -56,10 +56,10 @@ export function resolveChatGptWebContextLimit(model) {
       kind: 'conservative ChatGPT Web Instant browser',
     };
   }
-  if (plan || Object.hasOwn(workModels, originalSlug)) {
+  if (plan || Object.hasOwn(workSelectionPlans, originalSlug)) {
     return {
       limit: CHATGPT_WEB_REASONING_CONTEXT_LIMIT,
-      kind: Object.hasOwn(workModels, originalSlug)
+      kind: Object.hasOwn(workSelectionPlans, originalSlug)
         ? 'conservative ChatGPT Web Work browser'
         : 'conservative ChatGPT Web reasoning browser',
     };
@@ -84,7 +84,9 @@ export function estimatePreparedInput(prepared) {
   const historyTokens = history.reduce((total, message) => total + estimateTextTokens(message?.content), 0);
   const systemTokens = estimateTextTokens(prepared?.system);
   const toolSchemaTokens = tools.length ? estimateTextTokens(JSON.stringify(tools)) : 0;
-  const context = resolveChatGptWebContextLimit(prepared?.model);
+  // Magpie selects efforts through x-magpie-effort on the base model. Use the resolved
+  // browser selection for preflight so Instant cannot inherit the base reasoning ceiling.
+  const context = resolveChatGptWebContextLimit(prepared?.selectionModel ?? prepared?.model);
   return {
     inputTokens: CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + promptTokens + imageTokens,
     promptTokens,

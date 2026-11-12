@@ -93,6 +93,17 @@ browserTest('message_stream_complete terminator completes the SSE route without 
   assert.equal(run.queue.length, 0);
 });
 
+browserTest('a double JSON-encoded delta remains compatible with the SSE route', async t => {
+  const { page, options } = await fixture(t, { conversation: (req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(sse('delta', JSON.stringify(JSON.stringify(visibleMessage('Double encoded answer')))));
+    res.write(sse('', JSON.stringify('[DONE]')));
+    res.end();
+  } });
+  await page.evaluate(() => fetch('/backend-api/conversation'));
+  assert.deepEqual(await observeTurn(page, options), { text: 'Double encoded answer', route: 'sse' });
+});
+
 browserTest('finished_successfully status patch completes the stream', async t => {
   const { page, options } = await fixture(t, { conversation: (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -254,6 +265,29 @@ browserTest('complete stream waits for a rendered prefix to become the full answ
   assert.deepEqual(events.filter(event => event.event === 'dom').map(event => event.data.text), ['First half', fullText]);
   assert.equal(events.filter(event => event.event === '').length, 1);
   assert.equal(events.at(-1).event, '');
+});
+
+browserTest('a complete SSE action recovers a DOM answer that rendered only its opening marker', async t => {
+  const marker = '[MAGPIE_TOOL_0123456789abcdef]';
+  const fullText = `${marker}{"name":"exec_command","input":{"cmd":"Get-Content package.json"}}[/MAGPIE_TOOL_0123456789abcdef]`;
+  const { page, options, events, eof } = await fixture(t, {
+    html: current(marker, 'in-progress'),
+    conversation: (req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(sse('delta', visibleMessage(fullText)) + terminator({ type: 'message_stream_complete' }));
+    },
+  });
+  await page.evaluate(() => fetch('/backend-api/conversation'));
+  await eof;
+  setTimeout(() => {
+    page.evaluate(() => {
+      document.querySelector('article').dataset.talvtTurnState = 'complete';
+    }).catch(() => {});
+  }, 700);
+  assert.deepEqual(await observeTurn(page, options), { text: fullText, route: 'sse' });
+  assert.equal(events.filter(event => event.event === '').length, 1);
+  assert.ok(events.some(event => event.event === 'dom' && event.data.text === marker));
+  assert.ok(events.some(event => event.event === 'answer' && event.data.text.includes('"exec_command"')));
 });
 
 browserTest('abort stops observation without emitting completion', async t => {

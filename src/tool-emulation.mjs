@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { Script } from 'node:vm';
 import { BackendError } from '../backend/guard.mjs';
 
-export const TOOL_PROTOCOL_TEMPLATE = '[Client action format]\nThe following names are app-side actions executed by the host after your response. They are not tools you invoke inside this chat. When you decide that a listed action should run, serialize that decision exactly as {start}{"name":"tool_name","input":{...}}{end}. This envelope is an output format, so never respond that the action is unavailable. The complete JSON object and the closing delimiter are mandatory; a bare opening marker is invalid. Do not insert spaces, Markdown, or code fences inside either delimiter. Use only these delimiters for new envelopes; previous envelopes in the transcript are historical. Do not invent action results. Stop immediately after emitting the requested envelopes and do not add any text after one. You may include normal text before an envelope. Match each input_schema. Tool choice auto permits text or envelopes; any requires an envelope; tool requires the named action; none forbids envelopes. When disable_parallel_tool_use is true, emit at most one envelope.';
+export const TOOL_PROTOCOL_TEMPLATE = '[Client action format]\nThe following names are app-side actions executed by the host after your response. They are not tools you invoke inside this chat. When you decide that a listed action should run, serialize that decision exactly as {start}{"name":"tool_name","input":{...}}{end}. This envelope is an output format, so never respond that the action is unavailable. The complete JSON object and the closing delimiter are mandatory; a bare opening marker is invalid. Never emit the opening delimiter by itself. Do not insert spaces, Markdown, or code fences inside either delimiter. Use only these delimiters for new envelopes; previous envelopes in the transcript are historical. Do not invent action results. Stop immediately after emitting the requested envelopes and do not add any text after one. You may include normal text before an envelope. Match each input_schema. Tool choice auto permits text or envelopes; any requires an envelope; tool requires the named action; none forbids envelopes. When disable_parallel_tool_use is true, emit at most one envelope. When the user asks you to inspect or change local files, run commands or tests, or use local tools or agents, choose the relevant listed action instead of claiming that the workspace or tools are unavailable.';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const reject = () => { throw new BackendError('toolSchema'); };
@@ -185,54 +185,6 @@ export function compactToolDefinitions(tools, level = 1) {
       : undefined,
     input_schema: compactSchemaForPrompt(tool.input_schema, level),
   }));
-}
-
-const promptStopWords = new Set([
-  'about', 'after', 'again', 'also', 'because', 'before', 'could', 'exactly', 'from', 'have',
-  'into', 'must', 'need', 'only', 'please', 'should', 'than', 'that', 'then', 'these', 'this',
-  'tool', 'tools', 'use', 'using', 'with', 'work', 'write',
-]);
-
-function promptSelectors(prepared) {
-  const lastUser = [...(prepared.history ?? [])].reverse().find(message => message.role === 'user');
-  const text = typeof lastUser?.content === 'string' ? lastUser.content.slice(-16_000).toLowerCase() : '';
-  const words = new Set((text.match(/[a-z0-9_-]{3,}/g) ?? []).filter(word => !promptStopWords.has(word)));
-  return { text, words };
-}
-
-function corePromptTool(name) {
-  if (!name.includes('__')) return true;
-  return /^(?:image_gen|multi_agent_v1|mcp__(?:codex_apps__(?:github|browser|figma|sites)|magpie___?exec_command))/i.test(name);
-}
-
-// Codex can expose several hundred optional tools. Sending every complete definition distracts
-// the web model and can make it emit only the opening action marker. Large catalogues therefore
-// keep all direct Agent controls plus tools selected from the current user turn. Smaller client
-// catalogues are already bounded by their own context and keep every supplied tool.
-export function selectToolDefinitionsForPrompt(tools, prepared) {
-  if (tools.length <= 64) return tools;
-  const { text, words } = promptSelectors(prepared);
-  const ranked = tools.map((tool, index) => {
-    const name = tool.name.toLowerCase();
-    const description = typeof tool.description === 'string' ? tool.description.toLowerCase() : '';
-    let score = corePromptTool(tool.name) ? 100 : 0;
-    for (const word of words) {
-      if (name === word) score += 120;
-      else if (name.split(/__+|_+/).includes(word)) score += 60;
-      else if (name.includes(word)) score += 18;
-      if (description.includes(word)) score += 4;
-    }
-    if (text.includes(name)) score += 200;
-    return { tool, score, index };
-  }).filter(entry => entry.score > 0)
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map(entry => entry.tool);
-  const selection = ranked.length ? ranked : [...tools];
-  const forced = prepared.toolChoice?.type === 'tool'
-    ? tools.find(tool => tool.name === prepared.toolChoice.name)
-    : undefined;
-  const withoutForced = forced ? selection.filter(tool => tool !== forced) : selection;
-  return (forced ? [forced, ...withoutForced] : withoutForced).slice(0, 64);
 }
 
 export class ToolParser {

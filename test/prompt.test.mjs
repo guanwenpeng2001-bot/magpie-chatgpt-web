@@ -23,11 +23,12 @@ test('prefix-matching resumeFrom compiles only the suffix without the system pre
 });
 
 test('compile regenerates tool protocol definitions when tools are present', () => {
-  const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: 'one' }], tools: [{ name: 'lookup', input_schema: { type: 'object' } }] });
+  const prepared = prepare({ model: 'auto', messages: [{ role: 'user', content: 'Inspect this project.' }], tools: [{ name: 'lookup', input_schema: { type: 'object' } }] });
   const prompt = compile(prepared);
   assert.ok(prompt.indexOf('[Client action format]') < prompt.indexOf('[Human]'));
   assert.match(prompt, /\[Client action format\]/);
   assert.match(prompt, /app-side actions executed by the host/);
+  assert.match(prompt, /Never emit the opening delimiter by itself/);
   assert.ok(prompt.includes(prepared.start));
   assert.ok(prompt.includes(`${prepared.start}{"name":"lookup","input":{"query":"example"}}${prepared.end}`));
   assert.match(prompt, /"name":"lookup"/);
@@ -35,6 +36,7 @@ test('compile regenerates tool protocol definitions when tools are present', () 
   assert.match(prompt, /Tool choice: \{"type":"auto"\}/);
   assert.doesNotMatch(prompt, /\[Assistant\]\s*$/);
   assert.match(prompt, /\[Client action reminder\]\s*If this turn needs a listed app-side action/);
+  assert.match(prompt, /prefer the listed action when the user explicitly asks you to operate on them/);
 });
 
 test('required tool choice is stated explicitly in the system protocol', () => {
@@ -59,6 +61,9 @@ test('a completed tool result tells the model not to repeat the action', () => {
   const prompt = compile(prepared, prepared.history.length - 1);
   assert.match(prompt, /preceding client action has completed/i);
   assert.match(prompt, /Do not repeat it/i);
+  assert.match(prompt, /Re-read the original user request and its ordered requirements/i);
+  assert.match(prompt, /If any requested action or dependent step remains/i);
+  assert.match(prompt, /Only return the final answer after every requested action is complete/i);
 });
 
 test('history changed prefixes reject the resume index instead of compiling wrong context', () => {

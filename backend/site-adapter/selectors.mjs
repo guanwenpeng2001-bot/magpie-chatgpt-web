@@ -1,4 +1,4 @@
-export const ADAPTER_VERSION = '2026-11-12.4';
+export const ADAPTER_VERSION = '2026-11-13.1';
 
 // Verified against archived page shapes and offline fixtures on 2026-10-15; live revalidation is separate.
 export const shape = {

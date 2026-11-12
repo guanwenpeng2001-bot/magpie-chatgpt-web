@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.7 — 2026-11-13
+
+- Present the account catalogue through Magpie's native model-variant contract: two Chat base families with five verified efforts and eight Work base families with six verified efforts, instead of duplicate effort model cards.
+- Advance the site-adapter diagnostic version to `2026-11-13.1` with the Chat and Work picker changes.
+- Map `x-magpie-effort` to the exact ChatGPT Chat and Work picker positions, including High, Extra High, Max and Ultra, and verify the selected family before sending.
+- Reopen and verify the Work picker after selecting a family so the six-position slider is applied in the real page lifecycle.
+- Bind conversation reuse to the selected effort as well as the base model, preventing a page selected for one effort from being silently reused for another.
+- Make context preflight use the selected effort, so Instant requests are checked against the 41K browser boundary instead of inheriting the larger base-family value.
+- Respect the host's `tool_choice` and keep tool schemas available on automatic turns. The plugin no longer guesses whether arbitrary prose needs a tool from a keyword whitelist.
+- Track explicitly named tool requests across tool-result rounds and force the next unfinished action, so multi-command and patch-then-read tasks cannot stop early with an invented completion.
+- Leave semantic tool selection to the Web model for indirect, mixed-language and otherwise unclassified requests, and pause an explicit action queue when any parallel tool result fails.
+- When ChatGPT Web stops immediately after an opening action marker, issue a bounded JSON-only correction in the same temporary Chat before returning a tool call; a second correction attempt covers an empty first repair.
+- Accept the site's double JSON-encoded SSE delta payloads and use a complete SSE envelope only when it exactly extends a truncated rendered DOM prefix.
+- Preserve every tool name, required property and final result-validation schema when a large Agent catalogue is compacted; if the compacted catalogue still exceeds the browser boundary, return `contextLength` before dispatch instead of silently hiding tools.
+- Keep full model, history and tool context dynamic; no fixed message-count trimming or silent history slicing is introduced.
+
 ## 0.4.6 — 2026-11-13
 
 - Recognize explicit project inspection, checking, editing, testing and execution requests as Agent actions, so prompts such as “看一下这个项目” call the client tools instead of returning a text-only clarification.

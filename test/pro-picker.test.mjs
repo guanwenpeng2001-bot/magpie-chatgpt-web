@@ -38,3 +38,26 @@ for (const available of [true, false]) test(`inline model picker verifies ${base
     }
   } finally { await browser.close(); }
 });
+
+test('explicit Pro fails when the browser picker offers fewer effort positions', async () => {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <button data-composer-navigation-target="reasoning" aria-haspopup="menu" onclick="document.querySelector('[role=menu]').hidden=false">Medium</button>
+      <div role="menu" hidden>
+        <div role="menuitem" data-model-picker-view-toggle="true" onclick="document.querySelector('[role=menuitemradio]').hidden=false">6</div>
+        <div role="menuitemradio" hidden aria-checked="false" onclick="this.setAttribute('aria-checked','true')">GPT-6</div>
+        <div role="menuitem" data-reasoning-slider="true" tabindex="0">Effort
+          <div data-model-picker-power-slider><span role="slider" aria-valuenow="0" aria-valuemax="2"></span></div>
+        </div>
+      </div>`);
+    const result = await selectModel(page, 'gpt-6-pro');
+    assert.equal(result.ok, false);
+    assert.equal(result.kind, 'model-not-offered');
+    assert.equal(result.detail.slug, 'gpt-6-pro');
+    assert.equal(result.detail.stage, 'effort-verification');
+    assert.equal(await page.locator('[role="slider"]').getAttribute('aria-valuenow'), '0');
+  } finally { await browser.close(); }
+});

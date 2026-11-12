@@ -7,7 +7,7 @@ import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
 import * as siteAdapter from './site-adapter/index.mjs';
 import { ADAPTER_VERSION, shape } from './site-adapter/selectors.mjs';
-import { wireModels, workModels } from './site-adapter/compatibility.mjs';
+import { wireModels, workSelectionPlans } from './site-adapter/compatibility.mjs';
 import { IMAGE_MODEL } from './site-adapter/images.mjs';
 import { observeTurn } from './observe.mjs';
 import { compile } from './prompt.mjs';
@@ -46,7 +46,7 @@ export class TurnDriver {
     this.installed.add(context);
   }
   async complete(command, guard, identity, signal, emit) {
-    const workMode = Object.hasOwn(workModels, command.model);
+    const workMode = Object.hasOwn(workSelectionPlans, command.model);
     const imageMode = command.model === IMAGE_MODEL;
     const wireModel = Object.hasOwn(wireModels, command.model) ? command.model : undefined;
     const controller = new AbortController();
@@ -238,6 +238,63 @@ export class TurnDriver {
           }));
           harvestStarted = true;
         };
+        const repairIncompleteAction = async result => {
+          if (!command.tools?.length || typeof command.start !== 'string' || typeof command.end !== 'string' ||
+              command.toolChoice?.type === 'none' ||
+              typeof result?.text !== 'string' || result.text.trim() !== command.start) return undefined;
+          const names = (command.promptTools ?? command.tools).map(tool => tool.name).join(', ');
+          for (let attempt = 0; attempt < 2; attempt++) {
+            activeSignal.throwIfAborted();
+            run = { id: randomUUID(), queue: [] };
+            this.turns.set(page, run);
+            await wait(page.evaluate(({ id, network, model }) => window.__chatgptHarvest.start(id, network, model), {
+              id: run.id, network: this.network && !command.visibleTurns && !workMode && !imageMode, model: wireModel,
+            }));
+            await ensurePageError();
+            await waitForOrdinaryReady();
+            this.assertResult(await wait(this.adapter.readComposer(page)), command.model);
+            const composer = page.locator(shape.composer).filter({ visible: true });
+            await wait(composer.fill([
+              'Your previous answer stopped immediately after the opening client-action marker and omitted the required JSON.',
+              'Do not repeat or explain that marker.',
+              'Reply now with only one JSON object using one action listed earlier and matching its input_schema.',
+              `The allowed action names are: ${names}.`,
+              attempt ? 'Return the JSON object itself, starting with { and ending with }.' : 'Use no prose, Markdown, code fence or closing delimiter.',
+              'If no action is needed, reply exactly NO_ACTION.',
+            ].join('\n')));
+            activeSignal.throwIfAborted();
+            if (this.adapter.submitPrompt) this.assertResult(await wait(this.adapter.submitPrompt(page, composer)), command.model);
+            else await wait(composer.press('Enter'));
+            promptSubmitted = true;
+            rememberCheckpoint();
+            let repair;
+            try {
+              repair = await wait(this.observe(page, {
+                run,
+                adapter: this.adapter,
+                guard,
+                budget: Math.max(0, deadline - this.now()),
+                signal: activeSignal,
+                emit: async () => {},
+              }));
+            } catch (error) {
+              if (activeSignal.aborted) throw error;
+              continue;
+            }
+            const text = typeof repair?.text === 'string' ? repair.text.trim() : '';
+            const first = text.indexOf('{');
+            const last = text.lastIndexOf('}');
+            if (first < 0 || last <= first) continue;
+            const candidate = `${result.text}${text.slice(first, last + 1)}${command.end}`;
+            try {
+              normalizeAssistantContent(command, candidate);
+            } catch {
+              continue;
+            }
+            return { ...result, text: candidate, route: repair.route ?? result.route, repaired: true };
+          }
+          return undefined;
+        };
         if (pendingChallenge) {
           challengeSeen = true;
           await ensurePageError();
@@ -261,7 +318,10 @@ export class TurnDriver {
             if (temporary !== true) throw new BackendError('temporary');
             await waitForOrdinaryReady();
             this.assertResult(await wait(this.adapter.readComposer(page)), command.model);
-            this.assertResult(await wait(this.adapter.selectModel(page, command.model)), command.model);
+            this.assertResult(
+              await wait(this.adapter.selectModel(page, command.selectionModel ?? command.model)),
+              command.selectionModel ?? command.model,
+            );
             if (command.images?.length) this.assertResult(await wait(this.adapter.attachImages(page, command.images)), command.model);
             activeSignal.throwIfAborted();
             if (!run) {
@@ -288,7 +348,15 @@ export class TurnDriver {
         for (;;) {
           try {
             if (imageMode) return await wait(this.adapter.readGeneratedImages(page, { baseline: imageBaseline, budget: Math.max(1, deadline - this.now()), artifactRoot: this.artifactRoot, signal: activeSignal }));
-            return await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: emitObservation }));
+            const first = await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: emitObservation }));
+            const repaired = await wait(repairIncompleteAction(first));
+            if (repaired) {
+              const suffix = repaired.text.slice(first.text.length);
+              if (suffix) await wait(emit({ type: 'delta', index: 0, text: suffix }));
+              streamedText = repaired.text;
+              streamed = true;
+            }
+            return repaired ?? first;
           } catch (error) {
             if (error?.code !== 'verification') throw error;
             await recoverChallenge();

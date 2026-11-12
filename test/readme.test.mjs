@@ -23,7 +23,7 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.4\.6`\. Host verified against: magpie `0\.1\.3930`/);
+  assert.match(prose, /Plugin version: `0\.4\.7`\. Host verified against: magpie `0\.1\.3930`/);
 });
 
 test('README records the exact verified host identity with its evidence citation', () => {
@@ -87,7 +87,7 @@ test('README discloses privacy boundaries and emulated capabilities', () => {
   assert.match(prose, /Anthropic-wire emulation/);
   assert.match(prose, /toolcall: false/);
   assert.match(prose, /prompt-level client tool emulation/i);
-  assert.match(prose, /outer Agent executes those tools/i);
+  assert.match(prose, /outer Agent then executes it/i);
   assert.match(prose, /4 images \/ 10 MiB each/);
 });
 

@@ -11,24 +11,33 @@ test('provider maps the recorded catalogue to complete host model entries', asyn
   const catalogue = { models: slugs.map((slug, index) => ({ slug, title: titles[index], max_tokens: 34834 })) };
   const hooks = plugin._internal.createHooks({ bridge: { call: async () => catalogue }, profileRoot: '.' });
   const models = await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } });
-  assert.deepEqual(Object.keys(models), ['auto', ...slugs.filter(slug => slug !== 'auto')]);
+  assert.equal(Object.keys(models)[0], 'auto');
   for (const [index, slug] of slugs.entries()) {
     const name = slug === 'gpt-5-6-mini' ? 'GPT-5.6 Luna (mini)'
       : slug === 'gpt-6-mini' ? `${titles[index]} (${slug}) [not yet supported]`
         : titles[index];
-    assert.deepEqual(models[slug], {
+    const reasoning = slug === 'gpt-5-6' || slug === 'gpt-6';
+    const expected = {
       name, api: { id: slug },
       limit: { context: resolveChatGptWebContextLimit(slug).limit, output: 34834 },
       prefer_websockets: false,
-      capabilities: { reasoning: false, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
-    });
+      capabilities: { reasoning, toolcall: false, attachment: false, temperature: false, input: { text: true, image: false }, output: { text: true } },
+      ...(reasoning ? { variants: {
+        low: {}, medium: {}, high: {}, xhigh: {}, max: {},
+      } } : {}),
+    };
+    assert.deepEqual(models[slug], expected);
   }
+  assert.equal(Object.hasOwn(models, 'gpt-5-6-high'), false);
+  assert.equal(Object.hasOwn(models, 'gpt-6-extra-high'), false);
 });
 
-test('previously filtered catalogue slugs are now exposed', async () => {
+test('effort aliases collapse into variants while other catalogue rows remain exposed', async () => {
   const catalogue = { models: [{ slug: 'gpt-5-6', title: 'GPT-5.6 Luna' }, { slug: 'gpt-6-mini', title: 'GPT-6' }] };
   const hooks = plugin._internal.createHooks({ bridge: { call: async () => catalogue }, profileRoot: '.' });
-  assert.deepEqual(Object.keys(await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } })), ['gpt-5-6', 'gpt-6-mini']);
+  assert.deepEqual(Object.keys(await hooks.provider.models({}, { auth: { type: 'oauth', refresh: crypto.randomUUID() } })), [
+    'gpt-5-6', 'gpt-6-mini',
+  ]);
 });
 
 test('unauthenticated models preserve static config and failures remain loud', async () => {

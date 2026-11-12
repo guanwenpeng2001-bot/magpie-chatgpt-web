@@ -1,8 +1,18 @@
 # Model support audit
 
-Checked on 2026-11-12 against this account's 23-entry catalogue, the ordinary Chat picker, the Work saved-task picker and live submission results. Catalogue presence does not prove that this adapter can complete a usable answer. Twenty-one catalogue IDs have a mapped route; two remain explicitly unsupported.
+Checked on 2026-11-13 against this account's 23-entry catalogue, the ordinary Chat picker, the Work saved-task picker and live submission results. Catalogue presence does not prove that this adapter can complete a usable answer. Twenty-one catalogue IDs have a mapped route; two remain explicitly unsupported.
 
-On the current power picker, base IDs use the explicitly selected Medium setting; thinking aliases also select Medium. This prevents a previous Pro/Instant choice from leaking into a later request. `auto` remains the explicitly requested page-default mode.
+## Public model presentation
+
+Magpie exposes the base family once and sends the chosen effort in `x-magpie-effort`. The plugin verifies the resulting browser family and slider before sending; it never silently downgrades to a different family.
+
+| Public family group | Browser efforts |
+| --- | --- |
+| GPT-5.6 Chat | `low` → Instant, `medium` → Medium, `high` → High, `xhigh` → Extra High, `max` → Pro |
+| GPT-6 Chat | `low` → Instant, `medium` → Medium, `high` → High, `xhigh` → Extra High, `max` → Pro |
+| Each of the eight GPT-5.6/GPT-6 Work families | `low` → Light, `medium` → Medium, `high` → High, `xhigh` → Extra High, `max` → Max, `ultra` → Ultra |
+
+The six ordinary Chat alias catalogue rows (`-instant`, `-thinking`, `-pro` for each family) are represented by these variants rather than duplicate model cards. Without an effort header, a base ID uses the verified Medium/default browser state. `auto` remains the explicitly requested page-default mode.
 
 ## Local context and usage estimates
 
@@ -24,7 +34,9 @@ The prepared browser prompt already includes system text, conversation history, 
 | Default, Thinking, request-only Thinking mini, Work | 90,000 | Documented Plus Medium/High browser boundary |
 | Explicit Pro | 111,001 | Documented Pro Max browser boundary |
 
-The ceiling is inclusive of the 8,192-token product reserve and image reserves. The plugin measures the complete prepared request dynamically for every call. It does not keep a fixed number of turns, slice history into fixed segments, or silently drop messages. When a large Agent supplies hundreds of tools, the plugin keeps core controls plus tools relevant to the current turn and progressively removes verbose descriptions and nonessential schema annotations until the Web prompt fits below half the selected transport ceiling. Full schemas remain local for validating returned arguments. Compatible hosts receive the advertised ceiling and can also apply their own compaction. An estimate equal to or above the ceiling is rejected as `contextLength` with HTTP 400 before the browser turn opens. The error carries `estimated`, `limit`, `limitKind` and `model` values, and advises starting a new chat, compacting, or removing history, images or tool schemas. There is no automatic history truncation.
+The ceiling is inclusive of the 8,192-token product reserve and image reserves. The plugin measures the complete prepared request dynamically for every call. It does not keep a fixed number of turns, slice history into fixed segments, or silently drop messages. When a large Agent supplies hundreds of tools, every tool name, required input property and final result-validation schema is retained while the browser copy progressively removes verbose descriptions and nonessential schema annotations. If that complete compacted catalogue still reaches the browser ceiling, the request fails as `contextLength` rather than hiding tools. Compatible hosts receive the advertised ceiling and can also apply their own compaction. The error carries `estimated`, `limit`, `limitKind` and `model` values, and advises starting a new chat, compacting, or removing history, images or tool schemas. There is no automatic history truncation.
+
+Automatic turns keep the complete client tool catalogue available so the Web model, rather than a runtime keyword whitelist, decides whether an action is needed. Indirect, mixed-language, informational and otherwise unclassified prompts therefore cannot silently lose local capability. Large catalogues use the all-tool schema compaction above. Explicit host tool choices remain authoritative, and a tool named explicitly with an execution verb is handled deterministically. If the site returns only an opening action marker, the backend asks for the missing JSON in that same temporary Chat with at most two bounded repair attempts, validates the result against the original schema and emits one complete host tool call. A complete SSE action can also recover a DOM answer that rendered only a prefix when the SSE text exactly extends it. After a tool result, the plugin tracks explicitly named tool occurrences in the original request and forces only the next named action that remains; unrelated tools stay optional.
 
 Magpie already records usage for proxied requests from the Anthropic stream, so the plugin does not also call `input.magpie.usage`, which is reserved for out-of-band plugin-originated requests. Every successfully translated response emits one `message_start` with estimated `input_tokens`, `cache_creation_input_tokens: 0` and `cache_read_input_tokens: 0`, then one terminal `message_delta` with estimated `output_tokens`. Streaming accumulates translated text plus tool JSON; nonstreaming reconstructs the same fields from the same frames. Tool rounds are separate responses and therefore separate usage records. Errors and cancellations stop before a successful terminal delta, preventing a second or falsely completed record.
 
@@ -62,7 +74,7 @@ The exact `research` override completed with HTTP 200 but produced no assistant 
 
 All 23 catalogue rows declare PNG, JPEG, GIF and WebP input attachments. The model descriptor now derives image-input capability from that catalogue evidence; document and other non-image attachments remain outside the adapter.
 
-Legacy pickers without an effort control may still select an exact base-model row; explicit Instant/Thinking/Pro variants never use that fallback.
+Legacy pickers without an effort control may still select an exact base-model row; an explicit effort variant never uses that fallback.
 
 Unsupported entries remain visible with `[not yet supported]`. Requests fail explicitly as `modelUnsupported`, without inferring account access or substituting a different model.
 

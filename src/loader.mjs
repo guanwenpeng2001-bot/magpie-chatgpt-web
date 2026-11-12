@@ -3,7 +3,7 @@ import { prepare } from './wire/prepare.mjs';
 import { translate, reconstruct, errorEvent } from './wire/translate.mjs';
 import { requireAuth } from './hooks/auth.mjs';
 import { compile } from '../backend/prompt.mjs';
-import { compactToolDefinitions, selectToolDefinitionsForPrompt } from './tool-emulation.mjs';
+import { compactToolDefinitions } from './tool-emulation.mjs';
 import { API, PROVIDER } from './hooks/config.mjs';
 import {
   assertPreparedInputFits,
@@ -29,10 +29,10 @@ export function makeLoader({ bridge, profileRoot, input }) {
           const prepared = prepare(request, init.headers ?? (resource instanceof Request ? resource.headers : undefined));
           let inputEstimate = estimatePreparedInput(prepared);
           for (const level of [1, 2, 3, 4]) {
-            if (!prepared.tools?.length || inputEstimate.inputTokens < Math.floor(inputEstimate.contextLimit * 0.5)) break;
-            const selected = selectToolDefinitionsForPrompt(prepared.tools, prepared);
-            prepared.promptTools = compactToolDefinitions(selected, level);
-            prepared.toolCompaction = { level, toolCount: prepared.tools.length, exposedToolCount: selected.length };
+            if (!prepared.tools?.length || prepared.promptTools?.length === 0 ||
+                inputEstimate.inputTokens < Math.floor(inputEstimate.contextLimit * 0.5)) break;
+            prepared.promptTools = compactToolDefinitions(prepared.tools, level);
+            prepared.toolCompaction = { level, toolCount: prepared.tools.length, exposedToolCount: prepared.tools.length };
             prepared.prompt = compile(prepared);
             inputEstimate = estimatePreparedInput(prepared);
           }

@@ -17,7 +17,7 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
   let emptyCompletions = 0;
   const log = data => emit({ event: 'log', data });
   const publish = async (next, source) => {
-    if (source === 'sse' && domObserved) return;
+    if (source === 'sse' && domObserved && !(stream.text.startsWith(text) && stream.text.length > text.length)) return;
     if (source === 'dom') {
       domObserved = true;
       domBehind ||= next.length < stream.text.length;
@@ -57,12 +57,13 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
       }
       if (item.kind === 'frame' && !streamFailed) {
         try {
-          const data = item.frame.data === '[DONE]' ? '[DONE]' : JSON.parse(item.frame.data);
+          let data = item.frame.data === '[DONE]' ? '[DONE]' : JSON.parse(item.frame.data);
+          if (typeof data === 'string' && data !== '[DONE]' && /^[\[{]/.test(data.trim())) data = JSON.parse(data);
           stream.accept({ event: item.frame.event, data });
         } catch (error) {
           if (error.code === 'hidden' || error.code === 'upstream') throw error;
           streamFailed = true;
-          await log({ kind: 'observationFailure', code: 'protocol' });
+          await log({ kind: 'observationFailure', code: 'protocol', frameType: item.frame.event });
         }
       }
     }
@@ -77,11 +78,14 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
       streamFailed = true;
       await log({ kind: 'observationFailure', code: 'harvest', cause: snapshot.failed });
     }
-    if (!streamFailed) await publish(stream.text, 'sse');
+    if (!streamFailed && !domObserved) await publish(stream.text, 'sse');
     if (snapshot.text) await publish(snapshot.text, 'dom');
     const domComplete = state.complete && snapshot.nodes > 0;
     const streamComplete = !streamFailed && !stream.handedOff && !partial && !domBehind && stream.complete;
     if (domComplete || streamComplete) {
+      if (domComplete && !streamFailed && stream.text.startsWith(text) && stream.text.length > text.length) {
+        await publish(stream.text, 'sse');
+      }
       if (text.trim()) {
         await emit({ event: '', data: { type: 'message_stream_complete' } });
         return { text, route: route(), ...(degraded ? { degraded } : {}) };
