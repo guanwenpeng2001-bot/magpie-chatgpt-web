@@ -103,6 +103,29 @@ test('idle contexts close at five minutes, with active time excluded', async t =
   await browser.close();
 });
 
+test('turn contexts can stay resident for the backend lifetime', async () => {
+  let closes = 0;
+  const context = new EventEmitter();
+  context.pages = () => [];
+  context.close = async () => { closes++; context.emit('close'); };
+  const browser = new module.BrowserSupervisor({ profileRoot: '.', idleMilliseconds: null, launch: async () => context });
+  await browser.run('fixture', async () => {});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(closes, 0);
+  let driverCloses = 0;
+  const driverContext = new EventEmitter();
+  driverContext.pages = () => [];
+  driverContext.close = async () => { driverCloses++; driverContext.emit('close'); };
+  const driver = new (await import('../backend/turn.mjs')).TurnDriver({ profileRoot: '.', launch: async () => driverContext });
+  assert.equal(driver.browser.idleMilliseconds, null);
+  await driver.browser.run('fixture', async () => {});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(driverCloses, 0);
+  await driver.close();
+  assert.equal(driverCloses, 1);
+  await browser.close();
+});
+
 test('one crash retries the operation and a second crash exhausts that turn only', async () => {
   let launches = 0;
   const browser = new module.BrowserSupervisor({ profileRoot: '.', launch: async () => {

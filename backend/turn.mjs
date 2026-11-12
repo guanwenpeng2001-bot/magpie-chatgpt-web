@@ -22,7 +22,7 @@ export class TurnDriver {
     this.observe = observe;
     this.prompter = prompter;
     this.bindings = new Conversations({ now });
-    this.browser = new BrowserSupervisor({ profileRoot, profile, launch: launch ?? (async (profile, options) => {
+    this.browser = new BrowserSupervisor({ profileRoot, profile, idleMilliseconds: null, launch: launch ?? (async (profile, options) => {
       return launchChatBrowserContext(profile, { ...options, serviceWorkers: 'block' });
     }) });
     this.installed = new WeakSet();

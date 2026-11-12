@@ -78,7 +78,7 @@ test('README documents visible-by-default turns and explicit headless opt-out', 
   assert.match(prose, /visible by default/);
   assert.match(prose, /explicitly disable/);
   assert.match(prose, /Show browser during chats.*visible-turns/);
-  assert.match(prose, /Idle turn browser contexts close after \*\*5 minutes\*\*/);
+  assert.match(prose, /turns and background reads reuse it for the backend lifetime/);
 });
 
 test('README discloses privacy boundaries and emulated capabilities', () => {

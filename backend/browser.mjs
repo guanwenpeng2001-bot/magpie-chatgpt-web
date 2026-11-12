@@ -248,7 +248,7 @@ export class BrowserSupervisor {
         entry.users--;
         entry.crashed.delete(rejectCrash);
         signal?.removeEventListener('abort', onAbort);
-        if (!entry.users && this.#accounts.get(account) === entry && !this.#closed) {
+        if (this.idleMilliseconds !== null && !entry.users && this.#accounts.get(account) === entry && !this.#closed) {
           entry.timer = setTimeout(() => { this.closeAccount(account).catch(() => {}); }, this.idleMilliseconds);
         }
       }
