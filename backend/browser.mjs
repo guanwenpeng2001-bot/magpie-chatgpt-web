@@ -28,10 +28,10 @@ const claimLocks = new Map();
 
 // Linux abstract sockets are not a portable lock. macOS returns EINVAL for a
 // leading NUL, which the claim catch turned into browserConfiguration.
-export function signinLockAddress(root) {
-  const identity = createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex');
-  if (process.platform === 'win32') return '\\\\.\\pipe\\magpie-signin-' + identity;
-  if (process.platform === 'linux') return '\0magpie-signin-' + identity;
+export function signinLockAddress(root, platform = process.platform) {
+  const identity = createHash('sha256').update(platform === 'win32' ? root.toLowerCase() : root).digest('hex');
+  if (platform === 'win32') return '\\\\.\\pipe\\magpie-signin-' + identity;
+  if (platform === 'linux') return '\0magpie-signin-' + identity;
   // macOS sockaddr_un.sun_path is 104 bytes, including the terminator.
   return join('/tmp', 'ms-' + identity + '.sock');
 }
@@ -41,7 +41,7 @@ function socketHeld(address) {
     const socket = connect(address);
     const timer = setTimeout(() => { socket.destroy(); resolveHeld(true); }, 500);
     socket.once('connect', () => { clearTimeout(timer); socket.destroy(); resolveHeld(true); });
-    socket.once('error', () => { clearTimeout(timer); resolveHeld(false); });
+    socket.once('error', error => { clearTimeout(timer); resolveHeld(!['ECONNREFUSED', 'ENOENT'].includes(error.code)); });
   });
 }
 
@@ -69,7 +69,10 @@ function listenSigninLock(address, allowStaleRetry) {
 
 async function lockSigninProfile(root) {
   if (!claimLocks.has(root)) {
-    const acquisition = listenSigninLock(signinLockAddress(root), true).catch(error => {
+    const acquisition = listenSigninLock(signinLockAddress(root), true).then(lock => {
+      if (!lock) claimLocks.delete(root);
+      return lock;
+    }).catch(error => {
       claimLocks.delete(root);
       throw error;
     });
@@ -353,14 +356,15 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
   }
 }
 
-export async function browserRead(context, page, path, origin, signal) {
+export async function browserRead(context, page, path, origin, signal, access) {
   const base = new URL(origin);
   if (!(base.origin === 'https://chatgpt.com' || (['http:', 'https:'].includes(base.protocol) && ['127.0.0.1', '[::1]'].includes(base.hostname))) || base.pathname !== '/' || base.username || base.password || base.search || base.hash) throw new BackendError('protocol');
   if (!['/api/auth/session', '/backend-api/models'].includes(path) || new URL(page.url()).origin !== base.origin) throw new BackendError('protocol');
   signal?.throwIfAborted();
   try {
-    const result = await page.evaluate(async path => {
-      const response = await fetch(path, { credentials: 'include', redirect: 'error', signal: AbortSignal.timeout(20000) });
+    const result = await page.evaluate(async ({ path, access }) => {
+      const response = await fetch(path, { credentials: 'include', redirect: 'error', signal: AbortSignal.timeout(20000),
+        ...(path === '/backend-api/models' && access ? { headers: { Authorization: `Bearer ${access}` } } : {}) });
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let body = '';
@@ -381,7 +385,7 @@ export async function browserRead(context, page, path, origin, signal) {
       } catch (error) { if (response.status === 200) throw error; }
       finally { await reader.cancel().catch(() => {}); }
       return { status: response.status, headers: { 'cf-mitigated': response.headers.get('cf-mitigated'), 'content-type': response.headers.get('content-type'), 'retry-after': response.headers.get('retry-after') }, body };
-    }, path);
+    }, { path, access });
     signal?.throwIfAborted();
     const failure = responseFailure(result.status, challengeEvidence(result.headers, result.body), undefined, result.headers['retry-after']);
     if (failure) throw failure;

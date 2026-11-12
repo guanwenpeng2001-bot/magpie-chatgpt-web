@@ -19,6 +19,17 @@ const methodFor = (bridge, profileRoot) => _internal.createHooks({ bridge, profi
 const source = relative => readFile(new URL(relative, import.meta.url), 'utf8');
 const lifecycle = () => import('../backend/browser.mjs');
 
+test('sign-in lock addresses fit macOS and retain Windows/Linux transports', async () => {
+  const { signinLockAddress } = await lifecycle();
+  const root = '/a/very/long/root/'.repeat(30);
+  const mac = signinLockAddress(root, 'darwin');
+  assert.ok(Buffer.byteLength(mac) < 104);
+  assert.match(mac.replaceAll('\\', '/'), /^\/tmp\/ms-[a-f0-9]{64}\.sock$/);
+  assert.ok(signinLockAddress(root, 'linux').startsWith('\0magpie-signin-'));
+  assert.ok(signinLockAddress(root, 'win32').startsWith('\\\\.\\pipe\\magpie-signin-'));
+  assert.notEqual(mac, signinLockAddress(root + 'other', 'darwin'));
+});
+
 function claimant(root) {
   return spawn(process.execPath, ['--input-type=module', '-e', `
     const { signinProfileClaim } = await import(process.argv[2]);

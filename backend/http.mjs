@@ -25,11 +25,12 @@ export function responseFailure(status, evidence = {}, guard, retryAfter) {
 }
 
 export class ReadClient {
+  #access;
   #cookie;
   #storedCookie;
   #catalog;
   #expires = 0;
-  constructor({ origin, cookie, guard = new AccountGuard(), timeout = 20_000, authority, browserRoute }) {
+  constructor({ origin, cookie, access, guard = new AccountGuard(), timeout = 20_000, authority, browserRoute }) {
     try {
       this.origin = new URL(origin);
       if (this.origin.username || this.origin.password || this.origin.pathname !== '/' || this.origin.search || this.origin.hash || !['http:', 'https:'].includes(this.origin.protocol)) throw 0;
@@ -38,11 +39,13 @@ export class ReadClient {
     if (typeof cookie !== 'string' || !cookie || /[\r\n\0]/.test(cookie)) throw new BackendError('expired');
     this.#cookie = cookie;
     this.#storedCookie = cookie;
+    this.#access = access;
     this.guard = guard;
     this.timeout = timeout;
     this.browserRoute = browserRoute;
   }
   get credential() { return this.#cookie; }
+  get accessToken() { return this.#access; }
   async #read(path, signal, receiveCookies = () => {}, { browserFallback = true } = {}) {
     const transport = this.origin.protocol === 'https:' ? https : http;
     const budget = AbortSignal.timeout(this.timeout);
@@ -51,7 +54,8 @@ export class ReadClient {
       return await new Promise((resolve, reject) => {
         const request = transport.get(new URL(path, this.origin), {
           agent: false, signal: bounded,
-          headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', 'Accept-Encoding': 'identity', Connection: 'close', Cookie: this.#cookie },
+          headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', 'Accept-Encoding': 'identity', Connection: 'close', Cookie: this.#cookie,
+            ...(path === '/backend-api/models' && this.#access ? { Authorization: `Bearer ${this.#access}` } : {}) },
         }, response => {
           const status = response.statusCode;
           if (status !== 200 && (status !== 403 || response.headers['cf-mitigated'] === 'challenge')) {
@@ -141,6 +145,7 @@ export class ReadClient {
         this.guard.observe(401);
         throw new BackendError('expired');
       }
+      this.#access = value.accessToken;
       const cookies = new Map(this.#cookie.split(';').map(pair => {
         const at = pair.indexOf('=');
         return [pair.slice(0, at).trim(), pair.slice(at + 1).trim()];

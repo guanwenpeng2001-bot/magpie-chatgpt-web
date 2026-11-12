@@ -48,10 +48,10 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (typeof cookie !== 'string' || !cookie) throw new BackendError('expired');
     const session = cookie.split(';').map(pair => pair.trim()).filter(pair => /^__Secure-next-auth\.session-token(?:\.\d+)?=/.test(pair)).sort().join(';');
     const identity = createHash('sha256').update(session || cookie).digest('hex');
-    const key = createHash('sha256').update(cookie).update('\0').update(String(command.origin)).digest('hex');
+    const key = createHash('sha256').update(cookie).update('\0').update(String(command.origin)).update('\0').update(String(command.auth?.access ?? '')).digest('hex');
     if (!clients.has(key)) {
       const guard = guards.get(identity) ?? new AccountGuard();
-      const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, guard,
+      const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, access: command.auth?.access, guard,
         browserRoute: async (path, signal, origin) => {
           if (typeof command.auth?.profile !== 'string' || typeof command.profileRoot !== 'string') throw new BackendError('browserConfiguration');
           turns ??= new TurnDriver({ profileRoot: command.profileRoot });
@@ -63,7 +63,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
             try {
               signal.throwIfAborted();
               await page.goto(origin.href, { waitUntil: 'domcontentloaded', timeout: 20000 });
-              return await browserRead(context, page, path, origin, signal);
+              return await browserRead(context, page, path, origin, signal, client.accessToken);
             } catch (error) {
               if (error instanceof BackendError && error.code === 'expired') guard.observe(401);
               if (error instanceof BackendError && error.code === 'cooldown') guard.observe(429, error.retryAfter);

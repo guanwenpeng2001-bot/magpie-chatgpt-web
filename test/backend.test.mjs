@@ -30,6 +30,20 @@ function harness(options) {
   };
 }
 
+test('model dispatch passes access tokens and replaces clients after token renewal', async t => {
+  const tokens = [];
+  const server = harness({ readClient: options => {
+    tokens.push(options.access);
+    return { guard: options.guard, models: async () => ({ models: [{ slug: 'auto', title: 'Auto' }] }) };
+  } });
+  t.after(async () => { server.input.end(); await server.work; });
+  for (const access of ['old-token', 'new-token']) {
+    server.send({ id: access, method: 'models', auth: { refresh: 'fixture=session', access } });
+    await server.until(frames => frames.some(frame => frame.id === access && frame.event === 'done'));
+  }
+  assert.deepEqual(tokens, ['old-token', 'new-token']);
+});
+
 test('backend streams head/data/done and cancels a live handler on abort', async () => {
   const server = harness({ handlers: {
     complete: async (command, signal, emit) => {
