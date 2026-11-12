@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6 — 2026-11-13
+
+- Recognize explicit project inspection, checking, editing, testing and execution requests as Agent actions, so prompts such as “看一下这个项目” call the client tools instead of returning a text-only clarification.
+- Keep ordinary conceptual questions such as “What does run mean?” text-eligible and preserve the exact-named tool and host `tool_choice` rules.
+
 ## 0.4.5 — 2026-11-13
 
 - Return ownership of the Codex Desktop route, `model_provider`, `model_catalog_json`, context override lookup and reconnect state to Magpie. The plugin no longer edits or repairs Magpie's main `config.toml`.

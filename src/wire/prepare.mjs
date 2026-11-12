@@ -33,6 +33,21 @@ function namedActionChoice(message, tools) {
   return unique.length > 1 ? { type: 'any' } : undefined;
 }
 
+function actionIntent(message) {
+  if (!message || message.role !== 'user' || message.content == null) return false;
+  const blocks = Array.isArray(message.content) ? message.content : [];
+  const text = (typeof message.content === 'string'
+    ? message.content
+    : blocks.filter(block => block?.type === 'text').map(block => block.text).join('\n'))
+    .replace(/<environment_context>[\s\S]*?<\/environment_context>/gi, '')
+    .replace(/<permissions instructions>[\s\S]*?<\/permissions instructions>/gi, '')
+    .trim();
+  const target = /\b(?:this|the|current)\s+(?:project|repo(?:sitory)?|code|files?|directory|folder|workspace|agents?|sub-?agents?|tools?|mcp)\b|(?:这|该|当前|本地)?(?:个|一)?(?:项目|仓库|代码|文件|目录|工作区|智能体|子代理|工具|MCP)/i;
+  const chineseAction = /(?:看一下|看看|检查|排查|查看|梳理|分析|修改|创建|实现|修复|运行|执行|测试|安装|读取|列出|查找|搜索|生成|更新|删除|重命名|提交|合并|部署)/;
+  const englishAction = /^(?:please\s+)?(?:(?:use|call|invoke)\s+(?:a\s+|the\s+)?(?:listed\s+)?(?:tool|agent|sub-?agent|mcp)|inspect|explore|look\s+at|review|analyze|check|create|edit|modify|write|implement|fix|run|execute|test|install|read|list|find|search|generate|update|delete|rename|commit|merge|deploy)\b/i;
+  return chineseAction.test(text) && target.test(text) || englishAction.test(text) && target.test(text);
+}
+
 function attachmentError(kind) {
   const error = new BackendError('unsupported');
   error.code = 'attachmentUnsupported';
@@ -49,7 +64,8 @@ export function prepare(request, headers = new Headers()) {
   if (!object(toolChoice) || !['auto', 'any', 'tool', 'none'].includes(toolChoice.type) || (toolChoice.disable_parallel_tool_use !== undefined && typeof toolChoice.disable_parallel_tool_use !== 'boolean')) throw new BackendError('toolChoice');
   if (toolChoice.type === 'tool' && !tools.some(tool => tool.name === toolChoice.name) || ['tool', 'any'].includes(toolChoice.type) && !tools.length) throw new BackendError('toolChoice');
   if (request.tool_choice === undefined && tools.length) {
-    toolChoice = namedActionChoice(request.messages.at(-1), tools) ?? toolChoice;
+    const message = request.messages.at(-1);
+    toolChoice = namedActionChoice(message, tools) ?? (actionIntent(message) ? { type: 'any' } : toolChoice);
   }
   const images = [];
   function textContent(content, allowTools = true, allowImages = true) {

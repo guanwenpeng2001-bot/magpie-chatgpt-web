@@ -157,7 +157,10 @@ export async function* translate(source, prepared) {
 
 export function errorEvent(error) {
   const failure = error instanceof BackendError ? error : new BackendError('upstream');
-  return event({ type: 'error', error: { type: failure.code === 'cooldown' ? 'rate_limit_error' : 'api_error', ...failure.toJSON() } });
+  const type = failure.code === 'cooldown'
+    ? 'rate_limit_error'
+    : failure.status < 500 ? 'invalid_request_error' : 'api_error';
+  return event({ type: 'error', error: { type, ...failure.toJSON() } });
 }
 
 export async function reconstruct(source) {
