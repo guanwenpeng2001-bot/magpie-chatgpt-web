@@ -29,6 +29,9 @@ const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePat
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
 // existing DOM evaluation so the checked row and active header are one snapshot.
 const modelAnnouncementTail = 'r.push(c.join(" "))}return r})}function fc(e)';
+const checkpointRegistry = 'var Kt=new Map,dx=256;';
+const checkpointRememberTail = 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value)}function Nh';
+const checkpointTouch = 'return Kt.delete(e),Kt.set(e,t),!0}';
 
 export function appendNativeModelAnnouncement(slider, descriptions, activeHeader) {
   const normalize = text => text.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
@@ -97,10 +100,19 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
     const announcement = ${JSON.stringify(modelAnnouncementTail)};
     if (source.split(announcement).length !== 2) throw new Error('Native model announcement compatibility mismatch');
+    const registry = ${JSON.stringify(checkpointRegistry)};
+    const remember = ${JSON.stringify(checkpointRememberTail)};
+    const touch = ${JSON.stringify(checkpointTouch)};
+    if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
+      throw new Error('Native checkpoint persistence compatibility mismatch');
     const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+      .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
+      .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
+      .replace(touch, 'return Kt.delete(e),Kt.set(e,t),magpieCheckpointPersistence?.commit(),!0}')
       .replaceAll(launch, 'launchNativeBrowser(ff,{executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})')
       .replace(announcement, ${JSON.stringify('r.push(c.join(" "));r=(' + appendNativeModelAnnouncement.toString() + ')(t,r,c.join(" "))}return r})}function fc(e)')})
-      + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())};
+      + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())}
+      + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')};
     return { contents, loader: 'js' };
   });
 } });

@@ -23,8 +23,14 @@ Native runtime integration (src/native/runtime.mjs and src/native/daemon.mjs):
   Archive SHA-256: 813690d379fd2fc91b0c95a54ab94026e9f53c53a5d43c39eeca98947cbf3fea
   Downloaded at setup and run as the Full-mode daemon, with its Bun runtime.
   src/native/runtime.mjs supplies a checksum-guarded Bun preload that adapts
-  the compaction gate, browser acquisition and model-announcement parsing in
-  memory. The downloaded bundle is not rewritten.
+  the compaction gate, browser acquisition, model-announcement parsing and
+  continuation checkpoint registry/commit hooks in memory. The downloaded
+  bundle is not rewritten. Plugin v0.5.3 adds src/native/checkpoints.mjs for
+  account-directory-bound AES-256-GCM persistence (256-entry LRU; 32 MiB
+  serialized plaintext limit), retaining the reference source-hash and
+  metadata authorization checks. Native Bigger Context and Temporary Chat
+  options configure the reference Full-mode runtime; they do not implement
+  its Zero Risk or Compatibility modes or extend native platform support.
   Verified accompanying notices under the default installation root
   ~/.config/magpie/chatgpt-web-native/runtime-6.1.18/payload/:
   - LICENSE: MIT, copyright (c) 2026 codex-chatgpt-web contributors;

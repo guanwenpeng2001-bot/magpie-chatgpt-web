@@ -264,7 +264,7 @@ for (const state of ['unprovisioned', 'startup-failed', 'unhealthy']) for (const
     const result = await response.json();
     assert.equal(result.error.code, scenario.code);
     assert.equal(result.error.retryable, true);
-    assert.match(result.error.message, /same native daemon/i);
+    assert.match(result.error.message, /account native daemon and its authenticated checkpoint store/i);
     assert.match(result.error.message, /trusted.*history/i);
     assert.equal(result.output, undefined);
     assert.equal(commands.length, 0);

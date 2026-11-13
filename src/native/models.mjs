@@ -1,13 +1,33 @@
-// v6.1.18 chatgpt-web-models.ts standard (Bigger Context disabled) catalog.
+// v6.1.18 chatgpt-web-models.ts automatic-mode measured transport limits.
+export function nativeOptions(value = {}) {
+  for (const key of ['experimentalBiggerContext', 'useTemporaryChats']) {
+    if (value[key] !== undefined && typeof value[key] !== 'boolean') throw new TypeError(`Invalid native option: ${key}`);
+  }
+  return { experimentalBiggerContext: value.experimentalBiggerContext === true, useTemporaryChats: value.useTemporaryChats !== false };
+}
+
+export function providerNativeOptions(input) {
+  return nativeOptions({
+    experimentalBiggerContext: input?.magpie?.option?.('chatgpt-web', 'native-bigger-context'),
+    useTemporaryChats: input?.magpie?.option?.('chatgpt-web', 'native-temporary-chats'),
+  });
+}
 // /v1/models first forwards to the Codex upstream and needs a separate Codex
 // credential. These browser-only rows require only the account capabilities.
 export function nativeCatalog(capabilities = {}) {
   const solAvailable = capabilities?.solAvailable === true;
   const proAvailable = capabilities?.proAvailable === true;
   const extraHighAvailable = capabilities?.extraHighAvailable === true;
-  const row = (slug, context, autoCompact, efforts) => ({ slug: `chatgpt-web/${slug}`, display_name: slug,
+  const row = (slug, context, autoCompact, efforts) => {
+    if (capabilities.experimentalBiggerContext === true && slug !== 'gpt-6-sol-instant') {
+      if (slug === 'gpt-5.6-luna') { context = 84000; autoCompact = 59424; }
+      else if (slug === 'gpt-6-sol') { context = proAvailable ? 240000 : 120000; autoCompact = proAvailable ? 220000 : 110000; }
+      else { context *= 3; autoCompact *= 3; }
+    }
+    return { slug: `chatgpt-web/${slug}`, display_name: slug,
     context_window: context, auto_compact_token_limit: autoCompact,
-    supported_reasoning_levels: efforts.map(effort => ({ effort })), input_modalities: ['text', 'image'] });
+    supported_reasoning_levels: efforts.map(effort => ({ effort })), input_modalities: ['text', 'image'] };
+  };
   if (!solAvailable) return [row('gpt-5.6-luna', 1050000, 1050000, ['low', 'medium'])];
   return ['gpt-6', 'gpt-5.6'].flatMap(family => [
     row(`${family}-sol-instant`, proAvailable ? 111193 : 41000, proAvailable ? 95000 : 32000, ['low']),
@@ -50,7 +70,7 @@ export function describeNativeCatalogue(source, profile, capabilities = {}) {
   if (typeof profile !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(profile)) return {};
   if (source && typeof source === 'object' && !Array.isArray(source)) {
     const available = nativeCatalog(capabilities);
-    return Object.fromEntries(Object.entries(source).filter(([slug, model]) => /^[A-Za-z0-9._-]+$/.test(slug) && model && typeof model === 'object').map(([slug, model]) => {
+    const descriptors = Object.fromEntries(Object.entries(source).filter(([slug, model]) => /^[A-Za-z0-9._-]+$/.test(slug) && model && typeof model === 'object').map(([slug, model]) => {
       const id = `native/${profile}/${slug}`;
       const unavailable = String(model.name ?? '').includes('[not yet supported]') || slug === 'chatgpt-image';
       const family = coreFamily(slug);
@@ -74,6 +94,18 @@ export function describeNativeCatalogue(source, profile, capabilities = {}) {
         },
       }];
     }));
+    // Core aliases retain their Instant-safe limit. Expose only the larger
+    // reasoning/Pro routes, without replacing any existing model identity.
+    if (capabilities.experimentalBiggerContext === true && capabilities.solAvailable === true) {
+      for (const row of available.filter(row => /-(?:sol|pro)$/.test(row.slug))) {
+        const slug = row.slug.slice('chatgpt-web/'.length);
+        const id = `native/${profile}/${slug}`;
+        if (!Object.hasOwn(descriptors, id)) {
+          descriptors[id] = nativeDescriptor(id, `${row.display_name} — Bigger Context`, [row]);
+        }
+      }
+    }
+    return descriptors;
   }
   const rows = Array.isArray(source) ? source : [];
   return Object.fromEntries(rows.filter(row => typeof row?.slug === 'string' && row.slug.startsWith('chatgpt-web/')

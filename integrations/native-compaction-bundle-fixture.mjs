@@ -2,7 +2,7 @@
 // protocol, ownership, checkpoint and prompt code comes from the downloaded CLI.
 // Substitute only browser generation; export aliases are injected by the test.
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -163,6 +163,84 @@ if (phase === 'model-announcements') {
   assert.equal(contextsCreated, 2);
   assert.equal(connections, 2);
   assert.equal(disconnects, 2);
+} else if (phase === 'persistence-failure') {
+  const state = join(home, 'checkpoints.bin'), backup = join(home, 'checkpoints.fixture-backup');
+  await rename(state, backup); await mkdir(state);
+  native.Worker.forProvider = () => ({ appName: 'Fixture', async run(options) {
+    const text = 'Uncommitted summary'; options.onTextDelta?.(text); return text;
+  } });
+  try {
+    for (const kind of ['v1', 'v2', 'v2-stream', 'memento-stream']) {
+      const turn = `failed-write-${kind}`;
+      const task = { type: 'message', role: 'user', id: 'failed-write-task', content: 'Must not gain durable authority',
+        internal_chat_message_metadata_passthrough: { turn_id: turn, content_item_kinds: ['goal.internal_context'] } };
+      const body = { model: 'chatgpt-web/high', stream: kind.endsWith('stream'), input: [task],
+        client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ thread_id: turn, turn_id: turn,
+          ...(kind.startsWith('memento') ? { request_kind: 'compaction', compaction: { implementation: 'responses', strategy: 'memento' } } : {}) }) } };
+      if (kind.startsWith('v2')) body.input.push({ type: 'compaction_trigger' });
+      try {
+        const response = await (kind === 'v1' ? native.compactRequest : native.responseRequest)(request(body), config);
+        const text = await response.text();
+        if (body.stream) assert.doesNotMatch(text, /"type":"response.completed"/);
+        else assert.notEqual(response.status, 200);
+      } catch (error) { assert.match(error.message, /Native checkpoint/); }
+      assert.equal(restore({ ...body, input: [checkpoint('Uncommitted summary')] }).some(message => message.content === task.content), false);
+    }
+  } finally { await rm(state, { recursive: true }); await rename(backup, state); }
+} else if (phase === 'durable-recompact') {
+  const replays = JSON.parse(await readFile(replayPath, 'utf8'));
+  for (const replay of replays) {
+    native.Worker.forProvider = () => ({ appName: 'Restarted compaction fixture', async run(options) {
+      const prompt = await options.prepare();
+      assert.ok(prompt.text.includes('Implement the next checked milestone.'), 'recompaction after restart retains the authorized task');
+      const summary = `Restarted checkpoint ${JSON.parse(replay.body.client_metadata['x-codex-turn-metadata']).thread_id}`;
+      options.onTextDelta?.(summary);
+      return summary;
+    } });
+    const response = await native.responseRequest(request({ ...replay.body, input: [...replay.body.input, { type: 'compaction_trigger' }] }), config);
+    const result = await response.json();
+    assert.equal(result.status, 'completed', JSON.stringify(result));
+    replay.body = { ...replay.body, input: [replay.body.input[0], ...result.output,
+      { type: 'function_call', call_id: 'latest', name: 'exec_command', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'latest', output: 'LATEST_TOOL_RESULT' }] };
+    assert.equal(restore(replay.body).filter(message => message.content === replay.taskText).length, 1);
+  }
+  await writeFile(replayPath, JSON.stringify(replays));
+} else if (phase === 'durable-fresh') {
+  for (const { body, taskText } of JSON.parse(await readFile(replayPath, 'utf8'))) {
+    const before = JSON.stringify(body);
+    assert.equal(restore(body).filter(message => message.content === taskText).length, 1);
+    const response = await native.responseRequest(request(body), config, () => ({
+      name: 'restarted-continuation-observer', async runTurn(parsed, _incoming, emit) {
+        const prompt = native.compilePrompt(parsed, capabilities, 'turn_12345678901234567890123456789012');
+        const match = prompt.text.match(/<codex_context_json>\n([^\n]+)\n<\/codex_context_json>/);
+        assert.ok(match);
+        const messages = JSON.parse(match[1]).messages;
+        const taskIndex = messages.findIndex(message => message.content === taskText);
+        assert.ok(taskIndex >= 0);
+        assert.ok(taskIndex < messages.findIndex(message => message.content === 'LATEST_TOOL_RESULT'));
+        emit({ type: 'text_delta', text: 'Restarted task accepted.', phase: 'final_answer' });
+        emit({ type: 'done', stopReason: 'stop', endTurn: true });
+      },
+    }), { rememberState: false });
+    assert.equal((await response.json()).status, 'completed');
+    assert.equal(JSON.stringify(body), before);
+    const identity = JSON.parse(body.client_metadata['x-codex-turn-metadata']);
+    for (const field of ['thread_id', 'turn_id']) {
+      const changed = { ...body, client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ ...identity, [field]: 'foreign' }) } };
+      assert.equal(restore(changed).some(message => message.content === taskText), false);
+    }
+    for (const field of ['model', 'effort']) {
+      const parsed = parse(body);
+      if (field === 'model') parsed.modelId = 'foreign-model'; else parsed.options.reasoning = 'low';
+      assert.equal(native.restore(parsed, native.identity(parsed), native.revisions(parsed)).some(message => message.content === taskText), false);
+    }
+    const unknown = { ...body, input: [...body.input, checkpoint('Unissued checkpoint after restart')] };
+    assert.equal(restore(unknown).some(message => message.content === taskText), false);
+    const steering = { ...body, input: [...body.input, { type: 'message', role: 'user', id: 'steering', content: 'Stop implementation.',
+      internal_chat_message_metadata_passthrough: { turn_id: identity.turn_id } }] };
+    assert.equal(restore(steering).some(message => message.content === taskText), false);
+  }
 } else if (phase === 'fresh-process') {
   for (const { body, taskText } of JSON.parse(await readFile(replayPath, 'utf8'))) {
     const parsed = parse(body);

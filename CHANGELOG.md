@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3 — 2026-11-13
+
+- Persist native continuation checkpoints across daemon restarts using atomic AES-256-GCM storage bound to each account directory, with a separate key, a 256-entry LRU and a 32 MiB serialized plaintext limit. Restore source-hash Sets and preserve task provenance, scope, summary and metadata checks. Compaction completion requires a successful durable commit; storage failures do not authorize the unsaved summary.
+- Reject damaged or replaced snapshots, missing committed state, invalid task-message schemas and unsafe checkpoint files. Checkpoints already lost by older versions cannot be recovered retroactively; recover trusted complete history or start a new turn with the original task.
+- Expose `native-bigger-context` (default false): the usual 18-text-model catalogue still has 36 entries by default; enabling Bigger Context adds two dedicated entries for Plus or four for Pro. Original aliases retain conservative Instant-safe windows.
+- Expose `native-temporary-chats` (default true); disabling it saves ordinary native chats. Restart Magpie after changing either native option for the new settings to take effect. Ordinary text Chat still requires Temporary Chat.
+- Keep the reference differences explicit: no Zero Risk manual-send mode or Compatibility V1 selector, and pinned native installation remains Windows x64 only.
+
+Live verification: pending for 0.5.3. Local adversarial and pinned-runtime fixtures are not live account verification.
+
 ## 0.5.2 — 2026-11-13
 
 - Serialize Unicode turn metadata as JSON-safe ASCII HTTP headers, preserving Chinese workspace paths and emoji for native turns and compaction.

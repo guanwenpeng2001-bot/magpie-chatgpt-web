@@ -16,7 +16,9 @@ export function authHook(env) {
     refreshLead: 24 * 3600_000,
     options: [{ key: 'visible-turns', label: 'Show browser during chats',
       description: 'Keep installed Chrome visible during chats. Leave this off for background chats; verification automatically reveals the same Chrome window for recovery.', default: false },
-      { key: 'native-tools', label: 'Native tools mode', description: 'Set up native Codex tools and an OpenAI tunnel. Native mode sends the original Codex history and local paths to ChatGPT without gateway masking, so tools can use the trusted environment. Text mode remains available.', default: true }],
+      { key: 'native-tools', label: 'Native tools mode', description: 'Set up native Codex tools and an OpenAI tunnel. Native mode sends the original Codex history and local paths to ChatGPT without gateway masking, so tools can use the trusted environment. Text mode remains available.', default: true },
+      { key: 'native-bigger-context', label: 'Native Bigger Context', description: 'Experimental staged context for native reference mode. Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: false },
+      { key: 'native-temporary-chats', label: 'Native temporary chats', description: 'Use temporary ChatGPT chats in native reference mode. Turn off to save ordinary chats in ChatGPT history. Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: true }],
     async refresh(auth) { return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot }); },
     loader: makeLoader(env),
     methods: [{

@@ -100,7 +100,7 @@ export async function textFallback(body, compact, fetchText, signal) {
     const code = compact || isCompaction(body, '/responses')
       ? 'native_compaction_unavailable' : 'native_checkpoint_unavailable';
     return Response.json({ error: { type: 'upstream_error', code, retryable: true,
-      message: 'Native compaction or checkpoint continuation requires the same native daemon and its authenticated state. Retry when that daemon is available. If its state was lost, recover from trusted complete history or start a new turn with the original task; restarting alone does not restore checkpoint authorization. No text request was submitted.',
+      message: 'Native compaction or checkpoint continuation requires the account native daemon and its authenticated checkpoint store. Retry when that daemon and storage are available. If the checkpoint was never saved, was evicted, or its key/state was lost, recover trusted complete history or start a new turn with the original task. No text request was submitted.',
     } }, { status: 503, headers: { 'retry-after': '5', 'cache-control': 'no-store' } });
   }
   const request = toTextRequest(body, compact);

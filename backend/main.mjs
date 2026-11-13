@@ -161,14 +161,22 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         try {
           const capabilities = accountCapabilities(await client.models(signal));
           return await driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
-            const daemon = await ensureNative({ ...command.auth, context, capabilities }, { resumeOnly: command.method === 'nativeRuntime', signal });
+            const daemon = await ensureNative({ ...command.auth, context, capabilities }, { resumeOnly: command.method === 'nativeRuntime', nativeOptions: command.nativeOptions, signal });
             return daemon && await daemon.health(signal) ? daemon.descriptor() : null;
           }, signal, { visibleTurns: command.method === 'nativeProvision', auth: { ...command.auth, refresh: client.credential } });
         } finally { release(); }
       }
       case 'models': {
         const { client, release } = clientFor(command);
-        try { return await client.models(signal); } finally { release(); }
+        try {
+          const catalogue = await client.models(signal);
+          if (command.nativeOptions !== undefined && typeof command.auth?.profile === 'string') {
+            const state = await ensureNative({ ...command.auth, capabilities: accountCapabilities(catalogue) },
+              { catalogOnly: true, nativeOptions: command.nativeOptions, signal });
+            return { ...catalogue, nativeCapabilities: state?.capabilities ?? null };
+          }
+          return catalogue;
+        } finally { release(); }
       }
       case 'session': {
         const { client, release } = clientFor(command);

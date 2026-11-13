@@ -82,7 +82,7 @@ test('only exact core aliases and reference direct routes select the native daem
 
 test('reference standard windows and efforts are gated independently by explicit account capabilities', () => {
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
-    const rows = nativeCatalog({ solAvailable: true, proAvailable, extraHighAvailable, experimentalBiggerContext: true });
+    const rows = nativeCatalog({ solAvailable: true, proAvailable, extraHighAvailable, experimentalBiggerContext: false });
     assert.equal(rows.length, proAvailable ? 6 : 4);
     for (const family of ['gpt-6', 'gpt-5.6']) {
       const row = suffix => rows.find(model => model.slug === `chatgpt-web/${family}-${suffix}`);
@@ -181,7 +181,7 @@ test('capability discovery requires ordinary model evidence and never infers Ext
 test('catalog loads capabilities from each saved native account without starting the daemon', async t => {
   const root = await mkdtemp(join(tmpdir(), 'native-model-capabilities-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const client = nativeClient({ root, bridge: { call: () => assert.fail('catalog must not start a runtime') } });
+  const client = nativeClient({ root, bridge: { call: command => { assert.equal(command.method, 'models'); return {}; } } });
   const cases = [
     ['plus', { solAvailable: true }, ['low', 'medium', 'high'], 35556],
     ['pro', { solAvailable: true, proAvailable: true }, ['low', 'medium', 'high', 'max'], 105556],

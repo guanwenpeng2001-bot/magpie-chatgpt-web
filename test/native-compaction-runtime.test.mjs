@@ -91,9 +91,10 @@ test('pinned bundle completes and authenticates continuation in the full owner',
   assert.notEqual(source, compactionPreloadSource(entry));
   await writeFile(preload, source);
   const fixture = fileURLToPath(new URL('../integrations/native-compaction-bundle-fixture.mjs', import.meta.url));
-  for (const phase of ['same-process', 'fresh-process', 'cdp-ownership', 'model-announcements']) {
+  for (const phase of ['same-process', 'fresh-process', 'durable-fresh', 'persistence-failure', 'durable-recompact', 'durable-fresh', 'cdp-ownership', 'model-announcements']) {
     const result = await promisify(execFile)(runtimeCommand[0], ['--preload', preload, fixture, entry, phase], {
-      env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex') },
+      env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex'),
+        MAGPIE_NATIVE_CHECKPOINT_HOME: ['same-process', 'durable-fresh', 'durable-recompact', 'persistence-failure'].includes(phase) ? home : '' },
       windowsHide: true, timeout: 30_000, maxBuffer: 1 << 20,
     });
     assert.match(result.stdout, new RegExp(`${phase}: passed`));
