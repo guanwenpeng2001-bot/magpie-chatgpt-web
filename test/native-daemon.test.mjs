@@ -25,6 +25,10 @@ async function fixture(t, overrides = {}) {
   const fetch = async (url, options) => {
     requests.push({ url, options });
     assert.equal(new URL(url).hostname, '127.0.0.1');
+    if (url.includes('/admin/')) {
+      if (url.endsWith('/shutdown')) children[calls.findLastIndex(call => call.args.includes('serve'))].emit('exit', 0);
+      return Response.json({ status: 'ok' });
+    }
     return url.endsWith('/healthz') ? Response.json({ service: 'codex-chatgpt-web', mode: 'full', accepting_turns: true }) : new Response('data: fixture\n\n', { headers: { 'content-type': 'text/event-stream' } });
   };
   const daemon = new NativeDaemon({ home, runtimeCommand: ['C:\\durable path\\bun.exe', 'C:\\durable path\\cli.js'],
@@ -37,6 +41,14 @@ async function fixture(t, overrides = {}) {
   return { daemon, calls, requests, children, home };
 }
 const credentials = { tunnelId: 'fixture-tunnel', runtimeKey: 'fixture-key' };
+
+test('native runtime receives only its owned ordinary browser endpoint', async t => {
+  const browserEndpoint = 'http://127.0.0.1:43211';
+  const {daemon,calls} = await fixture(t, {browserEndpoint,
+    env:{PATH:'fixture',MAGPIE_NATIVE_BROWSER_CDP:'http://127.0.0.1:9999'}});
+  await daemon.start(credentials);
+  assert.equal(calls[0].options.env.MAGPIE_NATIVE_BROWSER_CDP, browserEndpoint);
+});
 
 test('daemon writes exact verified state, private config and isolated hidden processes', async t => {
   const { daemon, calls, home } = await fixture(t);
@@ -127,7 +139,8 @@ test('tunnel connect failure cleans up without exposing command diagnostics', as
     ? Promise.reject(new Error('fixture-secret-do-not-log')) : command(args, signal);
   await assert.rejects(daemon.start(credentials), error => error.message === 'Native daemon startup failed' && !error.cause);
   await daemon.stop();
-  assert.equal(children[0].killed, true);
+  assert.notEqual(children[0].killed, true);
+  assert.equal(daemon.child, null);
 });
 
 test('stop aborts startup before tunnel connection and leaves no crash retry', async t => {
@@ -145,4 +158,84 @@ test('stop aborts startup before tunnel connection and leaves no crash retry', a
   assert.equal(children[0].killed, true);
   assert.equal(calls.some(call => call.args[1] === 'connect'), false);
   assert.equal(daemon.restartTimer, null);
+});
+
+test('stop drains, cancels and shuts down before stopping the tunnel, awaiting graceful exit', { timeout: 2000 }, async t => {
+  const { daemon, children, calls } = await fixture(t);
+  await daemon.start(credentials);
+  const child = children[0];
+  const events = [];
+  let shutdownRequested;
+  const shutdown = new Promise(resolve => { shutdownRequested = resolve; });
+  daemon.fetch = async (url, options) => {
+    const action = new URL(url).pathname;
+    events.push(action);
+    assert.equal(new URL(url).origin, `http://127.0.0.1:${daemon.config.port}`);
+    assert.equal(options.method, 'POST');
+    assert.equal(new Headers(options.headers).get('authorization'), `Bearer ${daemon.config.controlToken}`);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.signal.aborted, false, 'shutdown must not reuse the aborted startup controller');
+    assert.equal(calls.some(call => call.args[1] === 'stop'), false, 'keep tunnel available until cancellation settles');
+    if (action === '/admin/shutdown') shutdownRequested();
+    return Response.json({ status: 'ok' });
+  };
+  const command = daemon.command.bind(daemon);
+  daemon.command = (args, signal) => { if (args[1] === 'stop') events.push('tunnel-stop'); return command(args, signal); };
+  const stopping = daemon.stop();
+  assert.equal(daemon.stop(), stopping);
+  let settled = false;
+  void stopping.then(() => { settled = true; });
+  await shutdown;
+  assert.equal(settled, false);
+  assert.notEqual(child.killed, true);
+  child.emit('exit', 0);
+  await stopping;
+  assert.deepEqual(events, ['/admin/drain', '/admin/cancel-turns', '/admin/shutdown', 'tunnel-stop']);
+  assert.notEqual(child.killed, true);
+  assert.equal(daemon.restartTimer, null);
+  assert.equal(daemon.child, null);
+});
+
+for (const failure of ['drain', 'cancel-turns', 'shutdown', 'invalid-json']) {
+  test(`shutdown ${failure} failure forces cleanup and stops the tunnel`, async t => {
+    const { daemon, calls, children } = await fixture(t);
+    await daemon.start(credentials);
+    const actions = [];
+    daemon.fetch = async url => {
+      const action = new URL(url).pathname.split('/').at(-1);
+      actions.push(action);
+      if (failure === 'invalid-json') return new Response('invalid');
+      return Response.json({ status: action === failure ? 'refused' : 'ok' }, { status: action === failure ? 409 : 200 });
+    };
+    await daemon.stop();
+    const expected = ['drain', 'cancel-turns', 'shutdown'];
+    assert.deepEqual(actions, failure === 'invalid-json' ? ['drain'] : expected.slice(0, expected.indexOf(failure) + 1));
+    assert.equal(children[0].killed, true);
+    assert.equal(calls.some(call => call.args[1] === 'stop'), true);
+    assert.equal(daemon.restartTimer, null);
+  });
+}
+
+test('shutdown request timeout forces cleanup with a fresh bounded signal', { timeout: 2000 }, async t => {
+  const { daemon, calls, children } = await fixture(t, { shutdownRequestTimeoutMs: 15 });
+  await daemon.start(credentials);
+  let timedOut = false;
+  daemon.fetch = async (_url, { signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => { timedOut = true; reject(signal.reason); }, { once: true });
+  });
+  await daemon.stop();
+  assert.equal(timedOut, true);
+  assert.equal(children[0].killed, true);
+  assert.equal(calls.some(call => call.args[1] === 'stop'), true);
+});
+
+test('acknowledged shutdown that never exits falls back after the exit deadline', { timeout: 2000 }, async t => {
+  const { daemon, calls, children } = await fixture(t, { shutdownExitTimeoutMs: 15 });
+  await daemon.start(credentials);
+  const actions = [];
+  daemon.fetch = async url => { actions.push(new URL(url).pathname); return Response.json({ status: 'ok' }); };
+  await daemon.stop();
+  assert.deepEqual(actions, ['/admin/drain', '/admin/cancel-turns', '/admin/shutdown']);
+  assert.equal(children[0].killed, true);
+  assert.equal(calls.some(call => call.args[1] === 'stop'), true);
 });

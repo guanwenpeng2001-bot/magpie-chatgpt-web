@@ -18,6 +18,108 @@ export const RELEASES = Object.freeze([
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const installing = new Map();
 
+// Exact minified gate in the pinned Windows v6.1.18 bundle, corresponding to
+// adapters/chatgpt-web/index.ts:936-937. Only automatic managed Chrome uses the
+// existing read-only branch; Launcher/Zero Risk retain their structured handoff.
+const compactionGate = 'let oe=(f.modelId!==Ie||c)&&l.localToolsEnabled;';
+const sharedCompactionGate = compactionGate.slice(0, -1)
+  + '&&!(e.chatgptWeb?.browserHost==="managed-chrome"&&e.chatgptWeb?.browserInteractionMode==="automatic");';
+const cliSha256 = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
+const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})';
+// readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
+// existing DOM evaluation so the checked row and active header are one snapshot.
+const modelAnnouncementTail = 'r.push(c.join(" "))}return r})}function fc(e)';
+
+export function appendNativeModelAnnouncement(slider, descriptions, activeHeader) {
+  const normalize = text => text.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+  const header = normalize(activeHeader);
+  if (!/^(?:Instant|Medium|High|Extra High|Pro|Max|\u5373\u65f6|\u4e2d|\u9ad8)$/i.test(header)) return descriptions;
+  // Versioned evidence already belongs to the native parser. In particular, do
+  // not manufacture a matching state beside a contradictory version/name/mode.
+  if (descriptions.some(text => /^(?:GPT[-\s]?)?\d+(?:\.\d+)?\s+/i.test(normalize(text)))) return descriptions;
+  const mode = text => ({ '\u5373\u65f6': 'instant', '\u4e2d': 'medium', '\u9ad8': 'high' }[text] ?? text.toLowerCase());
+  for (const description of descriptions) {
+    const effort = /^(Instant|Medium|High|Extra High|Pro|Max|\u5373\u65f6|\u4e2d|\u9ad8)(?=\p{P}|$)/iu.exec(normalize(description));
+    if (effort && mode(effort[1]) !== mode(header)) return descriptions;
+  }
+  const menu = slider.closest('[role="menu"]');
+  if (!menu) return descriptions;
+  // In simple view the real model rows remain attached but inert. Include them,
+  // while excluding rows belonging to a nested or unrelated picker.
+  const checked = [...menu.querySelectorAll('[role="menuitemradio"][aria-checked="true"]')]
+    .filter(row => row.closest('[role="menu"]') === menu);
+  if (checked.length !== 1) return descriptions;
+  const row = checked[0];
+  const label = normalize(row.textContent ?? '');
+  if (row.hasAttribute('aria-labelledby')
+    || row.hasAttribute('aria-label') && normalize(row.getAttribute('aria-label')) !== label) return descriptions;
+  // A generic Latest/Default row does not prove a version. These are only the
+  // exact versioned shared/named rows supported by the pinned native assertion.
+  if (!/^(?:(?:GPT[-\s]?)?6(?:\s+(?:Sol|Astra))?|GPT[-\s]?5\.6\s+Sol)$/i.test(label)) return descriptions;
+  return [...descriptions, `${label} ${header}`];
+}
+
+// Borrow the backend's ordinary signed-in context. The returned Playwright CDP
+// Browser owns only this connection; its unmodified close() disconnects it.
+// Keep this helper self-contained: the preload embeds it in the pinned bundle.
+export async function launchNativeBrowser(chromium, options, endpoint = process.env.MAGPIE_NATIVE_BROWSER_CDP) {
+  if (endpoint === undefined || endpoint === '') return chromium.launch(options);
+  const match = typeof endpoint === 'string' && /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(endpoint);
+  if (!match || match[0] !== endpoint || Number(match[1]) > 65535) throw new Error('Invalid MAGPIE_NATIVE_BROWSER_CDP loopback endpoint');
+  const browser = await chromium.connectOverCDP(endpoint);
+  try {
+    const context = browser.contexts()[0];
+    if (!context) throw new Error('Native browser CDP connection has no default context');
+    browser.newContext = async () => context;
+    return browser;
+  } catch (error) {
+    await browser.close().catch(() => {});
+    throw error;
+  }
+}
+
+export function compactionPreloadSource(cliPath) {
+  // Bun loads the original entry at its original path: helper/dependency resolution
+  // is unchanged and the verified download is never modified. Fail closed on drift.
+  return `import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+const entry = ${JSON.stringify(resolve(cliPath))};
+Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
+  build.onLoad({ filter: /[\\\\/]cli\\.js$/ }, async ({ path }) => {
+    if (resolve(path) !== entry) return;
+    const bytes = await Bun.file(path).arrayBuffer();
+    if (createHash('sha256').update(Buffer.from(bytes)).digest('hex') !== ${JSON.stringify(cliSha256)})
+      throw new Error('Native shared compaction runtime checksum mismatch');
+    const source = new TextDecoder().decode(bytes);
+    const before = ${JSON.stringify(compactionGate)};
+    if (source.split(before).length !== 2) throw new Error('Native shared compaction gate mismatch');
+    const launch = ${JSON.stringify(browserLaunch)};
+    if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
+    const announcement = ${JSON.stringify(modelAnnouncementTail)};
+    if (source.split(announcement).length !== 2) throw new Error('Native model announcement compatibility mismatch');
+    const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+      .replaceAll(launch, 'launchNativeBrowser(ff,{executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})')
+      .replace(announcement, ${JSON.stringify('r.push(c.join(" "));r=(' + appendNativeModelAnnouncement.toString() + ')(t,r,c.join(" "))}return r})}function fc(e)')})
+      + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())};
+    return { contents, loader: 'js' };
+  });
+} });
+`;
+}
+
+async function sharedCompactionCommand(root, runtime) {
+  const entry = join(runtime, 'app/cli.js');
+  if (hash(await readFile(entry)) !== cliSha256) throw new Error('Native shared compaction runtime checksum mismatch');
+  const source = compactionPreloadSource(entry);
+  const preload = join(root, `compaction-6.1.18-${hash(source)}.mjs`);
+  try { await writeFile(preload, source, { flag: 'wx', mode: 0o600 }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  const stat = await lstat(preload);
+  if (!stat.isFile() || stat.isSymbolicLink() || await readFile(preload, 'utf8') !== source)
+    throw new Error('Native shared compaction preload mismatch; refusing to overwrite');
+  return [join(runtime, 'runtime/bun.exe'), '--preload', preload, entry];
+}
+
 async function extractZip(archive, destination) {
   // No shell interpolation of filesystem paths. Reject traversal before extraction.
   await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
@@ -99,7 +201,10 @@ export function ensureRuntime({ root = nativeRoot(), fetch: fetchImpl = globalTh
     try {
       const runtime = await install(root, releases[0], fetchImpl, extract);
       const tunnel = await install(root, releases[1], fetchImpl, extract);
-      return { runtimeCommand: [join(runtime, 'runtime/bun.exe'), join(runtime, 'app/cli.js')], tunnelBinary: join(tunnel, 'tunnel-client.exe') };
+      const runtimeCommand = releases[0].sha256 === RELEASES[0].sha256
+        ? await sharedCompactionCommand(root, runtime)
+        : [join(runtime, 'runtime/bun.exe'), join(runtime, 'app/cli.js')];
+      return { runtimeCommand, tunnelBinary: join(tunnel, 'tunnel-client.exe') };
     } finally { await rm(lock, { recursive: true, force: true }); }
   })().finally(() => installing.delete(key));
   installing.set(key, pending);

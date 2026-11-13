@@ -34,7 +34,7 @@ function routed(t, body = original(), origin = 'local') {
   return {body, ctx};
 }
 
-test('restores all native item metadata and opaque fields without retaining message text', t => {
+test('restores the canonical local request and all opaque native fields', t => {
   const expected = original();
   const {body} = routed(t);
   restore(body, 'account-a');
@@ -48,6 +48,7 @@ test('Responses Lite routing lifts additional tools and removes only transport m
   input.input[2].namespace = 'functions';
   input.reasoning = {effort:'high', context:'all_turns'};
   input.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite = 'true';
+  const expected = structuredClone(input);
   const {body} = routed(t, input);
   assert.equal(body.input[0][TICKET], undefined);
   body.input.shift();
@@ -55,26 +56,25 @@ test('Responses Lite routing lifts additional tools and removes only transport m
   delete body.reasoning.context;
   delete body.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite;
   restore(body, 'account-a');
-  assert.equal(body.input[0].internal_chat_message_metadata_passthrough.turn_id, turn);
-  assert.deepEqual(body.input[1].encrypted_function_args, []);
-  assert.equal(body.input[2].encrypted_content, 'sealed-agent');
-  assert.equal(body.client_metadata.extra, 'keep');
+  assert.deepEqual(body, {...expected, model:route});
 });
 
 for (const field of ['sandbox_mode', 'workspaces', 'turn_trigger', 'window_number']) {
-  test(`binds full turn metadata, including ${field}`, t => {
+  test(`restores canonical turn metadata, including ${field}`, t => {
     const {body} = routed(t);
     const metadata = JSON.parse(body.client_metadata['x-codex-turn-metadata']);
     metadata[field] = 'changed';
     body.client_metadata['x-codex-turn-metadata'] = JSON.stringify(metadata);
-    assert.throws(() => restore(body, 'account-a'), /metadata|identity/);
+    restore(body, 'account-a');
+    assert.deepEqual(body, {...original(), model:route});
   });
 }
-test('binds other client metadata and prompt cache identity', t => {
+test('restores other client metadata and prompt cache identity', t => {
   for (const mutate of [b => {b.client_metadata.extra = 'changed';}, b => {b.prompt_cache_key = 'other';}]) {
     const {body} = routed(t);
     mutate(body);
-    assert.throws(() => restore(body, 'account-a'), /metadata|identity/);
+    restore(body, 'account-a');
+    assert.deepEqual(body, {...original(), model:route});
   }
 });
 test('object turn metadata and future metadata keys round-trip exactly', t => {
@@ -99,15 +99,42 @@ test('saved metadata is detached from caller mutation and successful retries', t
   restore(retry, 'account-a');
   assert.equal(retry.input[0].internal_chat_message_metadata_passthrough.extension.nested[0], 1);
 });
-test('unclaimed proof rejects account, route, nonce, missing and duplicate tickets', t => {
+test('unclaimed proof rejects account, route, nonce and missing provider proof', t => {
   for (const mutate of [b => {b.model = 'native/account-b/gpt-6-sol';},
     b => {b.client_metadata[NONCE] = 'x'.repeat(32);},
     b => {b.client_metadata[CHECKED] = JSON.stringify({nonce:b.client_metadata[NONCE], provider:'chatgpt-web', route:'native/account-b/gpt-6-sol'});},
-    b => {delete b.input[0][TICKET];}, b => {b.input.push(structuredClone(b.input[0]));}]) {
+    b => {delete b.client_metadata[CHECKED];},
+    b => {b.client_metadata[NONCE] = '{{SECRET_ab12cd34}}';}]) {
     const {body} = routed(t);
     mutate(body);
     assert.throws(() => restore(body, 'account-a'));
   }
+});
+
+test('merged vendor messages and changed tools cannot replace the canonical local task', t => {
+  const {body} = routed(t);
+  body.input = [{type:'message', role:'user', content:'a rewritten vendor task'}];
+  body.tools = [{type:'function', name:'unexpected', parameters:{}}];
+  restore(body, 'account-a');
+  assert.deepEqual(body, {...original(), model:route});
+});
+
+test('a claimed proof cannot replay a different vendor request', t => {
+  const {body} = routed(t);
+  const retry = structuredClone(body);
+  restore(body, 'account-a');
+  retry.input[0].content[0].text = 'changed';
+  assert.throws(() => restore(retry, 'account-a'), /retry changed/);
+});
+
+test('parallel requests keep their own snapshots and never guess a masked nonce', t => {
+  const first = routed(t), input = original();
+  input.input[0].content[0].text = 'second task';
+  const second = routed(t, input);
+  second.body.client_metadata[NONCE] = '{{SECRET_ab12cd34}}';
+  assert.throws(() => restore(second.body, 'account-a'), /nonce/);
+  restore(first.body, 'account-a');
+  assert.deepEqual(first.body, {...original(), model:route});
 });
 test('response cleanup revokes proof and leaves unrelated hook state intact', t => {
   const {body, ctx} = routed(t);

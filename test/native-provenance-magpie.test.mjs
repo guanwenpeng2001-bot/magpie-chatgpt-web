@@ -47,6 +47,24 @@ test('installed Magpie preserves native provenance through both Responses routes
     for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
     calls.push({ path: req.url, headers: req.headers, body });
+    if (body.client_metadata?.extra === 'custom-probe') {
+      const custom = { type: 'custom_tool_call', id: 'ctc_fixture', call_id: 'call_custom', name: 'apply_patch', input: '*** Begin Patch\n*** End Patch', status: 'completed' };
+      const spaced = { type: 'function_call', id: 'fc_spaced', call_id: 'call_spaced', namespace: 'mcp__fixture', name: 'echo', arguments: '{\"x\":1}', status: 'completed' };
+      const response = { id: 'resp_custom', object: 'response', created_at: 1, status: 'completed', model: body.model, output: [custom, spaced], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } };
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const event of [{ type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
+        { type: 'response.output_item.added', output_index: 0, item: { ...custom, input: '', status: 'in_progress' } },
+        { type: 'response.custom_tool_call_input.delta', item_id: custom.id, output_index: 0, delta: custom.input },
+        { type: 'response.custom_tool_call_input.done', item_id: custom.id, output_index: 0, input: custom.input },
+        { type: 'response.output_item.done', output_index: 0, item: custom },
+        { type: 'response.output_item.added', output_index: 1, item: { ...spaced, arguments: '', status: 'in_progress' } },
+        { type: 'response.function_call_arguments.delta', item_id: spaced.id, output_index: 1, delta: spaced.arguments },
+        { type: 'response.function_call_arguments.done', item_id: spaced.id, output_index: 1, arguments: spaced.arguments },
+        { type: 'response.output_item.done', output_index: 1, item: spaced },
+        { type: 'response.completed', response }]) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      res.end();
+      return;
+    }
     const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: body.model,
       output: [{ type: 'message', id: 'msg_fixture', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'fixture-ok', annotations: [] }] }],
       usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } };
@@ -107,8 +125,10 @@ test('installed Magpie preserves native provenance through both Responses routes
     import { restore } from ${JSON.stringify(nativeUrl + 'provenance.mjs')};
     export default { id: 'native-provenance-fixture', server: async () => ({
       config: async config => { config.provider ??= {}; config.provider['chatgpt-web'] = {
-        name: 'Local fixture', npm: '@ai-sdk/openai', api: ${JSON.stringify(endpoint)},
+        name: 'Local fixture', npm: '@ai-sdk/anthropic', api: ${JSON.stringify(endpoint)},
         models: { ${JSON.stringify(route)}: { id: ${JSON.stringify(route)}, name: 'Local fixture', reasoning: true,
+          npm:'@ai-sdk/openai', api:{id:${JSON.stringify(route)}, npm:'@ai-sdk/openai', url:${JSON.stringify(endpoint)}},
+          provider:{npm:'@ai-sdk/openai',api:${JSON.stringify(endpoint)}},
           tool_call: true, limit: {context: 90000, output: 8000} } } }; },
       auth: { provider: 'chatgpt-web', methods: [{type:'api', label:'Local fixture', keyless:true,
         authorize: async () => ({type:'success', key:'fixture-local'})}],
@@ -229,13 +249,6 @@ test('installed Magpie preserves native provenance through both Responses routes
         assert.equal(fetched.body.__probeMiddlewareMutation, true);
         expected.input[0].internal_chat_message_metadata_passthrough.hook_mutation = true;
       }
-      if (sent === lite) {
-        expected.input.shift();
-        delete expected.input[2].namespace;
-        expected.tools = tools;
-        delete expected.reasoning.context;
-        delete expected.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite;
-      }
       assert.deepEqual(calls[index].body, expected);
       t.diagnostic(JSON.stringify({path, mutationProbe:index === 2, url:fetched.url, headers:fetched.headers,
         hookContextKeys:Object.keys(request.ctx), providerContext:provider.ctx,
@@ -244,6 +257,27 @@ test('installed Magpie preserves native provenance through both Responses routes
         exactRestoredBody:true}));
     }
     t.diagnostic(`External background requests rejected by local proxy: ${[...new Set(blocked)].join(', ')}`);
+    const customRequest = structuredClone(original);
+    customRequest.client_metadata.extra = 'custom-probe';
+    customRequest.tools = [...original.tools, {type:'custom', name:'apply_patch', description:'Patch files', format:{type:'text'}},
+      {type:'namespace', name:'mcp__fixture', description:'Fixture MCP', tools:[{type:'function', name:'echo', description:'Echo', parameters:{type:'object', properties:{x:{type:'number'}}}}]}];
+    const customResponse = await fetch(`http://127.0.0.1:${gatewayPort}${paths[0]}`, {method:'POST',
+      headers:{'content-type':'application/json', authorization:'Bearer fixture', 'user-agent':'codex_cli_rs/0.162.1',
+        originator:'codex_cli_rs', 'x-codex-turn-metadata':JSON.stringify(turn), session_id:threadId},
+      body:JSON.stringify(customRequest), signal:AbortSignal.timeout(30000)});
+    const customOutput = await customResponse.text();
+    assert.equal(customResponse.status, 200, `${customOutput}\n${gatewayLog}`);
+    const doneItems = customOutput.split(/\r?\n/).filter(line => line.startsWith('data:'))
+      .map(line => JSON.parse(line.slice(5))).filter(event => event.type === 'response.output_item.done').map(event => event.item);
+    const patch = doneItems.find(item => item.call_id === 'call_custom');
+    assert.equal(patch?.type, 'custom_tool_call', customOutput);
+    assert.equal(patch.name, 'apply_patch');
+    assert.equal(patch.input, '*** Begin Patch\n*** End Patch');
+    const echo = doneItems.find(item => item.call_id === 'call_spaced');
+    assert.equal(echo?.type, 'function_call', customOutput);
+    assert.equal(echo.namespace, 'mcp__fixture');
+    assert.equal(echo.name, 'echo');
+    assert.equal(echo.arguments, '{"x":1}');
   } finally {
     if (gateway && gateway.exitCode === null) {
       const exited = new Promise(resolve => gateway.once('exit', resolve));

@@ -16,7 +16,7 @@ export function authHook(env) {
     refreshLead: 24 * 3600_000,
     options: [{ key: 'visible-turns', label: 'Show browser during chats',
       description: 'Keep installed Chrome visible during chats. Leave this off for background chats; verification automatically reveals the same Chrome window for recovery.', default: false },
-      { key: 'native-tools', label: 'Native tools mode', description: 'Set up the Full-mode daemon and OpenAI tunnel for native Codex tools. Text mode remains available.', default: true }],
+      { key: 'native-tools', label: 'Native tools mode', description: 'Set up native Codex tools and an OpenAI tunnel. Native mode sends the original Codex history and local paths to ChatGPT without gateway masking, so tools can use the trusted environment. Text mode remains available.', default: true }],
     async refresh(auth) { return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot }); },
     loader: makeLoader(env),
     methods: [{

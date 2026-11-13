@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ensureRuntime, nativeRoot } from './runtime.mjs';
 import { NativeDaemon, writePrivate, daemonProxy } from './daemon.mjs';
-import { exportStorageState, findChromeExecutable } from '../../backend/browser.mjs';
+import { exportStorageState, findChromeExecutable, browserEndpoint } from '../../backend/browser.mjs';
 import { nativeCatalog, describeNativeCatalogue } from './models.mjs';
 
 const accounts = new Map();
@@ -26,7 +26,8 @@ export function ensureNative(account, options = {}) {
     if (saved && (saved.profile !== profile || !saved.tunnelId || !saved.runtimeKey || !saved.connectorId || !saved.linkId)) throw new Error('Invalid native account state');
     if (!saved && options.resumeOnly) return null;
     const existing = accounts.get(home);
-    if (existing && options.resumeOnly && await existing.health()) return existing;
+    const endpoint = browserEndpoint(account.context);
+    if (existing && options.resumeOnly && existing.browserEndpoint === endpoint && await existing.health()) return existing;
     if (existing) { await existing.stop(); accounts.delete(home); }
     const installed = await (options.install ?? ensureRuntime)({ root });
     const capabilities = account.capabilities ?? saved?.capabilities ?? {};
@@ -35,6 +36,7 @@ export function ensureNative(account, options = {}) {
     const storage = await exportStorageState(account.context);
     const daemon = (options.createDaemon ?? (settings => new NativeDaemon(settings)))({ home, ...installed,
       appName: `Codex Magpie ${profile.slice(0, 8)}`,
+      browserEndpoint: endpoint,
       chromeExecutablePath: account.chromeExecutablePath ?? await findChromeExecutable(), capabilities, storageState: async () => storage });
     const abort = () => { void daemon.stop().catch(() => {}); };
     options.signal?.addEventListener('abort', abort, { once: true });
@@ -85,8 +87,12 @@ export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch =
     },
     async models(auth, baseModels) {
       if (baseModels && typeof baseModels === 'object' && !Array.isArray(baseModels) && Object.keys(baseModels).length) {
-        if (!await hasNative(auth, root)) return {};
-        return describeNativeCatalogue(baseModels, auth.profile);
+        const { profile, home } = identity(auth, root);
+        let saved;
+        try { saved = JSON.parse(await readFile(join(home, 'native.json'), 'utf8')); }
+        catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+        if (saved?.profile !== profile || !saved.connectorId || !saved.linkId) return {};
+        return describeNativeCatalogue(baseModels, profile, saved.capabilities);
       }
       const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot });
       if (!descriptor) return {};

@@ -53,12 +53,13 @@ export function daemonProxy({ port, controlToken, compaction }, fetchImpl = glob
 }
 
 export class NativeDaemon {
-  constructor({ home, runtimeCommand, tunnelBinary, chromeExecutablePath, storageState, capabilities = {}, appName = 'Codex Magpie',
+  constructor({ home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities = {}, appName = 'Codex Magpie',
     spawn = spawnProcess, fetch = globalThis.fetch, allocatePort = freePort, sleep = delay,
     startupTimeoutMs = 30_000, pollMs = 200, restartBaseMs = 1000, restartMaxMs = 30_000, env = process.env,
-    compactionIdleMs = 60_000 }) {
-    Object.assign(this, { home, runtimeCommand, tunnelBinary, chromeExecutablePath, storageState, capabilities, appName,
-      spawn, fetch, allocatePort, sleep, startupTimeoutMs, pollMs, restartBaseMs, restartMaxMs, env });
+    compactionIdleMs = 60_000, shutdownRequestTimeoutMs = 2000, shutdownExitTimeoutMs = 5000 }) {
+    Object.assign(this, { home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities, appName,
+      spawn, fetch, allocatePort, sleep, startupTimeoutMs, pollMs, restartBaseMs, restartMaxMs, env,
+      shutdownRequestTimeoutMs, shutdownExitTimeoutMs });
     this.ready = false;
     this.desired = false;
     this.failures = 0;
@@ -112,6 +113,7 @@ export class NativeDaemon {
       resolve(homedir(), '.codex'),
     ].filter(dir => dir && isAbsolute(dir) && existsSync(dir)))];
     this.childEnv = { ...inherited, CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
+      ...(this.browserEndpoint ? { MAGPIE_NATIVE_BROWSER_CDP: this.browserEndpoint } : {}),
       ...(trustedHomes.length ? { CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES: JSON.stringify(trustedHomes) } : {}),
       TUNNEL_CLIENT_STATE_DIR: join(this.home, 'tunnel-state'), TUNNEL_CLIENT_PROFILE_DIR: join(this.home, 'tunnel'),
       MCP_STDIO_SEND_INITIALIZED_NOTIFICATION: 'true' };
@@ -122,6 +124,7 @@ export class NativeDaemon {
       cwd: this.home, env: this.childEnv, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
     });
     this.child = child;
+    const childState = this.childState = { exited: false, httpReady: false };
     const failed = () => {
       if (this.child !== child) return;
       this.ready = false;
@@ -129,11 +132,12 @@ export class NativeDaemon {
       if (!this.starting && this.desired) this.scheduleRestart();
     };
     this.childDone = new Promise(resolve => {
-      child.once('error', () => { resolve(); failed(); });
-      child.once('exit', () => { resolve(); failed(); });
+      child.once('error', () => { childState.exited = true; resolve(); failed(); });
+      child.once('exit', () => { childState.exited = true; resolve(); failed(); });
     });
     this.proxy = daemonProxy(this.descriptor(), this.fetch);
     await this.waitFor(() => this.proxy.health(signal), signal);
+    childState.httpReady = true;
     const tunnel = this.config.tunnel;
     await this.command(['runtimes', 'connect', '--alias', tunnel.alias, '--profile', tunnel.profileName,
       '--profile-dir', tunnel.profileDir, '--tunnel-client-bin', tunnel.binaryPath, '--tunnel-id', tunnelId,
@@ -199,19 +203,52 @@ export class NativeDaemon {
     } catch { return false; }
   }
   responses(body, headers, signal) { return this.proxy.responses(body, headers, signal); }
-  async cleanup() {
-    await this.compactionService?.stop();
+  cleanup() {
+    if (this.cleaning) return this.cleaning;
+    const compactionService = this.compactionService;
     this.compactionService = null;
     const child = this.child;
     const done = this.childDone;
+    const childState = this.childState;
+    const config = this.config;
     this.child = null;
-    if (this.config?.tunnel) await this.command(['runtimes', 'stop', this.config.tunnel.alias, '--json']).catch(() => {});
-    child?.kill();
-    if (child && done) {
-      let timer;
-      await Promise.race([done, new Promise(resolve => { timer = setTimeout(resolve, 5000); })]);
-      clearTimeout(timer);
-    }
+    this.ready = false;
+    this.cleaning = (async () => {
+      try { await compactionService?.stop(); }
+      finally {
+        try {
+          if (child && !childState.exited) {
+            const waitForExit = async () => {
+              let timer;
+              try {
+                return await Promise.race([done.then(() => true), new Promise(resolve => {
+                  timer = setTimeout(() => resolve(false), this.shutdownExitTimeoutMs);
+                })]);
+              } finally { clearTimeout(timer); }
+            };
+            if (childState.httpReady) {
+              try {
+                // Windows kill() bypasses Bun's signal handlers. Let the reference
+                // cancel active turns, flush state and close its browsers first.
+                for (const action of ['drain', 'cancel-turns', 'shutdown']) {
+                  const response = await this.fetch(`http://127.0.0.1:${config.port}/admin/${action}`, {
+                    method: 'POST', headers: { authorization: `Bearer ${config.controlToken}` },
+                    signal: AbortSignal.timeout(this.shutdownRequestTimeoutMs), redirect: 'error',
+                  });
+                  if (!response.ok || (await response.json()).status !== 'ok') throw new Error('Native shutdown refused');
+                }
+                await waitForExit();
+              } catch { /* bounded forced cleanup when the daemon cannot shut down */ }
+            }
+            if (!childState.exited) { child.kill(); await waitForExit(); }
+          }
+        } finally {
+          // Cancellation may still need the MCP connection until the daemon exits.
+          if (config?.tunnel) await this.command(['runtimes', 'stop', config.tunnel.alias, '--json']).catch(() => {});
+        }
+      }
+    })().finally(() => { this.cleaning = null; });
+    return this.cleaning;
   }
   stop() {
     if (this.stopping) return this.stopping;

@@ -25,6 +25,9 @@ export function signinTimeoutWindow() {
 }
 
 const claimLocks = new Map();
+const browserEndpoints = new WeakMap();
+// Only plugin-owned ordinary Chrome contexts have a reusable native CDP endpoint.
+export const browserEndpoint = context => browserEndpoints.get(context);
 
 // Linux abstract sockets are not a portable lock. macOS returns EINVAL for a
 // leading NUL, which the claim catch turned into browserConfiguration.
@@ -445,6 +448,7 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
     if (!browser) throw new BackendError('backendDown');
     const context = browser.contexts()[0];
     if (!context) throw new BackendError('backendDown');
+    browserEndpoints.set(context, `http://127.0.0.1:${port}`);
     return { context, close };
   } catch (error) {
     await close();

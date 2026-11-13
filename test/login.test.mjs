@@ -172,6 +172,10 @@ test('sign-in launch inherits host proxy and stays visible', async () => {
     assert.ok(spawned.includes('--proxy-server=http://127.0.0.1:9123'));
     assert.equal(spawned.some(arg => /headless|enable-automation/.test(arg)), false);
     assert.equal(owned.context, context);
+    const endpoint = new URL(browserModule.browserEndpoint(context));
+    assert.equal(endpoint.hostname, '127.0.0.1');
+    assert.equal(endpoint.port, spawned.find(arg => arg.startsWith('--remote-debugging-port=')).split('=')[1]);
+    assert.equal(browserModule.browserEndpoint(new EventEmitter()), undefined);
   } finally { await owned.close(); }
 });
 

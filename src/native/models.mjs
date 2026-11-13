@@ -1,7 +1,10 @@
 // v6.1.18 chatgpt-web-models.ts standard (Bigger Context disabled) catalog.
 // /v1/models first forwards to the Codex upstream and needs a separate Codex
 // credential. These browser-only rows require only the account capabilities.
-export function nativeCatalog({ solAvailable = false, proAvailable = false, extraHighAvailable = false } = {}) {
+export function nativeCatalog(capabilities = {}) {
+  const solAvailable = capabilities?.solAvailable === true;
+  const proAvailable = capabilities?.proAvailable === true;
+  const extraHighAvailable = capabilities?.extraHighAvailable === true;
   const row = (slug, context, efforts) => ({ slug: `chatgpt-web/${slug}`, display_name: slug,
     context_window: context, supported_reasoning_levels: efforts.map(effort => ({ effort })), input_modalities: ['text', 'image'] });
   if (!solAvailable) return [row('gpt-5.6-luna', 1050000, ['low', 'medium'])];
@@ -12,39 +15,61 @@ export function nativeCatalog({ solAvailable = false, proAvailable = false, extr
   ]);
 }
 
-export function describeNativeCatalogue(source, profile) {
+function coreFamily(slug) {
+  return slug === 'gpt-6' ? 'gpt-6' : slug === 'gpt-5-6' ? 'gpt-5.6' : null;
+}
+
+function nativeDescriptor(id, name, rows) {
+  const image = rows.every(row => row.input_modalities?.includes('image'));
+  return {
+    name: `${name} (Native tools)`, npm: '@ai-sdk/openai',
+    provider: { npm: '@ai-sdk/openai', api: 'http://127.0.0.1:1/v1' },
+    api: { id, npm: '@ai-sdk/openai', url: 'http://127.0.0.1:1/v1' },
+    // Core aliases group Instant, reasoning and Pro. The published limit must
+    // fit every advertised effort, including the smallest Instant window.
+    limit: { context: Math.min(...rows.map(row => row.context_window)), output: 0 },
+    prefer_websockets: false,
+    capabilities: { reasoning: true, toolcall: true, attachment: image, temperature: false,
+      input: { text: true, image }, output: { text: true } },
+    variants: Object.fromEntries(rows.flatMap(row => row.supported_reasoning_levels.map(({ effort }) => [effort, {}]))),
+  };
+}
+
+export function describeNativeCatalogue(source, profile, capabilities = {}) {
   if (typeof profile !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(profile)) return {};
   if (source && typeof source === 'object' && !Array.isArray(source)) {
-    return Object.fromEntries(Object.entries(source).filter(([, model]) => model && typeof model === 'object').map(([slug, model]) => {
+    const available = nativeCatalog(capabilities);
+    return Object.fromEntries(Object.entries(source).filter(([slug, model]) => /^[A-Za-z0-9._-]+$/.test(slug) && model && typeof model === 'object').map(([slug, model]) => {
       const id = `native/${profile}/${slug}`;
-      const supported = !String(model.name ?? '').includes('[not yet supported]') && slug !== 'chatgpt-image';
+      const unavailable = String(model.name ?? '').includes('[not yet supported]') || slug === 'chatgpt-image';
+      const family = coreFamily(slug);
+      const rows = unavailable ? [] : available.filter(row => family
+        ? [`chatgpt-web/${family}-sol-instant`, `chatgpt-web/${family}-sol`, `chatgpt-web/${family}-pro`].includes(row.slug)
+        : row.slug === `chatgpt-web/${slug}`);
+      if (rows.length) return [id, nativeDescriptor(id, model.name ?? slug, rows)];
+      // Keep the exact text model's limits, variants and modalities. A Native
+      // namespace entry alone is not evidence that the daemon can serve it.
       return [id, {
-        name: `${model.name ?? slug} (Native tools)`,
+        ...structuredClone(model),
+        name: `${model.name ?? slug} (${unavailable ? 'Native unavailable' : 'Text fallback'})`,
         npm: '@ai-sdk/openai',
+        provider: { npm: '@ai-sdk/openai', api: 'http://127.0.0.1:1/v1' },
         api: { id, npm: '@ai-sdk/openai', url: 'http://127.0.0.1:1/v1' },
-        limit: { context: model.limit?.context ?? 90000, output: 0 },
         prefer_websockets: false,
         capabilities: {
-          ...(model.capabilities ?? {}),
-          toolcall: supported,
+          ...structuredClone(model.capabilities ?? {}),
+          toolcall: false,
           temperature: false,
-          input: { text: true, image: model.capabilities?.input?.image === true },
-          output: { text: true },
         },
-        ...(model.variants ? { variants: structuredClone(model.variants) } : {}),
       }];
     }));
   }
   const rows = Array.isArray(source) ? source : [];
-  return Object.fromEntries(rows.filter(row => /^chatgpt-web\/[A-Za-z0-9._-]+$/.test(row.slug) && Number.isSafeInteger(row.context_window) && row.context_window > 0).map(row => {
+  return Object.fromEntries(rows.filter(row => typeof row?.slug === 'string' && row.slug.startsWith('chatgpt-web/')
+    && DIRECT_DAEMON_SLUGS.has(row.slug.slice('chatgpt-web/'.length))
+    && Number.isSafeInteger(row.context_window) && row.context_window > 0).map(row => {
     const id = `native/${profile}/${row.slug.slice('chatgpt-web/'.length)}`;
-    return [id, { name: `${row.display_name} (Native tools)`, npm: '@ai-sdk/openai',
-      api: { id, npm: '@ai-sdk/openai', url: 'http://127.0.0.1:1/v1' },
-      limit: { context: row.context_window, output: 0 }, prefer_websockets: false,
-      capabilities: { reasoning: true, toolcall: true, attachment: true, temperature: false,
-        input: { text: true, image: row.input_modalities?.includes('image') === true }, output: { text: true } },
-      variants: Object.fromEntries(row.supported_reasoning_levels.map(({ effort }) => [effort, {}])),
-    }];
+    return [id, nativeDescriptor(id, row.display_name, [row])];
   }));
 }
 
@@ -61,20 +86,14 @@ function resolveDaemonTarget(slug, requestedEffort) {
         : requestedEffort;
     return { model: `chatgpt-web/${slug}`, ...(effort ? { effort } : {}) };
   }
-  if (slug === 'gpt-5-6-mini') return { model: 'chatgpt-web/gpt-5.6-sol-instant', effort: 'low' };
-  if (slug === 'gpt-5-6-t-mini') return { model: 'chatgpt-web/gpt-5.6-sol', effort: 'medium' };
-  if (slug === 'gpt-6-t-mini') return { model: 'chatgpt-web/gpt-6-sol', effort: 'medium' };
-  if (slug === 'chatgpt_alpha_model_external_access_reserved_gate_12'
-      || slug === 'chatgpt_alpha_model_external_access_reserved_gate_13') {
-    return { model: 'chatgpt-web/gpt-6-sol-instant', effort: 'low' };
-  }
-  if (slug === 'gpt-6' || slug === 'gpt-5-6' || slug.endsWith('-wm')) {
-    const family = slug === 'gpt-5-6' || slug.startsWith('gpt-5.6-') ? 'gpt-5.6' : 'gpt-6';
+  const family = coreFamily(slug);
+  if (family) {
     if (requestedEffort === 'low') return { model: `chatgpt-web/${family}-sol-instant`, effort: 'low' };
-    if (requestedEffort === 'max' || requestedEffort === 'ultra') {
+    if (requestedEffort === 'max') {
       return { model: `chatgpt-web/${family}-pro`, effort: 'max' };
     }
-    const effort = ['medium', 'high', 'xhigh'].includes(requestedEffort) ? requestedEffort : 'high';
+    const effort = requestedEffort ?? 'high';
+    if (!['medium', 'high', 'xhigh'].includes(effort)) return null;
     return { model: `chatgpt-web/${family}-sol`, effort };
   }
   return null;
@@ -95,9 +114,13 @@ export function nativeRoute(model, requestedEffort) {
 }
 
 export function accountCapabilities(catalogue) {
-  const slugs = new Set((catalogue?.models ?? []).map(row => row.slug));
-  const solAvailable = [...slugs].some(slug => /^(gpt-6|gpt-5-6|gpt-5\.6)(?!.*mini)/.test(slug));
-  return { solAvailable,
-    proAvailable: [...slugs].some(slug => /(?:^|-)pro(?:-|$)/.test(slug)),
-    extraHighAvailable: solAvailable || (catalogue?.models ?? []).some(row => row.supported_reasoning_levels?.some(level => (level.effort ?? level) === 'xhigh')) };
+  // Work and mini catalogs expose different selectors. Their names and effort
+  // lists cannot establish access to ordinary Sol, Pro or Extra High.
+  const rows = (Array.isArray(catalogue?.models) ? catalogue.models : []).filter(row =>
+    /^(?:chatgpt-web\/)?(?:gpt-6|gpt-5-6|gpt-5\.6)(?:-(?:sol(?:-instant)?|instant|thinking|high|extra-high|pro))?$/.test(row?.slug));
+  const hasEffort = effort => rows.some(row => Array.isArray(row.supported_reasoning_levels)
+    && row.supported_reasoning_levels.some(level => (level?.effort ?? level) === effort));
+  return { solAvailable: rows.length > 0,
+    proAvailable: rows.some(row => row.slug.endsWith('-pro')) || hasEffort('max'),
+    extraHighAvailable: rows.some(row => row.slug.endsWith('-extra-high')) || hasEffort('xhigh') };
 }

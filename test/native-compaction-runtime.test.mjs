@@ -1,44 +1,69 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
-import { tmpdir, homedir } from 'node:os';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { randomUUID, randomBytes } from 'node:crypto';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NativeDaemon, writePrivate } from '../src/native/daemon.mjs';
 import { CompactionService, compactionProxy } from '../src/native/compaction.mjs';
+import { ensureRuntime, compactionPreloadSource } from '../src/native/runtime.mjs';
 
-// Explicit opt-in: uses the durable installed release, never patches it or logs in.
-// A missing Chrome executable stops exactly at the browser-worker launch boundary,
-// making this smoke deterministic and offline with an empty scratch storage state.
-test('installed 6.1.18 reaches read-only browser compaction without a launcher', {
-  skip: process.env.NATIVE_COMPACTION_SMOKE !== '1', timeout: 60_000,
-}, async t => {
+const smoke = { skip: process.env.NATIVE_COMPACTION_SMOKE !== '1', timeout: 60_000 };
+let installation;
+const installed = () => installation ??= ensureRuntime({ fetch: () => { throw new Error('Offline runtime test cannot download'); } });
+
+// Empty scratch storage and a missing Chrome stop at the real browser boundary.
+// The full server and preload are real; no tunnel process or signed-in account is used.
+test('installed 6.1.18 full daemon reaches read-only compaction without a launcher', smoke, async t => {
   const home = await mkdtemp(join(tmpdir(), 'native-compaction-runtime-'));
-  const payload = join(homedir(), '.config/magpie/chatgpt-web-native/runtime-6.1.18/payload');
-  const runtimeCommand = [join(payload, 'runtime/bun.exe'), join(payload, 'app/cli.js')];
+  const { runtimeCommand } = await installed();
+  const owner = new NativeDaemon({ home, runtimeCommand });
+  owner.config = { version: 3, releaseVersion: '6.1.18', mode: 'full', subagentProtocol: 'native',
+    host: '127.0.0.1', port: await owner.allocatePort(), contextWindow: 256000, appName: 'Codex Compaction Fixture',
+    browserHost: 'managed-chrome', browserInteractionMode: 'automatic',
+    chromeExecutablePath: join(home, 'intentionally-missing-chrome.exe'), storageStatePath: join(home, 'storage.json'),
+    brokerSocketPath: '\\\\.\\pipe\\compaction-fixture-' + randomUUID(), solAvailable: true,
+    headed: false, autoApproveToolCalls: false, controlToken: randomBytes(32).toString('base64url'), runtimeCommand,
+    tunnel: { binaryPath: join(home, 'unused-tunnel.exe'), tunnelId: 'tunnel_' + '0'.repeat(32),
+      runtimeKeyFile: join(home, 'unused.key'), profileDir: join(home, 'tunnel'), profileName: 'fixture', alias: 'fixture' } };
+  await writePrivate(owner.config.storageStatePath, JSON.stringify({ cookies: [], origins: [] }));
+  await writePrivate(`${owner.config.storageStatePath}.verified.json`, JSON.stringify({ version: 1, authenticated: true,
+    verifiedAt: new Date().toISOString(), solAvailable: true }));
+  await writePrivate(join(home, 'config.json'), JSON.stringify(owner.config));
   let logs = '';
-  let forcedStops = 0;
-  const owner = new NativeDaemon({ home, runtimeCommand,
-    chromeExecutablePath: join(home, 'intentionally-missing-chrome.exe'),
-    storageState: async () => ({ cookies: [], origins: [] }), capabilities: { solAvailable: true },
-    spawn(file, args, options) {
-      const child = spawn(file, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
-      const kill = child.kill.bind(child);
-      child.kill = (...args) => { forcedStops++; return kill(...args); };
-      child.stdout.on('data', bytes => { logs += bytes; });
-      child.stderr.on('data', bytes => { logs += bytes; });
-      return child;
-    },
+  const child = spawn(runtimeCommand[0], [...runtimeCommand.slice(1), 'serve'], {
+    cwd: home, env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex') },
+    windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const service = new CompactionService(owner, { writePrivate });
-  t.after(async () => { await service.stop(); await rm(home, { recursive: true, force: true }); });
+  const done = new Promise(resolve => { child.once('exit', resolve); child.once('error', resolve); });
+  child.stdout.on('data', bytes => { logs += bytes; });
+  child.stderr.on('data', bytes => { logs += bytes; });
+  const service = new CompactionService(owner);
+  t.after(async () => {
+    await service.stop();
+    try {
+      for (const action of ['drain', 'cancel-turns', 'shutdown']) await fetch(`http://127.0.0.1:${owner.config.port}/admin/${action}`, {
+        method: 'POST', headers: { authorization: `Bearer ${owner.config.controlToken}` }, signal: AbortSignal.timeout(2000),
+      });
+    } finally {
+      const timer = setTimeout(() => child.kill(), 3000);
+      await done; clearTimeout(timer);
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+  await owner.waitFor(async () => {
+    if (child.exitCode !== null) throw new Error('Full fixture exited: ' + logs);
+    try { const health = await (await fetch(`http://127.0.0.1:${owner.config.port}/healthz`)).json(); return health.mode === 'full'; }
+    catch { return false; }
+  }, AbortSignal.timeout(15_000)).catch(error => { throw new Error(`${error.message}: ${logs}`); });
   await service.listen();
   const compact = compactionProxy(service.descriptor());
-  const identity = { thread_id: 'offline-compaction-thread', turn_id: 'offline-compaction-turn' };
   for (const kind of ['v1', 'memento', 'v2']) {
-    const metadata = { ...identity, turn_id: `${identity.turn_id}-${kind}`,
-      ...(kind === 'memento' ? { request_kind: 'compaction',
-        compaction: { implementation: 'responses', strategy: 'memento' } } : {}) };
+    const metadata = { thread_id: `offline-thread-${kind}`, turn_id: `offline-turn-${kind}`,
+      ...(kind === 'memento' ? { request_kind: 'compaction', compaction: { implementation: 'responses', strategy: 'memento' } } : {}) };
     const body = { model: 'chatgpt-web/gpt-6-sol', stream: false,
       input: [{ type: 'message', id: 'offline-user', role: 'user', content: [{ type: 'input_text', text: 'Inspect the fixture project.' }],
         internal_chat_message_metadata_passthrough: { turn_id: metadata.turn_id, content_item_kinds: ['user_message'] } },
@@ -46,15 +71,33 @@ test('installed 6.1.18 reaches read-only browser compaction without a launcher',
     const response = await compact(body, { 'x-codex-turn-metadata': JSON.stringify(metadata) },
       AbortSignal.timeout(20_000), kind === 'v1' ? '/v1/responses/compact' : '/v1/responses');
     const text = await response.text();
-    t.diagnostic(`${kind}: HTTP ${response.status} ${text}`);
     assert.match(text, /Configured Chrome executable does not exist/);
     assert.doesNotMatch(text + logs, /compaction_control_unavailable/);
   }
-  const config = JSON.parse(await readFile(join(service.home, 'config.json'), 'utf8'));
-  assert.equal(config.mode, 'browser-only');
-  assert.equal(config.tunnel, undefined);
-  assert.deepEqual(config.runtimeCommand, runtimeCommand);
-  t.diagnostic(`spawned installed runtime with scratch CODEX_CHATGPT_WEB_HOME=${service.home}`);
-  await service.stop();
-  assert.equal(forcedStops, 0, 'reference admin shutdown should settle without forced termination');
+});
+
+test('pinned bundle completes and authenticates continuation in the full owner', smoke, async t => {
+  const home = await mkdtemp(join(tmpdir(), 'native-compaction-continuation-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const { runtimeCommand } = await installed();
+  const entry = runtimeCommand.at(-1);
+  const original = await readFile(entry);
+  const preload = join(home, 'exports-preload.mjs');
+  // Only expose existing bundle bindings to the fixture. Production has no test API.
+  const exports = '\nexport { ff as chromium, Cs as Worker, cd as compactRequest, Ls as responseRequest, Fn as parseRequest, sd as route, Nh as restore, H_ as sourceRevision, _i as revisions, ue as identity, Xt as compilePrompt, zt as summaryPrefix, vs as close, da as readAnnouncements, mu as assertModelFamily, pu as selectModelFamily, r_ as familyMatches, rawModelAnnouncements };';
+  const source = compactionPreloadSource(entry).replace("return { contents, loader: 'js' };",
+    `return { contents: contents + '\\n' + source.slice(source.indexOf('async function da(e)'), source.indexOf('function fc(e)'))
+      .replace('async function da(e)', 'async function rawModelAnnouncements(e)') + ${JSON.stringify(exports)}, loader: 'js' };`);
+  assert.notEqual(source, compactionPreloadSource(entry));
+  await writeFile(preload, source);
+  const fixture = fileURLToPath(new URL('../integrations/native-compaction-bundle-fixture.mjs', import.meta.url));
+  for (const phase of ['same-process', 'fresh-process', 'cdp-ownership', 'model-announcements']) {
+    const result = await promisify(execFile)(runtimeCommand[0], ['--preload', preload, fixture, entry, phase], {
+      env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex') },
+      windowsHide: true, timeout: 30_000, maxBuffer: 1 << 20,
+    });
+    assert.match(result.stdout, new RegExp(`${phase}: passed`));
+    t.diagnostic(`${phase}: pinned runtime assertions passed`);
+  }
+  assert.deepEqual(await readFile(entry), original, 'downloaded runtime remains unchanged');
 });
