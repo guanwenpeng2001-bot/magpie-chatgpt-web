@@ -15,6 +15,10 @@ const executablePath = process.env.NATIVE_TERMINAL_BROWSER || process.env.CHATGP
 const pin = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const anchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
+const initialAnchor = 'd=0,h=o?.snapshot();let g=Gi(u.initialTurnIdentities,m.responseIdentities);';
+const initialObservationAnchor = 'let m;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r)}catch(w)';
+const initialObservationPatch = 'let m,magpieSubmittedFailure;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r);try{await nativeSubmittedTerminalAlert(this,l,u,undefined,m,r,q,nativeTerminalErrorAlert)}catch(magpieProofError){if(magpieProofError instanceof Mi)throw magpieProofError;magpieSubmittedFailure={error:magpieProofError}}}catch(w)';
+const initialFailureThrow = 'if(magpieSubmittedFailure)throw magpieSubmittedFailure.error;';
 const stageAnchor = 'let V=await this.captureSubmissionBaseline(O,z.text,ze);';
 const finalAnchor = 'let oe=await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),ae=';
 
@@ -51,6 +55,7 @@ async function workerFrom(source, patched) {
     imported = await import(JSON.parse(match[1]));
   }
   const functions = [
+    section(source, 'var Sf=5000,mo=2;', 'class Mi'),
     section(source, 'class q extends Error{', 'function Ya('),
     section(source, 'class Mi extends Error{', 'async function Ye('),
     section(source, 'async function Ye(', 'async function C_('),
@@ -67,6 +72,10 @@ async function workerFrom(source, patched) {
     section(source, 'function _t(){', 'function dl('),
     section(source, 'function S_(', 'function fo('),
     section(source, 'var Jn=6;function ki(', 'var Wx='),
+    'var ' + section(source, 'Eu=(e)=>', 'async function Et('),
+    section(source, 'async function Et(', 'var g_='),
+    section(source, 'function hu(', 'function fu('),
+    section(source, 'function Cu(', 'var xf='),
   ].join('\n');
   const methods = section(source, 'async submissionDomState(', 'async attachedPromptText(')
     + section(source, 'promptCodeUnitEquivalent(e,t,n){', 'promptEquivalentPrefixLength(e,t){')
@@ -79,8 +88,9 @@ async function workerFrom(source, patched) {
   return runInNewContext(`${functions}\n${detector}\nclass Worker { ${methods} }
     async function captureStage(O,z,ze,A,E,c) { ${stageCapture} return V; }
     async function captureFinal(O,Be,ze,c,A,M) { ${finalCapture} return oe; }
-    ({ Worker, AdapterError:q, ObservationError:Mi, selector:uo, stage:_r, commit:ao, captureStage, captureFinal })`, {
-    ...imported, af: createHash, setTimeout, clearTimeout, DOMException, Sf: 3000, $e: 3000,
+    ({ Worker, AdapterError:q, ObservationError:Mi, selector:uo, stage:_r, commit:ao, captureStage, captureFinal, recoveryLimit:mo })`, {
+    ...imported, af: createHash, setTimeout, clearTimeout, DOMException, $e: 3000,
+    ys: 60000, P_: 5000, A_: 600000,
   });
 }
 
@@ -124,9 +134,19 @@ test('submitted terminal classification through the actual pinned preload', asyn
     assert.equal(raw.split(formatterCall).length, 2, 'fresh local transaction feeds both pinned formatters');
     const identityGate = 'd=t.acceptedUserIdentity?l===t.acceptedUserIdentity:Boolean(t.submittedText)&&await this.userMessageMatchesSubmission(h,t.submittedText,r,t.turnToken)';
     assert.equal(patched.split(identityGate).length, 2);
-    assert.equal(section(patched, 'async waitForNewAssistantTurn(', 'async reconcileAssistantTurnBinding('),
+    assert.equal(patched.split(initialObservationPatch).length, 2);
+    assert.equal(patched.split(initialFailureThrow).length, 2);
+    for (const before of [initialAnchor, initialObservationAnchor]) {
+      assert.equal(raw.split(before).length, 2);
+      for (const replacement of ['', before + before]) {
+        const drift = Buffer.from(raw.replace(before, replacement));
+        await assert.rejects(transform(drift, digest(drift)), /Native initial submitted alert compatibility mismatch/);
+      }
+    }
+    assert.equal(section(patched, 'async waitForNewAssistantTurn(', 'async reconcileAssistantTurnBinding(')
+      .replace(initialObservationPatch, initialObservationAnchor).replace(initialFailureThrow, ''),
       section(raw, 'async waitForNewAssistantTurn(', 'async reconcileAssistantTurnBinding('),
-      'no new fallback before an assistant binding has ever been established');
+      'initial wait unchanged except for proof-gated classification; no synthesized binding');
   });
 
   await t.test('isolated Chrome reconciliation fixtures', {
@@ -438,6 +458,263 @@ test('submitted terminal classification through the actual pinned preload', asyn
         const error = new fixed.ObservationError(1);
         f.worker.userMessageMatchesSubmission = async () => { throw error; };
         await assert.rejects(f.reconcile(), caught => caught === error);
+      } finally { await f.page.close(); }
+    });
+
+    // Independent initial-wait gap. These fixtures never mount an assistant shell
+    // or construct a binding. The live response-visible checkpoint is NOT evidence
+    // for this path: its binding/proof history remains unknown.
+    async function initialFixture({ history = '', submitted = prompt, token, current, accepted,
+      run = fixed, capture, acknowledgedStages = [], setup } = {}) {
+      const page = await context.newPage(), worker = new run.Worker(); worker.config = {};
+      await page.setContent(`<main>${history}</main>`);
+      const baseline = capture ? await capture(worker, page, submitted, acknowledgedStages)
+        : await worker.captureSubmissionBaseline(page, submitted, acknowledgedStages, token);
+      if (accepted) baseline.acceptedUserIdentity = `group:user:${accepted}`;
+      await page.locator('main').evaluate((node, html) => { node.innerHTML = html; }, current ?? history + group('submitted', submitted, alert));
+      if (setup) await setup(page, worker, baseline);
+      return { page, worker, baseline, run, wait(signal, progress, grace = 0, tracker, recoverObservation) {
+        return worker.waitForNewAssistantTurn(page, baseline, Date.now() + 10000, signal, progress, grace, tracker, recoverObservation);
+      } };
+    }
+    async function initialCheck(options, terminal, ordinaryError = 'ChatGPT accepted the message but did not expose its assistant turn in the DOM') {
+      const f = await initialFixture(options);
+      try {
+        await assert.rejects(f.wait(), error => {
+          if (terminal) {
+            assert.ok(error instanceof f.run.AdapterError, error.stack);
+            assert.equal(error.code, 'upstream_server_error');
+            assert.equal(error.status, 502); assert.equal(error.retryable, true);
+          } else {
+            // Assert the original ordinary DOM-grace verdict, not merely absence
+            // of the new code (which could hide a harness/observation failure).
+            assert.equal(error.message, ordinaryError);
+          }
+          return true;
+        });
+      } finally { await f.page.close(); }
+    }
+    await t.test('initial wait: raw pinned method misses a proven service alert, transformed method classifies it', async () => {
+      await initialCheck({ run: original }, false);
+      await initialCheck({}, true);
+    });
+    await t.test('initial wait: exact second Chinese alert, no tools, no assistant ever mounted', () => initialCheck({
+      current: group('submitted', prompt, '<aside role="alert">出了点问题。请重试<div><button>重试</button></div></aside>'),
+      setup: async (page, worker) => {
+        const state = await worker.submissionDomState(page, {});
+        assert.equal(state.responseIdentities.length, 0); assert.equal(state.visibleStopButtonCount, 0);
+        worker.reconcileAssistantTurnBinding = () => assert.fail('initial classification must not invoke rebind authority');
+      },
+    }, true));
+    await t.test('initial wait: exact prepared token despite unmounted older history', () => initialCheck({
+      submitted: `Prepared ${token}`, token, history: group('old', 'History', answer), current: group('submitted', token, alert),
+    }, true));
+    await t.test('initial wait: stale accepted identity can classify only via original full-text proof', () => initialCheck({ accepted: 'unmounted' }, true));
+    await t.test('initial wait: actual first-stage capture without any assistant binding', () => initialCheck({
+      submitted: stages[0].text, capture: captureStage(0),
+    }, true));
+    await t.test('initial wait: trusted six-part commit with acknowledged history already virtualized', () => initialCheck(finalOptions(), true));
+
+    for (const [name, options] of [
+      ['different submitted user', { current: group('submitted', 'Different task', alert) }],
+      ['prefix only', { current: group('submitted', prompt.slice(0, 20), alert) }],
+      ['no submitted proof', { submitted: '' }],
+      ['wrong prepared token', { submitted: `Prepared ${token}`, token, current: group('submitted', otherToken, alert) }],
+      ['ambiguous token', { submitted: token, token, current: group('submitted', `${token} ${token}`, alert) }],
+      ['historical alert only', { history: group('old', prompt, alert), current: group('old', prompt, alert) }],
+      ['historical matching alert with wrong current user', { history: group('old', prompt, alert), current: group('old', prompt, alert) + group('submitted', 'Other', alert) }],
+      ['vanished full-text history without nonce', { history: group('old', prompt, answer), current: group('submitted', prompt, alert) }],
+      ['nonce-looking wrapper without trusted capture', { ...finalOptions(), capture: undefined }],
+      ['two current matches', { current: group('submitted', prompt, alert) + group('competing', prompt, alert) }],
+      ['competing different user', { current: group('submitted', prompt, alert) + group('competing', 'Other') }],
+      ['surviving accepted owner', { accepted: 'old', history: group('old', 'Earlier'), current: group('old', 'Earlier') + group('submitted', prompt, alert) }],
+      ['spoofed markdown alert', { current: group('submitted', prompt, `<div class="markdown">${alert}</div>`) }],
+      ['spoofed user-content alert', { current: group('submitted', prompt + '消息流中的错误').replace('</div></div>', `${alert}</div></div>`) }],
+      ['global alert', { current: group('submitted', prompt) + alert }],
+      ['foreign alert owner', { current: group('submitted', prompt, `<article data-turn-id="foreign">${alert}</article>`) }],
+      ['alert before user', { current: group('submitted', prompt, '', alert) }],
+      ['hidden proof', { current: group('submitted', prompt, alert).replace('data-search-result-target', 'data-search-result-target hidden') }],
+      ['hidden alert', { current: group('submitted', prompt, `<div hidden>${alert}</div>`) }],
+      ['duplicate bubble', { current: group('submitted', prompt, bubble(prompt) + alert) }],
+    ]) await t.test(`initial wait abstains: ${name}`, () => initialCheck(options, false));
+
+    await t.test('initial wait: full-text expansion classifies and restores collapse', async () => {
+      const f = await initialFixture({ submitted: longPrompt, current: expandable(longPrompt), setup: expansionSetup('none') });
+      try {
+        await assert.rejects(f.wait(), error => error instanceof f.run.AdapterError && error.code === 'upstream_server_error');
+        assert.equal(await f.page.locator('button').getAttribute('aria-expanded'), 'false');
+      } finally { await f.page.close(); }
+    });
+    for (const mutation of ['compete', 'wrong', 'rekey']) await t.test(`initial wait expansion race: ${mutation}`, () => initialCheck({
+      submitted: longPrompt, current: expandable(longPrompt), setup: expansionSetup(mutation),
+    }, false, mutation === 'rekey' ? 'ChatGPT removed the message expansion control during verification' : undefined));
+    for (const mutation of ['replace', 'revert', 'compete']) await t.test(`initial wait witness rejects mutation after proof: ${mutation}`, () => initialCheck({
+      setup: async (page, worker) => {
+        const actual = worker.userMessageMatchesSubmission;
+        worker.userMessageMatchesSubmission = async function (...args) {
+          const proof = await actual.apply(this, args);
+          await page.locator('[data-turn-key]').evaluate((root, mutation) => {
+            if (mutation === 'replace') root.replaceWith(root.cloneNode(true));
+            if (mutation === 'compete') { const clone = root.cloneNode(true); clone.setAttribute('data-turn-key', 'competing'); root.after(clone); }
+            if (mutation === 'revert') { root.setAttribute('hidden', ''); root.removeAttribute('hidden'); }
+          }, mutation);
+          return proof;
+        };
+      },
+    }, false));
+    await t.test('initial wait: live external progress cannot swallow terminal error or acknowledge a tool boundary', async () => {
+      const f = await initialFixture();
+      try {
+        f.worker.waitForTurnDomOrExternalProgress = () => assert.fail('terminal error must not become a progress wait');
+        const progress = { snapshot: () => ({ revision: 1, activeToolCalls: 1, lastProgressAt: Date.now(), lastToolBatchRevision: 1 }),
+          acknowledgeToolBatch: () => assert.fail('error classification must not acknowledge tools') };
+        await assert.rejects(f.wait(undefined, progress, 10000, { needsToolBatchObservation: () => true,
+          observeToolBatch: () => assert.fail('error classification must not observe tools') }),
+        error => error instanceof f.run.AdapterError && error.code === 'upstream_server_error');
+      } finally { await f.page.close(); }
+    });
+    const liveProgress = () => ({ snapshot: () => ({ revision: 7, activeToolCalls: 1,
+      lastProgressAt: Date.now(), lastToolBatchRevision: 1 }),
+      acknowledgeToolBatch: () => assert.fail('failed proof must not acknowledge tools') });
+    const noToolTracker = { needsToolBatchObservation: () => true,
+      observeToolBatch: () => assert.fail('failed proof must not observe tools') };
+    await t.test('initial proof timeout uses original recovery callback even with live external progress', async () => {
+      const f = await initialFixture(), timeout = new fixed.ObservationError(1), recoveredBaseline = { ...f.baseline, domCache: {} };
+      try {
+        const actual = f.worker.userMessageMatchesSubmission;
+        let proofs = 0, recoveries = 0;
+        f.worker.userMessageMatchesSubmission = async function (...args) {
+          if (++proofs === 1) throw timeout;
+          return actual.apply(this, args);
+        };
+        f.worker.waitForTurnDomOrExternalProgress = () => assert.fail('recovery takes precedence over liveness wait');
+        await assert.rejects(f.wait(undefined, liveProgress(), 10000, noToolTracker, async (attempt, error, baseline, signal) => {
+          assert.equal(++recoveries, 1); assert.equal(attempt, 1); assert.equal(error, timeout);
+          assert.equal(baseline, f.baseline); assert.equal(signal, undefined);
+          return { page: f.page, baseline: recoveredBaseline };
+        }), error => error instanceof fixed.AdapterError && error.code === 'upstream_server_error');
+        assert.equal(proofs, 2); assert.equal(recoveries, 1);
+      } finally { await f.page.close(); }
+    });
+    await t.test('persistent initial proof timeouts exhaust the pinned two-recovery bound despite live progress', async () => {
+      const f = await initialFixture(), timeout = new fixed.ObservationError(1);
+      try {
+        let proofs = 0; const attempts = [];
+        f.worker.userMessageMatchesSubmission = async () => { proofs++; throw timeout; };
+        f.worker.waitForTurnDomOrExternalProgress = () => assert.fail('bounded recovery must not fall into progress wait');
+        await assert.rejects(f.wait(undefined, liveProgress(), 10000, noToolTracker, async (attempt, error, baseline) => {
+          attempts.push(attempt); assert.equal(error, timeout); assert.equal(baseline, f.baseline);
+          return { page: f.page, baseline };
+        }), error => {
+          assert.equal(error.message, 'ChatGPT accepted the message, but its DOM remained unresponsive after 2 same-page rebinds');
+          assert.equal(error.cause, timeout); return true;
+        });
+        assert.equal(f.run.recoveryLimit, 2);
+        assert.deepEqual(attempts, [1, 2]); assert.equal(proofs, 3);
+      } finally { await f.page.close(); }
+    });
+    await t.test('initial proof timeout without recovery waits for live external progress then retries fresh proof', async () => {
+      const f = await initialFixture(), timeout = new fixed.ObservationError(1);
+      try {
+        const actual = f.worker.userMessageMatchesSubmission, progress = liveProgress();
+        let proofs = 0, waits = 0;
+        f.worker.userMessageMatchesSubmission = async function (...args) {
+          if (++proofs === 1) throw timeout;
+          return actual.apply(this, args);
+        };
+        f.worker.waitForTurnDomOrExternalProgress = async (page, revision, external, signal) => {
+          assert.equal(++waits, 1); assert.equal(page, f.page); assert.equal(revision, 7);
+          assert.equal(external, progress); assert.equal(signal, undefined);
+        };
+        await assert.rejects(f.wait(undefined, progress, 10000, noToolTracker),
+          error => error instanceof fixed.AdapterError && error.code === 'upstream_server_error');
+        assert.equal(proofs, 2); assert.equal(waits, 1);
+      } finally { await f.page.close(); }
+    });
+    await t.test('initial proof timeout escapes unchanged when external progress is stale and recovery absent', async () => {
+      const f = await initialFixture(), timeout = new fixed.ObservationError(1);
+      try {
+        f.worker.userMessageMatchesSubmission = async () => { throw timeout; };
+        f.worker.waitForTurnDomOrExternalProgress = () => assert.fail('stale progress must not suppress a timeout');
+        await assert.rejects(f.wait(undefined, { snapshot: () => ({ revision: 1, activeToolCalls: 0, lastProgressAt: Date.now() - 60000 }) }, 10000),
+          error => error === timeout);
+      } finally { await f.page.close(); }
+    });
+    await t.test('recovered baseline is used for proof; old proof cannot authorize changed submission', async () => {
+      const f = await initialFixture(), timeout = new fixed.ObservationError(1);
+      try {
+        const actual = f.worker.userMessageMatchesSubmission;
+        let proofs = 0;
+        f.worker.userMessageMatchesSubmission = async function (...args) {
+          if (++proofs === 1) throw timeout;
+          assert.equal(args[1], 'Changed submitted request');
+          return actual.apply(this, args);
+        };
+        await assert.rejects(f.wait(undefined, undefined, 0, undefined, async () => ({ page: f.page,
+          baseline: { ...f.baseline, submittedText: 'Changed submitted request', domCache: {} } })),
+        error => error.message === 'ChatGPT accepted the message but did not expose its assistant turn in the DOM');
+        assert.equal(proofs, 2);
+      } finally { await f.page.close(); }
+    });
+    await t.test('authenticated initial error bypasses supplied recovery and live progress before tool acknowledgement', async () => {
+      const f = await initialFixture();
+      try {
+        f.worker.waitForTurnDomOrExternalProgress = () => assert.fail('terminal error must not wait');
+        await assert.rejects(f.wait(undefined, liveProgress(), 10000, noToolTracker,
+          () => assert.fail('terminal error must not recover observation')),
+        error => error instanceof fixed.AdapterError && error.code === 'upstream_server_error');
+      } finally { await f.page.close(); }
+    });
+    for (const [name, failure] of [['abort', new DOMException('Aborted during proof', 'AbortError')],
+      ['ordinary exception', new Error('Proof fixture failure')], ['falsy thrown value', undefined]]) {
+      await t.test(`non-observation proof failure escapes recovery/progress unchanged: ${name}`, async () => {
+        const f = await initialFixture();
+        try {
+          f.worker.userMessageMatchesSubmission = async () => { throw failure; };
+          f.worker.waitForTurnDomOrExternalProgress = () => assert.fail('non-observation failure must not wait');
+          let caught = false;
+          try { await f.wait(undefined, liveProgress(), 10000, noToolTracker,
+            () => assert.fail('non-observation failure must not recover')); }
+          catch (error) { caught = true; assert.equal(error, failure); }
+          assert.equal(caught, true);
+        } finally { await f.page.close(); }
+      });
+    }
+    await t.test('initial wait: ordinary assistant binding and acceptance are unchanged', async () => {
+      for (const current of [group('submitted', prompt, answer), group('submitted', 'Normal reference selection', answer)]) {
+        const outcomes = [];
+        for (const run of [original, fixed]) {
+          const f = await initialFixture({ run, current });
+          try {
+            f.worker.userMessageMatchesSubmission = () => assert.fail('normal assistant selection must not invoke fallback proof');
+            const result = await f.wait();
+            outcomes.push({ identity: result.identity, turns: Array.from(result.acceptedTurnIdentities), count: await result.locator.count() });
+          } finally { await f.page.close(); }
+        }
+        assert.deepEqual(outcomes[0], outcomes[1]);
+      }
+    });
+    await t.test('initial wait: user-only ordinary generation continues until a natural assistant appears', async () => {
+      const f = await initialFixture({ current: group('submitted', prompt) });
+      try {
+        let waits = 0;
+        f.worker.withExpandedUserMessage = () => assert.fail('no alert must not expand');
+        f.worker.waitForTurnDomOrExternalProgress = async () => {
+          assert.equal(++waits, 1);
+          await f.page.locator('[data-turn-key]').evaluate((root, html) => root.insertAdjacentHTML('beforeend', html), answer);
+        };
+        const result = await f.wait(undefined, undefined, 10000);
+        assert.equal(result.identity, 'group:assistant:submitted'); assert.equal(waits, 1);
+      } finally { await f.page.close(); }
+    });
+    await t.test('initial wait: original abort and observation exception identities survive', async () => {
+      const f = await initialFixture();
+      try {
+        const abort = new AbortController(); abort.abort();
+        await assert.rejects(f.wait(abort.signal), error => error instanceof DOMException && error.name === 'AbortError');
+        const observation = new fixed.ObservationError(1);
+        f.worker.userMessageMatchesSubmission = async () => { throw observation; };
+        await assert.rejects(f.wait(), error => error === observation);
       } finally { await f.page.close(); }
     });
     assert.equal(networkAttempts, 0, 'fixtures never attempted network requests');

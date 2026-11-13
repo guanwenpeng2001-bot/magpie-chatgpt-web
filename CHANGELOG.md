@@ -2,8 +2,9 @@
 
 ## 0.5.6 — 2026-11-13
 
-- Classify visible terminal service alerts after an established assistant binding disappears, only when the original submitted user message is proven and no competing turn exists. Support virtualized multipart history using local formatter provenance; preserve ordinary rebinding and error identities. Alerts before initial binding or behind surviving stale bindings remain outside this fallback.
+- Classify visible terminal service alerts before initial assistant selection or after an established assistant binding disappears, only when the original submitted user message is proven and no competing turn exists. Support virtualized multipart history using local formatter provenance; preserve ordinary rebinding, bounded observation recovery and error identities. Alerts behind surviving stale bindings remain outside this fallback.
 - Port four applicable fixes from the newer reference source into the checksum-pinned runtime: atomically replace restored drafts for plain/staged prompts, ignore Mermaid preview-only remounts without losing source code, recognize strict UUID subagent inventories in calendar updates, and activate capability menus through the existing click/pointer fallback. Preserve connector-pill insertion and continuation authorization.
+- Capture bounded Native broker registration/claim fingerprints and completion counters for diagnosing failed tool calls. Exclude raw credentials, prompts and arguments; bound stream drain and optional writes during shutdown, and isolate files by daemon generation so delayed writes cannot replace the new run's evidence.
 - Record near-threshold Pro compaction and restart evidence, including the GPT-5.6 failed automatic compaction followed by successful explicit retry. Record the failed Bigger Sol stress and no-tool control separately; these results do not establish full-window retention or 1M support. Model windows and the guarded Pro limit remain conservative.
 
 ## 0.5.5 — 2026-11-13

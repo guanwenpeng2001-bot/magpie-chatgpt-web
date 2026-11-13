@@ -39,6 +39,11 @@ const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
 // Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
 // and multipart reconciliation. This classifies failure only; it never rebinds.
 const submittedAlertAnchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
+// Only proof observation timeouts enter the original bounded recovery/progress
+// catch. All other proof failures escape afterward, before response selection or
+// tool acknowledgement, so liveness cannot suppress an authenticated error.
+const submittedInitialObservationAnchor = 'let m;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r)}catch(w)';
+const submittedInitialAlertAnchor = 'd=0,h=o?.snapshot();let g=Gi(u.initialTurnIdentities,m.responseIdentities);';
 // Provenance is recorded only at the actual local multipart formatter call sites,
 // never inferred from user-supplied text that happens to resemble a wrapper.
 const submittedStageBaseline = 'let V=await this.captureSubmissionBaseline(O,z.text,ze);';
@@ -193,6 +198,10 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(terminal).length !== 2) throw new Error('Native terminal alert compatibility mismatch');
     const submittedAlert = ${JSON.stringify(submittedAlertAnchor)};
     if (source.split(submittedAlert).length !== 2) throw new Error('Native submitted alert compatibility mismatch');
+    const submittedInitialAlert = ${JSON.stringify(submittedInitialAlertAnchor)};
+    const submittedInitialObservation = ${JSON.stringify(submittedInitialObservationAnchor)};
+    if (source.split(submittedInitialAlert).length !== 2 || source.split(submittedInitialObservation).length !== 2)
+      throw new Error('Native initial submitted alert compatibility mismatch');
     const submittedStage = ${JSON.stringify(submittedStageBaseline)};
     const submittedFinal = ${JSON.stringify(submittedFinalBaseline)};
     if (source.split(submittedStage).length !== 2 || source.split(submittedFinal).length !== 2)
@@ -211,6 +220,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     let contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
       .replace(submittedAlert, 'await this.reconcileMultipartHistory(e,t,i,r);await nativeSubmittedTerminalAlert(this,e,t,n,i,r,q,nativeTerminalErrorAlert);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])')
+      .replace(submittedInitialObservation, 'let m,magpieSubmittedFailure;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r);try{await nativeSubmittedTerminalAlert(this,l,u,undefined,m,r,q,nativeTerminalErrorAlert)}catch(magpieProofError){if(magpieProofError instanceof Mi)throw magpieProofError;magpieSubmittedFailure={error:magpieProofError}}}catch(w)')
+      .replace(submittedInitialAlert, 'if(magpieSubmittedFailure)throw magpieSubmittedFailure.error;' + submittedInitialAlert)
       .replace(submittedStage, 'let V=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,z.text,ze),A,"stage",E+1,c.multipart.parts.length,z.text);')
       .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
       .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')

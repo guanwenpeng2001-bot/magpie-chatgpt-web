@@ -1,5 +1,5 @@
-// A failure-classification fallback for a missing grouped assistant, not a
-// replacement assistant binding. IDs, prompts and tokens stay in memory only.
+// Classify failure when the grouped assistant is absent, including before its
+// initial binding. IDs, prompts and tokens stay in memory only; never rebind here.
 // The pinned worker supplies its original proof/expansion methods and error type.
 const multipartSubmissions = new WeakMap();
 
@@ -39,7 +39,7 @@ function candidateUser(baseline, binding, state) {
   // No surviving old owner, competing group, or unrelated new article. Both
   // logical roles exist in turnIdentities even for an alert-only group.
   if (state.turnIdentities.some(id => !initial.has(id) && id !== user && id !== assistant)) return;
-  if (binding.identity !== assistant && state.turnIdentities.includes(binding.identity)) return;
+  if (binding && binding.identity !== assistant && state.turnIdentities.includes(binding.identity)) return;
   if (baseline.acceptedUserIdentity && baseline.acceptedUserIdentity !== user
     && state.turnIdentities.includes(baseline.acceptedUserIdentity)) return;
   return { user, key };
@@ -78,7 +78,9 @@ function validWitness(containers, witness) {
 }
 
 export async function nativeSubmittedTerminalAlert(worker, page, baseline, binding, state, signal, AdapterError, detect) {
-  if (!binding.identity.startsWith('group:assistant:') || !baseline.submittedText) return;
+  // An absent binding is the initial-wait path. It grants no response identity;
+  // only the same unique submitted user and immutable proof can classify failure.
+  if ((binding && !binding.identity.startsWith('group:assistant:')) || !baseline.submittedText) return;
   const candidate = candidateUser(baseline, binding, state);
   if (!candidate) return;
   const group = page.locator(`[data-turn-key=${JSON.stringify(candidate.key)}]`);
