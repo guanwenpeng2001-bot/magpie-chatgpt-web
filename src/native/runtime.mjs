@@ -24,6 +24,9 @@ const installing = new Map();
 const compactionGate = 'let oe=(f.modelId!==Ie||c)&&l.localToolsEnabled;';
 const sharedCompactionGate = compactionGate.slice(0, -1)
   + '&&!(e.chatgptWeb?.browserHost==="managed-chrome"&&e.chatgptWeb?.browserInteractionMode==="automatic");';
+// Content-free phase boundaries distinguish an upstream delay from waiting for
+// the old browser's physical settlement. They never change retirement order.
+const compactionRetirement = 'if(se&&De.findConversationHead(se))await kt(De.retireConversationAndWait(se),v.abortSignal);else await De.retireAndWait(ae,v.abortSignal)';
 const cliSha256 = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
 const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})';
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
@@ -188,6 +191,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     const source = new TextDecoder().decode(bytes);
     const before = ${JSON.stringify(compactionGate)};
     if (source.split(before).length !== 2) throw new Error('Native shared compaction gate mismatch');
+    const retirement = ${JSON.stringify(compactionRetirement)};
+    if (source.split(retirement).length !== 2) throw new Error('Native compaction retirement compatibility mismatch');
     const launch = ${JSON.stringify(browserLaunch)};
     if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
     const announcement = ${JSON.stringify(modelAnnouncementTail)};
@@ -217,7 +222,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(tokenFactory).length !== 2) throw new Error('Native turn token compatibility mismatch');
     if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
       throw new Error('Native checkpoint persistence compatibility mismatch');
-    let contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+    let contents = source.replace(before, ${JSON.stringify('console.info("[chatgpt-web] compaction_phase entered");' + sharedCompactionGate)})
+      .replace(retirement, 'console.info("[chatgpt-web] compaction_phase retiring");' + retirement + ';console.info("[chatgpt-web] compaction_phase retired")')
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
       .replace(submittedAlert, 'await this.reconcileMultipartHistory(e,t,i,r);await nativeSubmittedTerminalAlert(this,e,t,n,i,r,q,nativeTerminalErrorAlert);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])')
       .replace(submittedInitialObservation, 'let m,magpieSubmittedFailure;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r);try{await nativeSubmittedTerminalAlert(this,l,u,undefined,m,r,q,nativeTerminalErrorAlert)}catch(magpieProofError){if(magpieProofError instanceof Mi)throw magpieProofError;magpieSubmittedFailure={error:magpieProofError}}}catch(w)')

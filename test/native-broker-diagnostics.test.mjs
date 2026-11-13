@@ -11,6 +11,22 @@ const register = hash => `[chatgpt-web] broker trace=fixture-turn registered tok
 const claim = (hash, valid = false) => `[chatgpt-web] broker claim received (tokenChars=37, tokenHash=${hash}, valid=${valid}${valid ? '' : ', retiredTurn=unknown'})\n`;
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
+test('compaction timing and retirement failure retain only allowlisted content-free fields', () => {
+  for (const phase of ['entered', 'retiring', 'retired']) {
+    assert.deepEqual(parseBrokerDiagnostic(`[chatgpt-web] compaction_phase ${phase}`), { type: 'compaction', phase });
+  }
+  for (const suffix of ['unknown', 'entered extra', 'retiring\nprivate']) {
+    assert.equal(parseBrokerDiagnostic(`[chatgpt-web] compaction_phase ${suffix}`), undefined);
+  }
+  const retirement = { traceId: 'fixture', completionCommitted: false,
+    pendingTools: 1, queuedTools: 0, deliveredTools: 1, activeMcpRequests: 0 };
+  const parse = failure => parseBrokerDiagnostic('[chatgpt-web] broker_retired ' + JSON.stringify({ ...retirement, failure }));
+  const timedOut = parse({ code: 'codex_tool_timeout', tool: 'PRIVATE_TOOL', timeoutMs: 90000, message: 'PRIVATE_ARGUMENTS' });
+  assert.equal(timedOut.failureCode, 'codex_tool_timeout');
+  assert.doesNotMatch(JSON.stringify(timedOut), /PRIVATE|timeoutMs/);
+  for (const failure of [null, {}, 'private', { code: 'PRIVATE_ERROR' }]) assert.equal(parse(failure).failureCode, undefined);
+});
+
 test('broker diagnostics distinguish registration/claim fingerprints without retaining credential material', async () => {
   let saved;
   const log = createBrokerDiagnostics(async value => { saved = JSON.parse(value); }, { now: () => 42 });

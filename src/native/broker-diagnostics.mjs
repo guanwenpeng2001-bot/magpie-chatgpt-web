@@ -13,6 +13,8 @@ const validTrace = new RegExp(`^${trace}$`);
 const traceHash = value => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
 export function parseBrokerDiagnostic(line) {
+  const phase = /^\[chatgpt-web\] compaction_phase (entered|retiring|retired)$/.exec(line);
+  if (phase) return { type: 'compaction', phase: phase[1] };
   let match = registered.exec(line);
   if (match) return { type: 'registered', traceHash: traceHash(match[1]), tokenHash: match[2] };
   match = claimed.exec(line);
@@ -29,6 +31,9 @@ export function parseBrokerDiagnostic(line) {
   const counts = ['pendingTools', 'queuedTools', 'deliveredTools', 'activeMcpRequests'];
   if (counts.some(key => !Number.isSafeInteger(value[key]) || value[key] < 0)) return;
   return { type: 'retired', traceHash: traceHash(value.traceId), completionCommitted: value.completionCommitted,
+    // The pinned broker currently validates only this failure code. Do not
+    // retain arbitrary error messages, tool names, or new upstream fields.
+    ...(value.failure?.code === 'codex_tool_timeout' ? { failureCode: 'codex_tool_timeout' } : {}),
     ...Object.fromEntries(counts.map(key => [key, value[key]])) };
 }
 
