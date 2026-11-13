@@ -2,18 +2,50 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID, randomBytes } from 'node:crypto';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NativeDaemon, writePrivate } from '../src/native/daemon.mjs';
 import { CompactionService, compactionProxy } from '../src/native/compaction.mjs';
-import { ensureRuntime, compactionPreloadSource } from '../src/native/runtime.mjs';
+import { ensureRuntime, compactionPreloadSource, nativeRoot } from '../src/native/runtime.mjs';
 
 const smoke = { skip: process.env.NATIVE_COMPACTION_SMOKE !== '1', timeout: 60_000 };
 let installation;
 const installed = () => installation ??= ensureRuntime({ fetch: () => { throw new Error('Offline runtime test cannot download'); } });
+
+test('pinned automatic compaction retires real pending tools by source ownership', smoke, async t => {
+  // Read the already installed pin directly: ensureRuntime can write an install lock/preload.
+  const payload = join(nativeRoot(), 'runtime-6.1.18', 'payload');
+  const entry = join(payload, 'app', 'cli.js');
+  const original = await readFile(entry);
+  assert.equal(createHash('sha256').update(original).digest('hex'),
+    'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1');
+  const scratch = fileURLToPath(new URL('../../native-live/', import.meta.url));
+  await mkdir(scratch, { recursive: true });
+  const home = await mkdtemp(join(scratch, 'compaction-retirement-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const preload = join(home, 'exports-preload.mjs');
+  const exports = '\nexport { dn as TurnBroker, Cs as Worker, De as sessions, Bi as createAdapter, Le as callBroker, kg as namespace, _s as executionKey, $u as sourceKey, $f as instructionLineage, Lu as ownerKey, Di as conversationKey, cd as compactRequest, Ls as responseRequest, Fn as parseRequest, sd as route, vs as close };';
+  const base = compactionPreloadSource(entry);
+  const source = base.replace("return { contents, loader: 'js' };",
+    `return { contents: contents + ${JSON.stringify(exports)}, loader: 'js' };`);
+  assert.notEqual(source, base);
+  await writeFile(preload, source);
+  const fixture = fileURLToPath(new URL('../integrations/native-compaction-bundle-fixture.mjs', import.meta.url));
+  const result = await promisify(execFile)(join(payload, 'runtime', 'bun.exe'),
+    ['--preload', preload, fixture, entry, 'compaction-retirement'], {
+      env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex'),
+        CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES: '[]', MAGPIE_NATIVE_CHECKPOINT_HOME: home },
+      windowsHide: true, timeout: 30_000, maxBuffer: 1 << 20,
+    });
+  assert.match(result.stdout, /compaction-retirement: passed/);
+  for (const line of result.stdout.split(/\r?\n/).filter(line => line.startsWith('retirement-evidence: '))) {
+    t.diagnostic(line);
+  }
+  assert.deepEqual(await readFile(entry), original, 'downloaded runtime remains unchanged');
+});
 
 // Empty scratch storage and a missing Chrome stop at the real browser boundary.
 // The full server and preload are real; no tunnel process or signed-in account is used.

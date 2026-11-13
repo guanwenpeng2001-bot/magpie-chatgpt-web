@@ -27,6 +27,8 @@ const sharedCompactionGate = compactionGate.slice(0, -1)
 // Content-free phase boundaries distinguish an upstream delay from waiting for
 // the old browser's physical settlement. They never change retirement order.
 const compactionRetirement = 'if(se&&De.findConversationHead(se))await kt(De.retireConversationAndWait(se),v.abortSignal);else await De.retireAndWait(ae,v.abortSignal)';
+const usageSubmissionStart = 'let ke=async()=>{if(!o)return;let E=ho(),z;';
+const usageSubmissionEnd = 'm.push(ne)}},Be=c.text,ze=[];';
 const cliSha256 = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
 const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})';
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
@@ -193,6 +195,9 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(before).length !== 2) throw new Error('Native shared compaction gate mismatch');
     const retirement = ${JSON.stringify(compactionRetirement)};
     if (source.split(retirement).length !== 2) throw new Error('Native compaction retirement compatibility mismatch');
+    const usageStart = ${JSON.stringify(usageSubmissionStart)}, usageEnd = ${JSON.stringify(usageSubmissionEnd)};
+    if (source.split(usageStart).length !== 2 || source.split(usageEnd).length !== 2)
+      throw new Error('Native send receipt compatibility mismatch');
     const launch = ${JSON.stringify(browserLaunch)};
     if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
     const announcement = ${JSON.stringify(modelAnnouncementTail)};
@@ -224,6 +229,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       throw new Error('Native checkpoint persistence compatibility mismatch');
     let contents = source.replace(before, ${JSON.stringify('console.info("[chatgpt-web] compaction_phase entered");' + sharedCompactionGate)})
       .replace(retirement, 'console.info("[chatgpt-web] compaction_phase retiring");' + retirement + ';console.info("[chatgpt-web] compaction_phase retired")')
+      .replace(usageStart, 'let magpieUsageIndex=0,magpieLegacyUsage=async()=>{if(!o)return;let E=ho(),z;')
+      .replace(usageEnd, 'm.push(ne)}},ke=async()=>{let receipt=await prepareSubmissionReceipt({readAccount:()=>os(O),profile:process.env.CODEX_CHATGPT_WEB_HOME,model:nativeUsageModel(Y),effort:Y.effort,source:"native",stage:c.multipart&&magpieUsageIndex++<c.multipart.parts.length?"multipart":e.compaction?"compaction":"message"}),legacy=await magpieLegacyUsage();return()=>{receipt.confirm();m.push(receipt.flush());legacy?.()}},Be=c.text,ze=[];')
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
       .replace(submittedAlert, 'await this.reconcileMultipartHistory(e,t,i,r);await nativeSubmittedTerminalAlert(this,e,t,n,i,r,q,nativeTerminalErrorAlert);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])')
       .replace(submittedInitialObservation, 'let m,magpieSubmittedFailure;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r);try{await nativeSubmittedTerminalAlert(this,l,u,undefined,m,r,q,nativeTerminalErrorAlert)}catch(magpieProofError){if(magpieProofError instanceof Mi)throw magpieProofError;magpieSubmittedFailure={error:magpieProofError}}}catch(w)')
@@ -244,6 +251,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
       + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
     contents = patchReferenceFixes(contents);
     return { contents, loader: 'js' };

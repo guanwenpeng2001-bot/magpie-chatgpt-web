@@ -7,16 +7,21 @@ import { Conversations } from './conversations.mjs';
 import { installHarvest } from './harvest.mjs';
 import * as siteAdapter from './site-adapter/index.mjs';
 import { ADAPTER_VERSION, shape } from './site-adapter/selectors.mjs';
-import { wireModels, workSelectionPlans } from './site-adapter/compatibility.mjs';
+import { selectionPlans, wireModels, workSelectionPlans } from './site-adapter/compatibility.mjs';
 import { IMAGE_MODEL } from './site-adapter/images.mjs';
 import { observeTurn } from './observe.mjs';
 import { compile } from './prompt.mjs';
 import { normalizeAssistantContent, ToolParser } from '../src/tool-emulation.mjs';
+import { prepareSubmissionReceipt } from '../src/usage/submission.mjs';
+import { usageProfile } from '../src/usage/store.mjs';
 
 const challengeText = new RegExp(shape.challengeCard, 'i');
+const receiptCall = async (receipt, method) => {
+  try { await receipt?.[method]?.(); } catch { /* Accounting never changes model execution. */ }
+};
 
 export class TurnDriver {
-  constructor({ profileRoot, profile, artifactRoot, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, challengeTimeout = timeout, now = Date.now, adapter = siteAdapter, observe = observeTurn, prompter = compile } = {}) {
+  constructor({ profileRoot, profile, artifactRoot, launch, origin = 'https://chatgpt.com', network = true, timeout = 180000, challengeTimeout = timeout, now = Date.now, adapter = siteAdapter, observe = observeTurn, prompter = compile, prepareReceipt = prepareSubmissionReceipt } = {}) {
     this.origin = origin;
     this.artifactRoot = artifactRoot ?? resolve(profileRoot ?? profile ?? '.', '..', 'chatgpt-web-artifacts');
     this.network = network;
@@ -26,6 +31,7 @@ export class TurnDriver {
     this.adapter = adapter;
     this.observe = observe;
     this.prompter = prompter;
+    this.prepareReceipt = prepareReceipt;
     this.bindings = new Conversations({ now });
     this.browser = new BrowserSupervisor({ profileRoot, profile, idleMilliseconds: null, headless: false, launch: launch ?? (async (profile, options) => {
       return launchChatBrowserContext(profile, { ...options, serviceWorkers: 'block' });
@@ -83,6 +89,35 @@ export class TurnDriver {
     };
     activeSignal.addEventListener('abort', abort, { once: true });
     const wait = work => Promise.race([work, interrupted]);
+    const receiptRuns = new Set();
+    const prepareRunReceipt = async run => {
+      if (workMode || imageMode) return;
+      receiptRuns.add(run);
+      if (run.receiptPrepared) return run.receiptPreparation;
+      run.receiptPrepared = true;
+      run.receiptPreparation = (async () => {
+        try {
+          const model = command.selectionModel ?? command.model;
+          const selectedEffort = selectionPlans[wireModels[model]?.uiModel ?? model]?.effort;
+          run.receipt = await this.prepareReceipt({ page, profile: usageProfile(command.auth.profile),
+            model, effort: { Instant: 'low', Medium: 'medium', High: 'high', 'Extra High': 'xhigh', Pro: 'max' }[selectedEffort]
+              ?? command.reasoning?.effort ?? command.effort,
+            stage: 'message', source: 'text', id: run.id });
+        } catch { /* Missing identity or storage must not prevent a Send. */ }
+      })();
+      return run.receiptPreparation;
+    };
+    const confirmRun = (run, text) => {
+      if (workMode || imageMode || !run?.receiptSubmitted || run.receiptAccepted ||
+          typeof text !== 'string' || !text.trim() || challengeText.test(text)) return;
+      // Acceptance precedes client-side envelope validation and delivery. Even a
+      // malformed tool answer or a disconnected client consumed a physical Send.
+      run.receiptAccepted = true;
+      void receiptCall(run.receipt, 'confirm');
+    };
+    const confirmObservation = (run, observation) => {
+      if (observation.event === 'dom' || observation.event === 'answer') confirmRun(run, observation.data?.text);
+    };
     let streamedText = '';
     let observedText = '';
     const emitObservation = async observation => {
@@ -138,6 +173,7 @@ export class TurnDriver {
           run = undefined;
           imageBaseline = undefined;
         }
+        if (run?.receiptPrepared) receiptRuns.add(run);
         const rememberCheckpoint = () => {
           checkpoint = {
             submitted: promptSubmitted,
@@ -272,12 +308,15 @@ export class TurnDriver {
               attempt ? 'Return the JSON object itself, starting with { and ending with }.' : 'Use no prose, Markdown, code fence or closing delimiter.',
               'If no action is needed, reply exactly NO_ACTION.',
             ].join('\n')));
+            await wait(prepareRunReceipt(run));
             activeSignal.throwIfAborted();
             if (this.adapter.submitPrompt) this.assertResult(await wait(this.adapter.submitPrompt(page, composer)), command.model);
             else await wait(composer.press('Enter'));
+            run.receiptSubmitted = true;
             promptSubmitted = true;
             rememberCheckpoint();
             let repair;
+            const repairRun = run;
             try {
               repair = await wait(this.observe(page, {
                 run,
@@ -285,8 +324,9 @@ export class TurnDriver {
                 guard,
                 budget: Math.max(0, deadline - this.now()),
                 signal: activeSignal,
-                emit: async () => {},
+                emit: async observation => { confirmObservation(repairRun, observation); },
               }));
+              confirmRun(repairRun, repair?.text);
             } catch (error) {
               if (activeSignal.aborted) throw error;
               if (['expired', 'cooldown', 'verification', 'browserClosed'].includes(error?.code)) throw error;
@@ -347,9 +387,11 @@ export class TurnDriver {
             const prompt = this.prompter(command, resumeFrom);
             const composer = page.locator(shape.composer).filter({ visible: true });
             await wait(composer.fill(prompt));
+            await wait(prepareRunReceipt(run));
             activeSignal.throwIfAborted();
             if (this.adapter.submitPrompt) this.assertResult(await wait(this.adapter.submitPrompt(page, composer)), command.model);
             else await wait(composer.press('Enter'));
+            run.receiptSubmitted = true;
             promptSubmitted = true;
             rememberCheckpoint();
           } catch (error) {
@@ -361,7 +403,10 @@ export class TurnDriver {
         for (;;) {
           try {
             if (imageMode) return await wait(this.adapter.readGeneratedImages(page, { baseline: imageBaseline, budget: Math.max(1, deadline - this.now()), artifactRoot: this.artifactRoot, signal: activeSignal }));
-            const first = await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal, emit: emitObservation }));
+            const observedRun = run;
+            const first = await wait(this.observe(page, { run, adapter: this.adapter, guard, budget: Math.max(0, deadline - this.now()), signal: activeSignal,
+              emit: observation => { confirmObservation(observedRun, observation); return emitObservation(observation); } }));
+            confirmRun(observedRun, first?.text);
             const repaired = await wait(repairIncompleteAction(first));
             return repaired ?? first;
           } catch (error) {
@@ -421,6 +466,15 @@ export class TurnDriver {
         binding.used = this.now();
       } else if (binding && !holdTurn && !binding.key) await this.bindings.failed(binding);
       release?.();
+      for (const run of receiptRuns) {
+        if (run.receiptSubmitted && !run.receiptAccepted && !run.receiptUncertain) {
+          run.receiptUncertain = true;
+          void receiptCall(run.receipt, 'uncertain');
+        }
+      }
+      // The helper owns bounded flushing; neither write errors nor rejected
+      // optional callbacks may turn a completed answer into a retry.
+      await Promise.all([...receiptRuns].map(run => receiptCall(run.receipt, 'flush')));
     }
   }
   assertResult(result, slug) {

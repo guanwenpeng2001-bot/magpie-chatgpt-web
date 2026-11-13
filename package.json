@@ -13,7 +13,7 @@
   "homepage": "https://github.com/guanwenpeng2001-bot/magpie-chatgpt-web#readme",
   "bugs": { "url": "https://github.com/guanwenpeng2001-bot/magpie-chatgpt-web/issues" },
   "engines": { "node": ">=20" },
-  "files": ["src", "backend", "integrations/fixture-backend.mjs", "integrations/turn-fixture.mjs", "README.md", "MODEL_SUPPORT.md", "CHANGELOG.md", "docs/verification-0.5.4.md", "docs/verification-0.5.6.md", "LICENSE", "THIRD_PARTY_NOTICES"],
+  "files": ["src", "backend", "integrations/fixture-backend.mjs", "integrations/turn-fixture.mjs", "README.md", "MODEL_SUPPORT.md", "CHANGELOG.md", "docs/verification-0.5.4.md", "docs/verification-0.5.6.md", "docs/local-usage.md", "LICENSE", "THIRD_PARTY_NOTICES"],
   "scripts": { "codex-profile": "node ./src/codex-profile.mjs" },
   "magpie": {
     "maxConcurrency": 1,

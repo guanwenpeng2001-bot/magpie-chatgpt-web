@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { inflateRawSync } from 'node:zlib';
 import { _internal } from '../src/index.mjs';
 import { BackendError } from '../backend/guard.mjs';
+import { localUsageWindows } from '../src/usage/display.mjs';
 
 async function installedHost(t) {
   const path = process.env.MAGPIE_USAGE_HOST_EXE
@@ -151,5 +152,23 @@ test('installed UI treats Go-normalized text windows as unknown, not 100% left',
     assert.equal(ui.quotaNoShare(measured), false);
     assert.equal(ui.quotaText(measured), left ? '100% left' : '0% used');
     assert.equal(tracks(ui.quotaWindows({ ...card, windows: [measured] })), 1);
+
+    // Real plugin projection, normalized like the host's text-only Go windows.
+    // Advisory budgets must be visible without becoming account-routing meters.
+    const now = Date.UTC(2026, 10, 13, 12);
+    const local = { version: 1, status: 'tracking', asOf: now, since: now - 3600000,
+      sources: [{ source: 'native', since: now - 3600000 }], day: 6, week: 6, gaps: { day: 0, week: 0 },
+      byModel: [{ model: 'gpt-6-pro', effort: 'max', day: 6, week: 6 }] };
+    const estimates = localUsageWindows(local, { planType: 'prolite', personal: true })
+      .map(window => ({ ...window, used: 0, remaining: 100, text: true }));
+    const estimatedCard = { ...card, windows: estimates };
+    for (const rendered of [ui.quotaWindows(estimatedCard), ui.panelQuotaCard(estimatedCard)]) {
+      assert.match(visibleText(rendered), /6 次已记录/);
+      assert.match(visibleText(rendered), /余44\/50\s+·\s+已记6次/);
+      assert.match(visibleText(rendered), /非官方实时/);
+      assert.match(visibleText(rendered), /未扣此前\/外部用量/);
+      assert.doesNotMatch(visibleText(rendered), /\d+(?:\.\d+)?%|Not used yet/);
+      assert.equal(tracks(rendered), 0);
+    }
   }
 });

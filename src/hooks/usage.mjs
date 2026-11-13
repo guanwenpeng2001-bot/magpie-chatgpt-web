@@ -1,6 +1,7 @@
 import { CHATGPT_PLANS } from '../../backend/quota.mjs';
 import { BackendError } from '../bridge.mjs';
 import { requireAuth } from './auth.mjs';
+import { localUsageWindows } from '../usage/display.mjs';
 
 const reasons = Object.freeze({
   'not-reported': '接口未返回额度',
@@ -15,14 +16,16 @@ const reasons = Object.freeze({
   upstream: '账号信息读取失败',
 });
 
-function unknown(reason, planType) {
+function unknown(reason, planType, local, accountScope) {
   const why = Object.hasOwn(reasons, reason) ? reason : 'protocol';
+  const localWindows = local === undefined ? [] : localUsageWindows(local, { planType, personal: accountScope === 'personal' });
+  if (localWindows === null) return unknown('protocol', planType);
   return {
     ...(typeof planType === 'string' && Object.hasOwn(CHATGPT_PLANS, planType) ? { plan: CHATGPT_PLANS[planType] } : {}),
     // Missing used is essential: the host treats 0 as a measured 100% left.
     // A text-only window keeps the card visible without ranking this account
     // as full or exhausted. Transient read failures must not clear sign-in state.
-    windows: [{ name: '剩余额度', display: `未知：${reasons[why]}`, aside: true }],
+    windows: [...localWindows, { name: localWindows.length ? '账号实测额度' : '剩余额度', display: `未知：${reasons[why]}`, aside: true }],
     signIn: why === 'expired' ? 'expired' : 'kept',
   };
 }
@@ -40,7 +43,7 @@ export function usageHook({ bridge, profileRoot }) {
       if (quota?.state !== 'unknown' || !['not-reported', 'plan-not-reported', 'payment-attention'].includes(quota.reason)) {
         return unknown('protocol');
       }
-      return unknown(quota.reason, quota.planType);
+      return unknown(quota.reason, quota.planType, quota.local, quota.accountScope);
     } catch (error) {
       signal?.throwIfAborted();
       return unknown(error instanceof BackendError ? error.code : 'upstream');

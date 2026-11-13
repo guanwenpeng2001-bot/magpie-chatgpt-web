@@ -7,6 +7,7 @@ import { TurnDriver } from './turn.mjs';
 import { ensureNative, hasNative, stopNative } from '../src/native/index.mjs';
 import { accountCapabilities } from '../src/native/models.mjs';
 import { readQuota } from './quota.mjs';
+import { usageProfile } from '../src/usage/store.mjs';
 
 export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
   const turnDrivers = new Map();
@@ -181,7 +182,8 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       }
       case 'quota': {
         const { client, release } = clientFor(command);
-        try { return await readQuota(client, signal); }
+        try { return await readQuota(client, signal, typeof command.auth?.profile === 'string'
+          ? { profile: usageProfile(command.auth.profile) } : {}); }
         finally { release(); }
       }
       case 'session': {

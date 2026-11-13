@@ -273,7 +273,9 @@ test('real composer, Mermaid snapshot/buffer, and capability methods in isolated
       }
       for (const options of [{}, { ghost: true }, { locked: true }, { open: true }]) {
         await page.goto('about:blank'); await picker(options);
-        assert.deepEqual(await probe(page, { settleMs: 20 }), {
+        // settleMs also bounds Playwright's stable-layout click, not just the
+        // ghost-menu wait. Keep the native default under concurrent test load.
+        assert.deepEqual(await probe(page), {
           solAvailable: true, extraHighAvailable: !options.locked, proAvailable: !options.locked,
         });
         const events = await page.evaluate(() => window.events);
@@ -281,13 +283,15 @@ test('real composer, Mermaid snapshot/buffer, and capability methods in isolated
         assert.equal(await page.locator('#effort').isVisible(), false);
       }
       await page.goto('about:blank'); await picker({ ghost: true, invalid: true });
-      let captured = false;
-      await assert.rejects(probe(page, { settleMs: 20, onFailureBeforeCleanup: async error => {
-        assert.match(error.message, /slider ticks/);
-        assert.equal(await page.locator('#effort').isVisible(), true);
-        captured = true;
+      let captured;
+      await assert.rejects(probe(page, { onFailureBeforeCleanup: async error => {
+        // Observe here and assert outside: a callback assertion mentioning
+        // "slider ticks" could itself satisfy the outer rejection matcher.
+        captured = { error, menuVisible: await page.locator('#effort').isVisible() };
       } }), /slider ticks/);
-      assert.equal(captured, true);
+      assert.ok(captured, 'failure callback ran before cleanup');
+      assert.match(captured.error.message, /slider ticks/);
+      assert.equal(captured.menuVisible, true);
       assert.equal(await page.locator('#effort').isVisible(), false);
       captured = false;
       await assert.rejects(probe(page, { signal: controller.signal, onFailureBeforeCleanup: async () => { captured = true; } }), /fixture abort/);
