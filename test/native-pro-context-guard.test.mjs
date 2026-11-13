@@ -13,7 +13,7 @@ const entry = resolve(process.env.NATIVE_PRO_CONTEXT_CLI
 const oldAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
 const patchedAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs';
 const roundAnchor = 'let D;if(y.localTools)try{D=m.resolve(f)}';
-const roundPrefix = 'if(y.effort==="max")assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q);';
+const roundPrefix = 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(';
 
 // Execute actual preload only. Never import the full CLI or touch a browser,
 // account, daemon, live app-server, installation or configuration.
@@ -96,10 +96,12 @@ function execute(script, { inputTokens, effort, multipart, family = '6', preflig
 }
 
 function adapterExecutionSource(source) {
-  assert.equal(source.split(roundPrefix + roundAnchor).length, 2, 'unique patched canonical-round prelude');
-  const start = source.indexOf(roundPrefix + roundAnchor);
+  assert.equal(source.split(roundPrefix).length, 2, 'unique patched canonical-round prelude');
+  const start = source.indexOf(roundPrefix);
+  const environmentPrelude = source.indexOf(roundAnchor, start);
   const preludeEnd = source.indexOf('if(f._compactionRequest)', start);
   assert.ok(preludeEnd > start && preludeEnd - start < 1000);
+  assert.ok(environmentPrelude > start && environmentPrelude < preludeEnd);
   const resolveIndex = source.indexOf('m.resolve(f)', start);
   const sessionStart = source.indexOf('await De.getOrCreateAfterOwnerRetirement(', preludeEnd);
   const sessionEnd = source.indexOf(',K=Df(f)', sessionStart);
@@ -115,8 +117,13 @@ function adapterExecutionSource(source) {
     + 'return ' + source.slice(sessionStart, sessionEnd) + ';})()';
 }
 
-function executeAdapter(script, { inputTokens, effort = 'max', localTools = true, appName = 'Fixture app' }) {
+function executeAdapter(script, { inputTokens, effort = 'max', localTools = true, appName = 'Fixture app', failureAt, failure }) {
   const events = [];
+  const emitted = [];
+  const adapterErrors = [];
+  class CapturedAdapterError extends FakeAdapterError {
+    constructor(message, options) { super(message, options); adapterErrors.push(this); }
+  }
   const toolResult = Object.freeze({ role: 'tool', tool_call_id: 'fixture-call', content: 'small result', fixtureTokens: 13 });
   const history = Object.freeze({ role: 'user', content: 'full canonical history fixture', fixtureTokens: inputTokens - 13 });
   const parsed = Object.freeze({ context: { messages: [history, toolResult] }, browserDelta: [toolResult] });
@@ -125,12 +132,14 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
   const environment = Object.freeze({ fixtureEnvironment: true });
   const signal = Object.freeze({ fixtureSignal: true });
   const scope = {
-    q: FakeAdapterError, f: parsed, y: { effort, localTools }, R: capabilities,
+    q: CapturedAdapterError, f: parsed, y: { effort, localTools }, R: capabilities,
     c: true, s: false, e: appName === undefined ? {} : { chatgptWeb: { appName } },
+    T(event) { events.push('emitError'); emitted.push(event); },
     w(input) {
       assert.equal(effort, 'max', 'non-Pro must not compute currentUsageInput');
       assert.equal(input, parsed, 'currentUsageInput receives canonical request, not browser delta');
       events.push('currentUsageInput');
+      if (failureAt === 'currentUsageInput') throw failure;
       return canonical;
     },
     wo(input, output, receivedCapabilities, biggerContext, skillAttachments, receivedAppName) {
@@ -146,6 +155,7 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
       assert.equal(skillAttachments, false);
       assert.equal(receivedAppName, appName);
       events.push('estimateFullHistory');
+      if (failureAt === 'estimateFullHistory') throw failure;
       return { inputTokens: input.context.messages.reduce((sum, message) => sum + message.fixtureTokens, 0), outputTokens: 999999 };
     },
     m: { resolve(input) { assert.equal(input, parsed); events.push('resolveEnvironment'); return environment; } },
@@ -159,7 +169,7 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
     qe: 'fixture-turn', ve: { threadId: 'fixture-thread' }, $f: input => { assert.equal(input, parsed); return 'fixture-lineage'; },
     C() { assert.fail('session factory must not start a runtime in this fixture'); },
   };
-  return { result: runInNewContext(script, scope), events };
+  return { result: runInNewContext(script, scope), events, emitted, adapterErrors };
 }
 
 test('pinned Native Pro context guard through actual patched preload', async t => {
@@ -181,28 +191,49 @@ test('pinned Native Pro context guard through actual patched preload', async t =
   for (const localTools of [true, false]) {
     for (const inputTokens of [112192, 112193, 275414, 340069]) {
       await t.test(`canonical tool-result round ${inputTokens}, localTools=${localTools}: full-history guard before side effects`, async () => {
-        const { result, events } = executeAdapter(adapterScript, { inputTokens, localTools });
+        const { result, events, emitted, adapterErrors } = executeAdapter(adapterScript, { inputTokens, localTools });
         if (inputTokens < 112193) {
           assert.equal(await result, 'fixture-session');
           assert.deepEqual(events, ['currentUsageInput', 'estimateFullHistory', ...(localTools ? ['resolveEnvironment'] : []), 'createSession']);
+          assert.deepEqual(emitted, []);
+          assert.deepEqual(adapterErrors, []);
         } else {
-          await assert.rejects(result, error => {
-            assert.ok(error instanceof FakeAdapterError);
-            assert.equal(error.status, 400);
-            assert.equal(error.errorType, 'invalid_request_error');
-            assert.equal(error.code, 'context_length_exceeded');
-            assert.equal(error.retryable, false);
-            return true;
+          assert.equal(await result, undefined, 'guard emits a typed error and returns instead of throwing');
+          assert.equal(adapterErrors.length, 1);
+          assert.equal(emitted.length, 1);
+          assert.match(adapterErrors[0].message, /112,193/);
+          assert.deepEqual({ ...emitted[0] }, {
+            type: 'error', message: adapterErrors[0].message,
+            status: 400, errorType: 'invalid_request_error',
+            code: 'context_length_exceeded', retryable: false,
           });
-          assert.deepEqual(events, ['currentUsageInput', 'estimateFullHistory']);
+          assert.deepEqual(events, ['currentUsageInput', 'estimateFullHistory', 'emitError']);
         }
       });
     }
     for (const effort of ['low', 'medium', 'high']) {
       await t.test(`canonical round ${effort}, localTools=${localTools}: does not compute Pro estimate`, async () => {
-        const { result, events } = executeAdapter(adapterScript, { inputTokens: 340069, effort, localTools });
+        const { result, events, emitted, adapterErrors } = executeAdapter(adapterScript, { inputTokens: 340069, effort, localTools });
         assert.equal(await result, 'fixture-session');
         assert.deepEqual(events, [...(localTools ? ['resolveEnvironment'] : []), 'createSession']);
+        assert.deepEqual(emitted, []);
+        assert.deepEqual(adapterErrors, []);
+      });
+    }
+    for (const failureAt of ['currentUsageInput', 'estimateFullHistory']) {
+      await t.test(`non-q exception from ${failureAt}, localTools=${localTools}: rethrows without emission or side effects`, async () => {
+        // Matching fields must not make an ordinary Error an AdapterError.
+        const failure = Object.assign(new Error('fixture estimator fault'), {
+          status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
+        });
+        const { result, events, emitted, adapterErrors } = executeAdapter(adapterScript, {
+          inputTokens: 340069, localTools, failureAt, failure,
+        });
+        await assert.rejects(result, error => error === failure);
+        assert.deepEqual(events, failureAt === 'currentUsageInput'
+          ? ['currentUsageInput'] : ['currentUsageInput', 'estimateFullHistory']);
+        assert.deepEqual(emitted, []);
+        assert.deepEqual(adapterErrors, []);
       });
     }
   }

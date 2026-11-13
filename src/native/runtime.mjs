@@ -197,7 +197,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
       .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')
-      .replace(roundGuard, 'if(y.effort==="max")assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q);let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(roundGuard, 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
