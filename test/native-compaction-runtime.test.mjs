@@ -84,16 +84,17 @@ test('pinned bundle completes and authenticates continuation in the full owner',
   const original = await readFile(entry);
   const preload = join(home, 'exports-preload.mjs');
   // Only expose existing bundle bindings to the fixture. Production has no test API.
-  const exports = '\nexport { ff as chromium, Cs as Worker, cd as compactRequest, Ls as responseRequest, Fn as parseRequest, sd as route, Nh as restore, H_ as sourceRevision, _i as revisions, ue as identity, Xt as compilePrompt, zt as summaryPrefix, vs as close, da as readAnnouncements, mu as assertModelFamily, pu as selectModelFamily, r_ as familyMatches, rawModelAnnouncements };';
+  const exports = '\nexport { dn as TurnBroker, ci as opaqueId, ff as chromium, Cs as Worker, cd as compactRequest, Ls as responseRequest, Fn as parseRequest, sd as route, Nh as restore, H_ as sourceRevision, _i as revisions, ue as identity, Xt as compilePrompt, zt as summaryPrefix, vs as close, da as readAnnouncements, mu as assertModelFamily, pu as selectModelFamily, r_ as familyMatches, rawModelAnnouncements };';
   const source = compactionPreloadSource(entry).replace("return { contents, loader: 'js' };",
     `return { contents: contents + '\\n' + source.slice(source.indexOf('async function da(e)'), source.indexOf('function fc(e)'))
       .replace('async function da(e)', 'async function rawModelAnnouncements(e)') + ${JSON.stringify(exports)}, loader: 'js' };`);
   assert.notEqual(source, compactionPreloadSource(entry));
   await writeFile(preload, source);
   const fixture = fileURLToPath(new URL('../integrations/native-compaction-bundle-fixture.mjs', import.meta.url));
-  for (const phase of ['same-process', 'fresh-process', 'cdp-ownership', 'model-announcements']) {
+  for (const phase of ['same-process', 'fresh-process', 'durable-fresh', 'persistence-failure', 'durable-recompact', 'durable-fresh', 'turn-tokens', 'cdp-ownership', 'model-announcements']) {
     const result = await promisify(execFile)(runtimeCommand[0], ['--preload', preload, fixture, entry, phase], {
-      env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex') },
+      env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, CODEX_HOME: join(home, 'codex'),
+        MAGPIE_NATIVE_CHECKPOINT_HOME: ['same-process', 'durable-fresh', 'durable-recompact', 'persistence-failure'].includes(phase) ? home : '' },
       windowsHide: true, timeout: 30_000, maxBuffer: 1 << 20,
     });
     assert.match(result.stdout, new RegExp(`${phase}: passed`));

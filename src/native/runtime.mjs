@@ -29,6 +29,28 @@ const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePat
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
 // existing DOM evaluation so the checked row and active header are one snapshot.
 const modelAnnouncementTail = 'r.push(c.join(" "))}return r})}function fc(e)';
+const checkpointRegistry = 'var Kt=new Map,dx=256;';
+const checkpointRememberTail = 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value)}function Nh';
+const checkpointTouch = 'return Kt.delete(e),Kt.set(e,t),!0}';
+const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url")}`}';
+
+// Preserve 160 random bits in the existing 32-character token payload without
+// mixed case or visually ambiguous i/l/o/u. Authentication remains exact-match;
+// never normalize a model-supplied token or revive an earlier turn capability.
+export function createNativeTurnToken(randomBytes) {
+  const bytes = randomBytes(20);
+  const alphabet = '0123456789abcdefghjkmnpqrstvwxyz';
+  let buffer = 0, bits = 0, payload = '';
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      payload += alphabet[(buffer >>> bits) & 31];
+    }
+  }
+  return `turn_${payload}`;
+}
 
 export function appendNativeModelAnnouncement(slider, descriptions, activeHeader) {
   const normalize = text => text.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
@@ -97,10 +119,23 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
     const announcement = ${JSON.stringify(modelAnnouncementTail)};
     if (source.split(announcement).length !== 2) throw new Error('Native model announcement compatibility mismatch');
+    const registry = ${JSON.stringify(checkpointRegistry)};
+    const remember = ${JSON.stringify(checkpointRememberTail)};
+    const touch = ${JSON.stringify(checkpointTouch)};
+    const tokenFactory = ${JSON.stringify(opaqueIdFactory)};
+    if (source.split(tokenFactory).length !== 2) throw new Error('Native turn token compatibility mismatch');
+    if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
+      throw new Error('Native checkpoint persistence compatibility mismatch');
     const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+      .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
+      .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
+      .replace(touch, 'return Kt.delete(e),Kt.set(e,t),magpieCheckpointPersistence?.commit(),!0}')
+      .replace(tokenFactory, 'function ci(e){return e==="turn"?createNativeTurnToken(Ev):' + tokenFactory.slice(tokenFactory.indexOf('return') + 6, -1) + '}')
       .replaceAll(launch, 'launchNativeBrowser(ff,{executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})')
       .replace(announcement, ${JSON.stringify('r.push(c.join(" "));r=(' + appendNativeModelAnnouncement.toString() + ')(t,r,c.join(" "))}return r})}function fc(e)')})
-      + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())};
+      + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())}
+      + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
+      + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')};
     return { contents, loader: 'js' };
   });
 } });
