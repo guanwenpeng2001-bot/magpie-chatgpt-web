@@ -51,7 +51,8 @@ const markdownGfmSetup = 'Vt.use(fC);';
 const proContextGuard = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
 const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
 // Xt is the pinned compiler. I contains all restored records here, before
-// compaction fit recovery can splice older messages out of T.
+// compaction fit recovery can splice older messages out of T. These anchors
+// protect both Pro and guarded Sol without changing their separate budgets.
 const solCompileGuard = 'A=T.length,I=v(T);if(!e._compactionRequest)return I;';
 const solTrimGuard = 'while(b()&&T.length>1){let y=_===0?1:0;';
 // Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
@@ -71,9 +72,11 @@ const submittedFinalBaseline = 'let oe=await this.captureSubmissionBaseline(O,Be
 // independent markers, even when all stages used Pro. Do not advertise or
 // submit the experimental triple Pro budget until retention is verified.
 // Keep the pinned reference's ordinary Pro boundary (including its reserve).
-export function assertNativeProContext(inputTokens, effort, AdapterError) {
-  if (effort === 'max' && inputTokens >= 112193) {
-    throw new AdapterError('Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+export function assertNativeProContext(inputTokens, effort, AdapterError, requiresTrimming = false) {
+  if (effort === 'max' && (requiresTrimming || inputTokens >= 112193)) {
+    throw new AdapterError(requiresTrimming
+      ? 'Native Pro compaction cannot fit the complete history without dropping records. Reduce the supplied history explicitly or use another verified route; no history was silently removed.'
+      : 'Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
       status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
     });
   }
@@ -285,8 +288,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
       .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs')
       .replace(roundGuard, 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{let magpieInput=wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens;assertNativeProContext(magpieInput,y.effort,q);assertNativeSolContext(magpieInput,f.modelId,f._chatgptModelFamily,y.effort,R,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
-      .replace(solCompileGuard, 'A=T.length,I=v(T);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;')
-      .replace(solTrimGuard, 'if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
+      .replace(solCompileGuard, 'A=T.length,I=v(T);if(s.effort==="max")assertNativeProContext(Nt(I,e.modelId),s.effort,q);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;')
+      .replace(solTrimGuard, 'if(s.effort==="max"&&b())assertNativeProContext(0,s.effort,q,!0);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')

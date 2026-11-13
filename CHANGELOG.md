@@ -2,6 +2,7 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Guard both Pro families before compaction's token/inline-byte fit recovery can remove older history, including with Bigger Context off. Preserve the distinct 112,193-token Pro and 111,193-token Sol limits; return an explicit error when a complete summary request cannot fit.
 - Present the current Native tool capability as an exact JSON literal in the ordinary final request footer. Permit one model-side correction only after explicit pre-execution token rejection; preserve 160-bit generation and exact schema/broker checks. This is copy guidance, not automatic token repair or a universal reliability claim.
 - Recognize positively identified browser-verification pages before Native prompt submission and return `chatgpt_security_check` with `retryable: false`. Keep ordinary composer readiness, authentication and post-Send handling separate; this does not solve verification or claim to preserve the failed turn tab.
 - Withdraw GPT-6/GPT-5.6 Sol Bigger windows on Pro-capable accounts after complete-fragment stress tests lost marker values during compaction. Retain route identities and baseline catalogue limits, remove misleading Bigger labels, and reject oversized full inputs before sending or trimming compaction history. Other capability tiers are unchanged and remain separately unverified.

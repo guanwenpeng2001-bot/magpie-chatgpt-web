@@ -72,7 +72,72 @@ async function compilerFixture() {
   console.log(`Sol compiler checks: ${checks} passed`);
 }
 
-test('pinned Sol compiler rejects full history before compaction trimming', { timeout: 60000 }, async t => {
+async function proCompilerFixture() {
+  const assert = (await import('node:assert/strict')).default;
+  const { pathToFileURL } = await import('node:url');
+  const [entry, family] = process.argv.slice(2);
+  process.argv = [process.execPath, entry, '--version'];
+  const native = await import(pathToFileURL(entry).href);
+  const caps = { solAvailable: true, proAvailable: true, localToolsEnabled: false, experimentalBiggerContext: false };
+  const config = { mode: 'full', browserInteractionMode: 'automatic', ...caps };
+  const request = (count, compact) => {
+    const input = Array.from({ length: count }, (_, i) => ({ type: 'message', role: 'user',
+      content: [{ type: 'input_text', text: `PRO_RECORD_${i}: ${'context history '.repeat(100)}` }] }));
+    const parsed = native.parse({ model: `chatgpt-web/gpt-${family}-pro`, reasoning: { effort: 'max' }, input });
+    native.route(parsed, config);
+    assert.equal(parsed._chatgptModelFamily, family);
+    assert.equal(parsed.options.reasoning, 'max');
+    parsed._compactionRequest = compact;
+    return parsed;
+  };
+  const contextError = e => e.status === 400 && e.code === 'context_length_exceeded' && e.retryable === false;
+  const parsed = request(100, true);
+  const before = JSON.stringify(parsed);
+  const full = native.rawCompile({ ...parsed, _compactionRequest: false }, caps);
+  assert.ok(native.tokens(full, parsed.modelId) < 112193, 'byte-bound Pro history is below its token limit');
+  assert.ok(Buffer.byteLength(JSON.stringify(full.text), 'utf8') > 110000, 'complete history exceeds the inline byte limit');
+  assert.ok(native.rawCompile(parsed, caps).trimmedCompactionMessages > 0, 'original pinned Pro compiler drops history');
+  assert.throws(() => native.compile(parsed, caps), e => contextError(e) && /without dropping records/.test(e.message),
+  `GPT-${family} Pro max, Bigger off must reject before inline compaction trims history`);
+  assert.equal(JSON.stringify(parsed), before, 'rejection leaves canonical history untouched');
+  assert.throws(() => native.usage(parsed, { reasoning: [] }, caps, false), contextError);
+  const completeMultipart = native.compile(parsed, caps, undefined, { experimentalMultipartParts: 6 });
+  assert.equal(completeMultipart.trimmedCompactionMessages, undefined, 'fitting multipart history stays complete');
+  assert.deepEqual(completeMultipart, native.rawCompile(parsed, caps, undefined, { experimentalMultipartParts: 6 }));
+  for (const compact of [false, true]) for (const parts of [undefined, 6]) {
+    const options = { experimentalMultipartParts: parts };
+    const small = request(2, compact);
+    assert.deepEqual(native.compile(small, caps, undefined, options), native.rawCompile(small, caps, undefined, options));
+    const large = request(700, compact);
+    const unchanged = JSON.stringify(large);
+    const full = native.rawCompile({ ...large, _compactionRequest: false }, caps, undefined, options);
+    assert.ok(native.tokens(full, large.modelId) >= 112193, 'complete Pro input exceeds its own baseline');
+    assert.throws(() => native.compile(large, caps, undefined, options), e => contextError(e) && /112,193/.test(e.message));
+    assert.equal(JSON.stringify(large), unchanged);
+  }
+  for (const bigger of [false, true]) {
+    assert.throws(() => native.usage(request(700, true), { reasoning: [] }, caps, bigger), contextError);
+  }
+  // Find a real compiled input between the Sol and Pro ceilings. Pro must not
+  // inherit Sol's smaller boundary, even with the new shared compiler hooks.
+  let low = 2, high = 700;
+  while (low + 1 < high) {
+    const count = Math.floor((low + high) / 2);
+    const sample = request(count, false);
+    const tokens = native.tokens(native.rawCompile(sample, caps), sample.modelId);
+    if (tokens < 112193) low = count;
+    else high = count;
+  }
+  const below = request(low, false);
+  const belowCompiled = native.rawCompile(below, caps);
+  assert.ok(native.tokens(belowCompiled, below.modelId) >= 111193, 'Pro acceptance control crosses the Sol ceiling');
+  assert.deepEqual(native.compile(below, caps), belowCompiled);
+  const above = request(high, true);
+  assert.throws(() => native.compile(above, caps), e => contextError(e) && /112,193/.test(e.message));
+  console.log(`Pro ${family} compiler checks passed`);
+}
+
+async function runCompilerFixture(t, fixtureFunction, args = []) {
   const entry = resolve(process.env.NATIVE_PRO_CONTEXT_CLI ?? join(nativeRoot(), 'runtime-6.1.18/payload/app/cli.js'));
   let original;
   try { original = await readFile(entry); }
@@ -93,11 +158,23 @@ test('pinned Sol compiler rejects full history before compaction trimming', { ti
     return { contents: contents + '\\n' + source.slice(start, end).replace('function Xt(', 'function rawXt(') + ${JSON.stringify(exports)}, loader: 'js' };`);
   assert.notEqual(source, base);
   await writeFile(preload, source);
-  await writeFile(fixture, `await (${compilerFixture.toString()})();`);
-  const result = await promisify(execFile)(join(dirname(dirname(entry)), 'runtime', 'bun.exe'), ['--preload', preload, fixture, entry], {
+  await writeFile(fixture, `await (${fixtureFunction.toString()})();`);
+  const result = await promisify(execFile)(join(dirname(dirname(entry)), 'runtime', 'bun.exe'), ['--preload', preload, fixture, entry, ...args], {
     env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home, MAGPIE_NATIVE_CHECKPOINT_HOME: '', MAGPIE_NATIVE_BROWSER_CDP: '' },
     windowsHide: true, timeout: 45000, maxBuffer: 1 << 20,
   });
-  assert.match(result.stdout, /Sol compiler checks: 30 passed/);
   assert.deepEqual(await readFile(entry), original, 'downloaded runtime remains byte-identical');
+  return result.stdout;
+}
+
+test('pinned Sol compiler rejects full history before compaction trimming', { timeout: 60000 }, async t => {
+  const output = await runCompilerFixture(t, compilerFixture);
+  if (output !== undefined) assert.match(output, /Sol compiler checks: 30 passed/);
 });
+
+for (const family of ['6', '5.6']) {
+  test(`pinned GPT-${family} Pro max compiler rejects pre-trim compaction with Bigger off`, { timeout: 60000 }, async t => {
+    const output = await runCompilerFixture(t, proCompilerFixture, [family]);
+    if (output !== undefined) assert.ok(output.includes(`Pro ${family} compiler checks passed`));
+  });
+}
