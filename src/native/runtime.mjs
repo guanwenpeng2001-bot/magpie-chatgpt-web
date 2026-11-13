@@ -34,9 +34,6 @@ const checkpointRememberTail = 'while(Kt.size>dx)Kt.delete(Kt.keys().next().valu
 const checkpointTouch = 'return Kt.delete(e),Kt.set(e,t),!0}';
 const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url")}`}';
 const markdownGfmSetup = 'Vt.use(fC);';
-// Keep Pro multipart history in its requested context tier. Switching through
-// Instant can make earlier staged records unavailable to the final Pro turn.
-const proStagingMode = 'X=I?v_(e.modelId,i,L,W):a,D=';
 const terminalErrorDetector = 'async function wf(e){if(await e.getByTestId("regenerate-thread-error-button").last().isVisible().catch(()=>!1))throw new q("ChatGPT displayed an error for this response. Check the ChatGPT tab for the exact error, then retry the turn.",{status:502,errorType:"server_error",code:"upstream_server_error",retryable:!0});if(!await g_(e).isVisible().catch(()=>!1))return;throw new q("ChatGPT ended the turn with \'Something went wrong\'. Retry the turn.",{status:502,errorType:"server_error",code:"upstream_server_error",retryable:!0})}';
 
 // Inspect only the bound response's visible service alert. User text and
@@ -172,8 +169,6 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(markdown).length !== 2) throw new Error('Native markdown table compatibility mismatch');
     const terminal = ${JSON.stringify(terminalErrorDetector)};
     if (source.split(terminal).length !== 2) throw new Error('Native terminal alert compatibility mismatch');
-    const staging = ${JSON.stringify(proStagingMode)};
-    if (source.split(staging).length !== 2) throw new Error('Native Pro staging compatibility mismatch');
     const registry = ${JSON.stringify(checkpointRegistry)};
     const remember = ${JSON.stringify(checkpointRememberTail)};
     const touch = ${JSON.stringify(checkpointTouch)};
@@ -183,7 +178,6 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       throw new Error('Native checkpoint persistence compatibility mismatch');
     const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
-      .replace(staging, 'X=I&&a.effort!=="max"?v_(e.modelId,i,L,W):a,D=')
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
