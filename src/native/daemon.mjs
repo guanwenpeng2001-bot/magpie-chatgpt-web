@@ -1,8 +1,10 @@
 import { spawn as spawnProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CompactionService, compactionProxy } from './compaction.mjs';
 
@@ -105,7 +107,12 @@ export class NativeDaemon {
     // Isolate all reference Codex state, including its model-catalog configuration reads.
     const inherited = Object.fromEntries(Object.entries(this.env).filter(([key]) =>
       /^(PATH|SYSTEMROOT|WINDIR|TEMP|TMP|LOCALAPPDATA|APPDATA|USERPROFILE|HTTPS_PROXY|HTTP_PROXY|ALL_PROXY|NO_PROXY)$/i.test(key)));
+    const trustedHomes = [...new Set([
+      this.env.CODEX_HOME ? resolve(this.env.CODEX_HOME) : null,
+      resolve(homedir(), '.codex'),
+    ].filter(dir => dir && isAbsolute(dir) && existsSync(dir)))];
     this.childEnv = { ...inherited, CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
+      ...(trustedHomes.length ? { CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES: JSON.stringify(trustedHomes) } : {}),
       TUNNEL_CLIENT_STATE_DIR: join(this.home, 'tunnel-state'), TUNNEL_CLIENT_PROFILE_DIR: join(this.home, 'tunnel'),
       MCP_STDIO_SEND_INITIALIZED_NOTIFICATION: 'true' };
     await mkdir(this.childEnv.CODEX_HOME, { recursive: true, mode: 0o700 });
