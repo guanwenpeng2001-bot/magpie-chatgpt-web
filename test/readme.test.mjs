@@ -23,7 +23,7 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.5\.4`\. Historical host verification used: magpie `0\.1\.3930`/);
+  assert.match(prose, /Plugin version: `0\.5\.5`\. Historical host verification used: magpie `0\.1\.3930`/);
 });
 
 test('README separates supported plan fields from unknown account allowance and live evidence', () => {
