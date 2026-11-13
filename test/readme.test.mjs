@@ -40,10 +40,10 @@ test('README separates supported plan fields from unknown account allowance and 
   assert.match(section, /does not verify every plan tier or the payment-attention outcome/);
   assert.match(section, /valid session can lack `account` or a recognized plan code/);
   assert.match(section, /Session expiry is not a quota reset or subscription renewal date/);
-  assert.match(section, /Historical budget scenarios are separate from measured allowance/);
+  assert.match(section, /Historical budgets are not used in the usage card/);
   assert.match(section, /local token totals and Codex `\/wham\/usage` counters do not measure ChatGPT Chat allowance/);
-  assert.match(section, /not verified current caps/);
-  assert.match(section, /excludes earlier and outside activity/);
+  assert.match(section, /no estimated allowance, historical budget, remaining percentage or forecast/);
+  assert.match(section, /Earlier activity and outside sends are not included/);
   assert.match(section, /Neither the live quota result nor these tests establishes a measured remaining allowance/);
   assert.doesNotMatch(prose, /no dedicated[^.]*quota-display workflow/i);
 });

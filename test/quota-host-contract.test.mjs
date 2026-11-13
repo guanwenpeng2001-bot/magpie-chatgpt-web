@@ -60,7 +60,7 @@ test('installed Magpie usage contract preserves unknown quota and cancellation (
     assert.equal(result.windows[0].balance, null);
     assert.equal(result.windows[0].aside, true);
     assert.equal(result.error, '', 'show the fixed reason as a text window, not a hidden tooltip');
-    assert.match(result.windows[0].display, /^未知：.+/);
+    assert.match(result.windows[0].display, /^(?:未知：.+|未提供)$/);
     assert.equal(result.signIn, value?.code === 'expired' ? 'expired' : 'kept');
     assert.equal(result.until, '');
     assert.equal(result.windows[0].resetsAt, '');
@@ -154,19 +154,18 @@ test('installed UI treats Go-normalized text windows as unknown, not 100% left',
     assert.equal(tracks(ui.quotaWindows({ ...card, windows: [measured] })), 1);
 
     // Real plugin projection, normalized like the host's text-only Go windows.
-    // Advisory budgets must be visible without becoming account-routing meters.
+    // Recorded counts stay visible without budgets or account-routing meters.
     const now = Date.UTC(2026, 10, 13, 12);
     const local = { version: 1, status: 'tracking', asOf: now, since: now - 3600000,
       sources: [{ source: 'native', since: now - 3600000 }], day: 6, week: 6, gaps: { day: 0, week: 0 },
       byModel: [{ model: 'gpt-6-pro', effort: 'max', day: 6, week: 6 }] };
-    const estimates = localUsageWindows(local, { planType: 'prolite', personal: true })
+    const counts = localUsageWindows(local)
       .map(window => ({ ...window, used: 0, remaining: 100, text: true }));
-    const estimatedCard = { ...card, windows: estimates };
-    for (const rendered of [ui.quotaWindows(estimatedCard), ui.panelQuotaCard(estimatedCard)]) {
+    const countedCard = { ...card, windows: counts };
+    for (const rendered of [ui.quotaWindows(countedCard), ui.panelQuotaCard(countedCard)]) {
       assert.match(visibleText(rendered), /6 次已记录/);
-      assert.match(visibleText(rendered), /余44\/50\s+·\s+已记6次/);
-      assert.match(visibleText(rendered), /非官方实时/);
-      assert.match(visibleText(rendered), /未扣此前\/外部用量/);
+      assert.match(visibleText(rendered), /此前及外部发送/);
+      assert.doesNotMatch(visibleText(rendered), /估算|预测|预算|余44/);
       assert.doesNotMatch(visibleText(rendered), /\d+(?:\.\d+)?%|Not used yet/);
       assert.equal(tracks(rendered), 0);
     }

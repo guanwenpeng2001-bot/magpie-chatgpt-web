@@ -4,7 +4,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { accountKeyFromSession, usageProfile, recordSubmission, readUsage, DAY_MS } from '../src/usage/store.mjs';
-import { referenceScenario, POLICY_EVIDENCE } from '../src/usage/policy.mjs';
 import { localUsageWindows } from '../src/usage/display.mjs';
 import { readQuota } from '../backend/quota.mjs';
 import { usageHook } from '../src/hooks/usage.mjs';
@@ -29,44 +28,14 @@ const noMeasuredQuota = windows => {
   }
 };
 
-test('historical shared budget counts Pro sends once, never non-Pro effort or token totals', () => {
-  const scenario = referenceScenario(sample(), { planType: 'prolite', personal: true });
-  assert.equal(scenario.date, '2026-09-19');
-  assert.equal(scenario.windows[0].cap, 50);
-  assert.equal(scenario.windows[0].recorded, 14);
-  assert.equal(scenario.windows[0].budgetLeft, 36);
-  assert.equal(scenario.uncertainPro, 2);
-  assert.equal(POLICY_EVIDENCE.status, 'numeric-caps-unverified');
-  const windows = localUsageWindows(sample(), { planType: 'prolite', personal: true });
-  const text = JSON.stringify(windows);
-  assert.match(text, /14 次已记录/);
-  assert.match(text, /余36\/50 · 已记14次/);
-  assert.match(text, /2026-09-19/);
-  assert.match(text, /非官方实时/);
-  assert.match(text, /未扣此前\/外部用量；非账号余额/);
-  assert.match(text, /窗口覆盖不全/);
-  noMeasuredQuota(windows);
-});
-
-test('Pro200 has distinct family/week/day scenarios and conservative uncertain-family counts', () => {
-  const scenario = referenceScenario(sample(), { planType: 'pro', personal: true });
-  assert.deepEqual(scenario.windows.map(x => [x.id, x.recorded, x.budgetLeft]), [
-    ['gpt6-week', 9, 191], ['sol-day', 3, 167], ['shared-day', 6, 194],
-  ]);
-  const over = local([{ model: 'gpt-6', effort: 'max', day: 220, week: 220 }]);
-  const results = referenceScenario(over, { planType: 'pro', personal: true }).windows;
-  assert.equal(results[0].budgetLeft, 0);
-  assert.equal(results[0].recorded, 220, 'do not clamp away observed overage');
-  assert.equal(results[2].budgetLeft, 0);
-});
-
-test('unverified plans/workspaces have useful local counts without a fabricated cap', () => {
-  for (const options of [{ planType: 'plus', personal: true }, { planType: 'business', personal: true },
-    { planType: 'prolite', personal: false }, { planType: 'prolite' }, { planType: '__proto__', personal: true }]) {
-    assert.equal(referenceScenario(sample(), options), null);
-    const windows = localUsageWindows(sample(), options);
-    assert.match(JSON.stringify(windows), /14 次已记录/);
-    assert.doesNotMatch(JSON.stringify(windows), /余\d+\/|Pro100旧规则|Pro200旧规则/);
+test('all plans show recorded counts without budgets, forecasts or remaining percentages', () => {
+  for (const planType of ['prolite', 'pro', 'plus', 'business', undefined]) {
+    const windows = localUsageWindows(sample(), { planType, personal: true });
+    const text = JSON.stringify(windows);
+    assert.match(text, /14 次已记录/);
+    assert.match(text, /34 次已记录/);
+    assert.match(text, /此前及外部发送/);
+    assert.doesNotMatch(text, /估算|预测|预算|Pro100|Pro200|余\d+|\d+\/50/);
     noMeasuredQuota(windows);
   }
 });
@@ -79,7 +48,7 @@ test('new/partial coverage, gaps and unknown family never become full-account ce
   const gaps = localUsageWindows({ ...sample(), gaps: { day: 1, week: 2 } }, { planType: 'prolite', personal: true });
   assert.match(JSON.stringify(gaps), /2 次记录缺口/);
   const unknown = local([{ model: 'unknown', effort: 'unknown', day: 1, week: 1 }]);
-  assert.match(JSON.stringify(localUsageWindows(unknown, { planType: 'prolite', personal: true })), /1次型号不明；未归入Pro预算/);
+  assert.match(JSON.stringify(localUsageWindows(unknown, { planType: 'prolite', personal: true })), /型号未识别/);
   assert.match(JSON.stringify(localUsageWindows({ status: 'unavailable' })), /未归零/);
   noMeasuredQuota(gaps);
 });
@@ -108,7 +77,8 @@ test('backend/session to visible card reads the same persisted account, with no 
   const hook = usageHook({ bridge: { call: async () => quota } });
   const result = await hook(async () => ({ type: 'oauth', refresh: 'fixture-only' }));
   assert.equal(result.signIn, 'kept');
-  assert.match(JSON.stringify(result), /余49\/50 · 已记1次/);
+  assert.doesNotMatch(JSON.stringify(result), /估算|预测|预算|余49/);
+  assert.equal(result.windows.at(-1).display, '未提供');
   assert.match(JSON.stringify(result), /1 次已记录/);
   noMeasuredQuota(result.windows);
   assert.equal(sessionReads, 1);
@@ -118,7 +88,7 @@ test('backend/session to visible card reads the same persisted account, with no 
   assert.equal(missingIdentity.local.status, 'identity-unavailable');
 });
 
-test('text hyphen-version aliases and native dotted models share the Pro budget; High remains separate', async t => {
+test('text hyphen-version aliases and native dotted models share recorded counts; High remains separate', async t => {
   const root = await mkdtemp(join(tmpdir(), 'usage-alias-')); t.after(() => rm(root, { recursive: true, force: true }));
   const scope = { profile: usageProfile('fixture', root), accountKey: 'a'.repeat(64) };
   for (const [id, model, effort, source] of [
@@ -128,9 +98,6 @@ test('text hyphen-version aliases and native dotted models share the Pro budget;
   const result = await readUsage(scope, { now });
   assert.equal(result.byModel.find(x => x.model === 'gpt-5.6-pro').week, 2);
   assert.equal(result.byModel.find(x => x.model === 'gpt-5.6-high').week, 1);
-  const scenario = referenceScenario(result, { planType: 'pro', personal: true });
-  assert.equal(scenario.windows.find(x => x.id === 'sol-day').recorded, 2);
-  assert.equal(scenario.windows.find(x => x.id === 'sol-day').budgetLeft, 168);
-  assert.equal(scenario.windows.find(x => x.id === 'gpt6-week').recorded, 0);
-  assert.equal(scenario.windows.find(x => x.id === 'shared-day').recorded, 2);
+  assert.equal(result.week, 3);
+  assert.doesNotMatch(JSON.stringify(localUsageWindows(result)), /估算|预测|预算/);
 });

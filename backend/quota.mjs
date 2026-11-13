@@ -1,6 +1,5 @@
 import { BackendError } from './guard.mjs';
 import { accountKeyFromSession, readUsage } from '../src/usage/store.mjs';
-import { POLICY_EVIDENCE } from '../src/usage/policy.mjs';
 
 export const CHATGPT_PLANS = Object.freeze({
   free: 'ChatGPT Free', go: 'ChatGPT Go', plus: 'ChatGPT Plus', pro: 'ChatGPT Pro',
@@ -11,8 +10,8 @@ export const CHATGPT_PLANS = Object.freeze({
 // The reference adapter's limits.ts verifies account.planType/isDelinquent in
 // /api/auth/session. Neither the plan nor session expiry is an allowance/reset.
 // No verified ChatGPT remaining-usage schema is available here. In particular,
-// never interpret Codex /wham/usage, local token totals, or reference budget
-// scenarios as measured Chat allowance. Local Send records remain separate.
+// never interpret Codex /wham/usage, local token totals, or historical budgets
+// as measured Chat allowance. Local Send records remain separate.
 export async function readQuota(client, signal, { profile, now } = {}) {
   const session = await client.session(signal, { interactive: false });
   if (session?.error != null && session.error !== '' || session?.expires != null
@@ -36,6 +35,6 @@ export async function readQuota(client, signal, { profile, now } = {}) {
     state: 'unknown',
     reason: account?.isDelinquent === true ? 'payment-attention' : planType ? 'not-reported' : 'plan-not-reported',
     ...(planType ? { planType } : {}),
-    ...(local ? { local, policy: POLICY_EVIDENCE, accountScope: account?.structure === 'personal' ? 'personal' : 'unknown' } : {}),
+    ...(local ? { local } : {}),
   };
 }
