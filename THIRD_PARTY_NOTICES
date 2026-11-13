@@ -69,11 +69,11 @@ These downloads are separate from the plugin's declared playwright-core npm
 dependency. This notice records the verified source attribution and download
 pins; it does not replace upstream dependency notices.
 
-MIT License
-
 The v6.1.18 preload also changes only the native turn capability generator to
 160 random bits encoded as 32 lowercase Crockford characters. Other opaque IDs,
 case-sensitive credential validation, broker lookup and revocation are unchanged.
+
+MIT License
 
 Copyright (c) 2026 codex-chatgpt-web contributors
 
