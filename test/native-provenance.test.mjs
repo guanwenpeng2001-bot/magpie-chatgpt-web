@@ -118,6 +118,15 @@ test('mark and restricted middleware agree; unrelated or missing provider strips
     assert.ok(copy.input.every(item => item[TICKET] === undefined));
   }
 });
+
+test('restores unmasked local rollout paths and metadata when Magpie privacy masking rewrites tokens', t => {
+  const expected = original();
+  const {body} = routed(t);
+  body.client_metadata['x-codex-turn-metadata'] = body.client_metadata['x-codex-turn-metadata'].replace('C:\\\\fixture', '{{PATH_ab12cd34}}');
+  body.input[0].content[0].text = '<environment_context><cwd>{{PATH_ab12cd34}}</cwd></environment_context>';
+  restore(body, 'account-a');
+  assert.deepEqual(body, {...expected, model:route});
+});
 test('unsupported origins and protocols cannot reuse supplied private proof', () => {
   for (const ctx of [{protocol:'responses', origin:'remote'}, {protocol:'chat', origin:'local'}]) {
     const body = original();

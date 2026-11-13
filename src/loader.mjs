@@ -54,7 +54,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                 // dedicated read-only runtime cannot bind or invoke a local tool environment.
                 if (request.client_metadata?.['x-magpie-native-nonce']) {
                   try { restore(request, current.profile, PROVIDER); }
-                  catch { throw new BackendError('invalidRequest'); }
+                  catch (err) { throw Object.assign(new BackendError('invalidRequest'), { diagnostic: { reason: err?.message } }); }
                 }
                 preflight = false;
                 return await runtime.compaction(buildDaemonPayload(), headers, signal, path);
@@ -65,7 +65,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
               try { runtime = await native.runtime(current); } catch { /* use text when startup failed */ }
               if (runtime && await runtime.health(signal)) {
                 try { restore(request, current.profile, PROVIDER); }
-                catch { throw new BackendError('invalidRequest'); }
+                catch (err) { throw Object.assign(new BackendError('invalidRequest'), { diagnostic: { reason: err?.message } }); }
                 preflight = false;
                 // Once submitted, never replay a failed native turn through text:
                 // native tools may already have executed.

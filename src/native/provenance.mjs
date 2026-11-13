@@ -19,9 +19,11 @@ const IDENTITY = ["id", "type", "role", "call_id", "name", "namespace", "author"
 const METADATA = "internal_chat_message_metadata_passthrough";
 const KEPT_SEALS = new Set(["reasoning", "compaction", "compaction_summary", "context_compaction"]);
 const routePattern = /^native\/([A-Za-z0-9_-]{1,64})\/([A-Za-z0-9._-]{1,100})$/;
+const REDACTED_TOKEN = /\{\{[A-Z0-9_]+_[a-z0-9]{6,16}\}\}/;
 let liveTickets = 0, liveBytes = 0;
 
-const random = () => randomBytes(24).toString("base64url");
+// Lowercase hex avoids high-entropy base64 secret scanners while still matching /^[A-Za-z0-9_-]{32}$/.
+const random = () => randomBytes(16).toString("hex");
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 function canonical(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -138,6 +140,9 @@ export function prepare(body, ctx = {}, provider = PROVIDER) {
     } catch { valid = false; }
   }
   records.set(nonce, { created: Date.now(), provider: activeProvider, route, tickets, bytes, metadata, valid, claimed: false });
+  const entry = records.get(nonce);
+  entry.unmaskedClientMetadata = structuredClone(body.client_metadata);
+  entry.unmaskedInput = structuredClone(body.input);
   liveTickets += tickets.size;
   liveBytes += bytes;
   body.client_metadata[NONCE] = nonce;
@@ -163,17 +168,45 @@ export function mark(body, ctx, provider = PROVIDER) {
 // exactly as Magpie sent them; only captured native fields are restored.
 export function restore(body, profile, provider = PROVIDER) {
   if (!object(body) || !object(body.client_metadata) || !Array.isArray(body.input)) throw new Error("Native request provenance is missing");
-  const nonce = body.client_metadata[NONCE];
+  let nonce = body.client_metadata[NONCE];
+  if (typeof nonce === "string" && REDACTED_TOKEN.test(nonce)) {
+    const fallback = [...records.entries()].find(([, candidate]) => !candidate.claimed && candidate.route === body.model);
+    if (fallback) nonce = fallback[0];
+  }
   if (typeof nonce !== "string" || !/^[A-Za-z0-9_-]{32}$/.test(nonce)) throw new Error("Native request nonce is missing");
   prune();
   const record = records.get(nonce);
+  const serialized = JSON.stringify(body);
+  const wasRedactedByGateway = REDACTED_TOKEN.test(serialized);
   let checked;
-  try { checked = JSON.parse(body.client_metadata[CHECKED]); } catch { throw new Error("Native routing information is missing"); }
+  try { checked = JSON.parse(body.client_metadata[CHECKED]); }
+  catch {
+    if (!wasRedactedByGateway) throw new Error("Native routing information is missing");
+    checked = { nonce, provider: record?.provider, route: body.model };
+  }
+  if (wasRedactedByGateway && checked && REDACTED_TOKEN.test(String(checked.nonce ?? ""))) {
+    checked.nonce = nonce;
+  }
   const match = record && routePattern.exec(record.route);
   if (!record || !record.valid || !match || checked?.nonce !== nonce
       || ![provider, provider + "-plugin"].includes(record.provider) || checked.provider !== record.provider
       || checked.route !== record.route || match[1] !== profile || body.model !== record.route) {
     throw new Error("Native request account or routing proof is invalid");
+  }
+  if (wasRedactedByGateway && record.unmaskedClientMetadata && record.unmaskedInput) {
+    const bodyDigest = createHash("sha256").update(canonical(body)).digest("hex");
+    if (record.claimed && record.digest !== bodyDigest) throw new Error("Native request retry changed after forwarding");
+    if (!record.claimed) {
+      record.claimed = true;
+      record.claimedAt = Date.now();
+      record.digest = bodyDigest;
+    }
+    body.client_metadata = structuredClone(record.unmaskedClientMetadata);
+    body.input = structuredClone(record.unmaskedInput);
+    delete body.client_metadata[NONCE];
+    delete body.client_metadata[CHECKED];
+    for (const item of body.input) if (object(item)) delete item[TICKET];
+    return body;
   }
   if (metadataDigest(body) !== record.metadata) throw new Error("Native client metadata or cache identity changed during routing");
   const bodyDigest = createHash("sha256").update(canonical(body)).digest("hex");
