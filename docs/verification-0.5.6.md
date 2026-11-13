@@ -338,3 +338,26 @@ An independent test-owned headless browser runner avoids attaching to the produc
 Browser launch then exposed a separate harness setup issue: fake Windows USERPROFILE/APPDATA/LOCALAPPDATA locations caused Chrome's default-profile debugging check to reject launch. A no-account A/B launch reproduced failure with fake OS directories and success with real OS path discovery. The live runner now preserves those OS paths while Playwright creates a separate temporary browser profile. Failed-launch runs retain their uncertainty and exact-owned-process-tree cleanup results; they are not successful model tests.
 
 The corrected isolated run reached ChatGPT but encountered human verification before any Send: zero activated/confirmed Sends, zero conversation POSTs, second arm not attempted, owned browser cleanup confirmed, source account files unchanged and zero private write attempts. Evidence: `partition-isolated-5777605f-aaf5-45ea-8967-19a9e5ed3dfb-{result,status,cut109-result}.json`. The paired online diagnostic remains incomplete; no inference about boundary-dependent recall or larger-window acceptance follows from this attempt. Existing Native parent/child success uses the plugin's authenticated browser and remains valid. GOAL remains active.
+
+## Completed partition, size and same-effort controls
+
+The later diagnostic used new temporary pages in the plugin's already authenticated browser, after an ordinary Native warmup completed. It neither completed nor bypassed the independent browser's human-verification challenge. The runner closed only its own pages and disconnected its client; it did not close/restart the shared browser, navigate existing pages, or write account storage. Original pages remained present and the selected account configuration remained unchanged. These standalone diagnostic Sends are outside installed-plugin usage coverage and are not backfilled into it.
+
+Both original 214-fragment arms completed. The same fresh 12 associations and original payload hashes were preserved; moving complete fragment 109 was the only data difference. Cut 109 recovered **0/7 stage markers and 5/5 final markers**; cut 108 recovered **0/6 and 6/6**. The crossing marker became recoverable only when it moved into the final message. Each run had two confirmed Sends, an exact first-stage response echo, linked stage/commit ancestry, linked final response, complete fragment coverage and zero observer gaps. This establishes a boundary-associated loss in these samples, not the contents of the upstream inference window.
+
+Two discriminating controls then completed:
+
+| Diagnostic | Local compiled input estimate | Actual request models | Stage recall | Final recall |
+| --- | ---: | --- | ---: | ---: |
+| Original cut 109 | 206,283 | GPT-6 → GPT-6 Thinking | 0/7 | 5/5 |
+| Original cut 108 | 206,285 | GPT-6 → GPT-6 Thinking | 0/6 | 6/6 |
+| Reduced filler, cut 109 | 92,610 | GPT-6 → GPT-6 Thinking | 7/7 | 5/5 |
+| Same effort, original cut 109 | 206,283 | GPT-6 Thinking → GPT-6 Thinking | 0/7 | 5/5 |
+
+The reduced-filler control retains all 214 records, their order and all 12 original associations, but keeps one in three inert filler lines. The stock planner correctly returns no split; this diagnostic explicitly forces two parts using the original compiler. It is a smaller causal control, **not** an expanded-window pass. Initial preflight incorrectly expected planner return `1`; source inspection established that `undefined` means no split, and corrected preflight passed before any browser call.
+
+The same-effort control changes only the diagnostic staging candidate from low to high. The checksum-pinned reference's original token/character fit checks, complete payloads, cut, acknowledgement and final effort remain intact. Offline worker preflight passed, and both observed requests were `gpt-6-thinking`. It still lost all seven stage markers. Therefore unifying the model/effort is insufficient to repair this large sample and is not shipped as a production fix. The smaller success supports size-dependent loss; it does not distinguish upstream history selection from model retrieval failure or establish a precise capacity threshold.
+
+All four live arms completed with confirmed owned-page cleanup. The [reviewable evidence projection](evidence/context-partition-0.5.6.json) contains counts, observed model IDs, integrity/lineage checks and hashes of the local artifacts, without account credentials, message bodies or marker values. Local result prefixes are `partition-session-79509e8b-fd9d-47dc-9607-e537ad03d90e`, `partition-small-1932b39f-5668-45cd-933b-0d2eafa1f84e` and `partition-same-mode-92f83015-62e9-4b11-8ff8-88a889da03a8`.
+
+Production code remains `e7d448e`; all 57 installed source/backend files still match. The current quota projection passes all 14 text rows: recorded Sends, `账号额度 / 未提供`, no allowance estimate, percentage or forecast (`partition-current-quota-verification.json`). No production changes were made for these experiments, so the existing full regression remains applicable. Expanded/1M acceptance and retained-source compaction parity remain open; GOAL is not complete.

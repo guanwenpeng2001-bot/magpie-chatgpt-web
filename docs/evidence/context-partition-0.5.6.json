@@ -1,0 +1,489 @@
+{
+  "schemaVersion": 1,
+  "referenceVersion": "6.1.18",
+  "originalBundleSha256": "df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1",
+  "productionCodeChanged": false,
+  "experiments": [
+    {
+      "name": "large_boundary_pair",
+      "source": "partition-session-79509e8b-fd9d-47dc-9607-e537ad03d90e-result.json",
+      "sourceSha256": "6bd99290e47b9685a92cceca0fcba79eb8f9195ce77ca21e6909f0e3f604a827",
+      "confirmedPhysicalSends": 4,
+      "installedUsageCoverage": false,
+      "cleanupConfirmed": true,
+      "accountConfigUnchanged": true,
+      "originalPagesStillPresent": true,
+      "arms": [
+        {
+          "cutAfterFragment": 109,
+          "compiledInputTokenEstimate": 206283,
+          "requestModels": [
+            "gpt-6",
+            "gpt-6-thinking"
+          ],
+          "confirmedPhysicalSends": 2,
+          "phaseRecall": {
+            "stage": {
+              "correct": 0,
+              "total": 7
+            },
+            "commit": {
+              "correct": 5,
+              "total": 5
+            }
+          },
+          "correctMarkers": 5,
+          "totalMarkers": 12,
+          "markers": [
+            {
+              "id": "RECALL_1_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            }
+          ],
+          "payloadHashesMatch": true,
+          "observerGaps": 0,
+          "completeFragmentCoverage": true,
+          "lineage": {
+            "membershipMatches": true,
+            "ambiguous": false,
+            "stageEchoExact": true,
+            "stageToCommitLinked": true,
+            "finalParentLinked": true,
+            "finalUserFullEchoObserved": false,
+            "physicalRequests": 2
+          },
+          "lineageSha256": "023a100b6ce163ed085dfa994becfed53842c421b8695f6f14e651f94e5f2cf7"
+        },
+        {
+          "cutAfterFragment": 108,
+          "compiledInputTokenEstimate": 206285,
+          "requestModels": [
+            "gpt-6",
+            "gpt-6-thinking"
+          ],
+          "confirmedPhysicalSends": 2,
+          "phaseRecall": {
+            "stage": {
+              "correct": 0,
+              "total": 6
+            },
+            "commit": {
+              "correct": 6,
+              "total": 6
+            }
+          },
+          "correctMarkers": 6,
+          "totalMarkers": 12,
+          "markers": [
+            {
+              "id": "RECALL_1_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            }
+          ],
+          "payloadHashesMatch": true,
+          "observerGaps": 0,
+          "completeFragmentCoverage": true,
+          "lineage": {
+            "membershipMatches": true,
+            "ambiguous": false,
+            "stageEchoExact": true,
+            "stageToCommitLinked": true,
+            "finalParentLinked": true,
+            "finalUserFullEchoObserved": false,
+            "physicalRequests": 2
+          },
+          "lineageSha256": "27303baf6b798057765fa9e7830ea33249fa2f3fedd3aebbc0cde2d3be5c3708"
+        }
+      ]
+    },
+    {
+      "name": "reduced_filler_control",
+      "source": "partition-small-1932b39f-5668-45cd-933b-0d2eafa1f84e-result.json",
+      "sourceSha256": "0382d435db36f3b0fde2bb273a1d1567a8bcbcdb15cfa74722eade6d1d2ea5f0",
+      "confirmedPhysicalSends": 2,
+      "installedUsageCoverage": false,
+      "cleanupConfirmed": true,
+      "accountConfigUnchanged": true,
+      "originalPagesStillPresent": true,
+      "arms": [
+        {
+          "cutAfterFragment": 109,
+          "compiledInputTokenEstimate": 92610,
+          "requestModels": [
+            "gpt-6",
+            "gpt-6-thinking"
+          ],
+          "confirmedPhysicalSends": 2,
+          "phaseRecall": {
+            "stage": {
+              "correct": 7,
+              "total": 7
+            },
+            "commit": {
+              "correct": 5,
+              "total": 5
+            }
+          },
+          "correctMarkers": 12,
+          "totalMarkers": 12,
+          "markers": [
+            {
+              "id": "RECALL_1_START",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_1_MIDDLE",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_1_END",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_2_START",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_2_MIDDLE",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_2_END",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_START",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            }
+          ],
+          "payloadHashesMatch": true,
+          "observerGaps": 0,
+          "completeFragmentCoverage": true,
+          "lineage": {
+            "membershipMatches": true,
+            "ambiguous": false,
+            "stageEchoExact": true,
+            "stageToCommitLinked": true,
+            "finalParentLinked": true,
+            "finalUserFullEchoObserved": false,
+            "physicalRequests": 2
+          },
+          "lineageSha256": "db33598beffcd2acff0dde1add96e885946c65d57442907c8c84b49d0aae180b"
+        }
+      ]
+    },
+    {
+      "name": "same_effort_control",
+      "source": "partition-same-mode-92f83015-62e9-4b11-8ff8-88a889da03a8-result.json",
+      "sourceSha256": "260fb3608e203239a81be26ade5889e7e026aba43d732cb74a09924ea20bb4de",
+      "confirmedPhysicalSends": 2,
+      "installedUsageCoverage": false,
+      "cleanupConfirmed": true,
+      "accountConfigUnchanged": true,
+      "originalPagesStillPresent": true,
+      "arms": [
+        {
+          "cutAfterFragment": 109,
+          "compiledInputTokenEstimate": 206283,
+          "requestModels": [
+            "gpt-6-thinking",
+            "gpt-6-thinking"
+          ],
+          "confirmedPhysicalSends": 2,
+          "phaseRecall": {
+            "stage": {
+              "correct": 0,
+              "total": 7
+            },
+            "commit": {
+              "correct": 5,
+              "total": 5
+            }
+          },
+          "correctMarkers": 5,
+          "totalMarkers": 12,
+          "markers": [
+            {
+              "id": "RECALL_1_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            }
+          ],
+          "payloadHashesMatch": true,
+          "observerGaps": 0,
+          "completeFragmentCoverage": true,
+          "lineage": {
+            "membershipMatches": true,
+            "ambiguous": false,
+            "stageEchoExact": true,
+            "stageToCommitLinked": true,
+            "finalParentLinked": true,
+            "finalUserFullEchoObserved": false,
+            "physicalRequests": 2
+          },
+          "lineageSha256": "0fcbab61955cdef3e730e5ce57dec456799802eb3bc4cf600f65a01a226b29f3"
+        }
+      ]
+    }
+  ],
+  "conclusions": {
+    "expandedRetentionPassed": false,
+    "smallerDiagnosticPassed": true,
+    "sameEffortSufficientToRepairLargeSample": false,
+    "serverInferenceContentsKnown": false
+  },
+  "limits": [
+    "One sample per experimental arm; no universal capacity threshold established.",
+    "Reduced filler keeps 214 records and the same 12 associations but is a separate diagnostic, not expanded-context acceptance.",
+    "Token figures are local transport sizing estimates, never account allowance or usage-card figures.",
+    "Diagnostic browser Sends bypass installed usage instrumentation and are not backfilled.",
+    "Request coverage, acknowledgements and server echo do not establish inclusion in the inference window."
+  ]
+}

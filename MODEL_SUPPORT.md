@@ -26,6 +26,8 @@ On Pro-capable accounts, Native GPT-6 Sol and GPT-5.6 Sol now retain baseline 11
 
 The runtime rejects affected full inputs at or above 111,193 before browser work, including tools and stale-catalogue requests. Compaction rejects before dropping records to fit. This is conservative mitigation, not a measured safe capacity or a lossless repair for already oversized history. Other capability tiers require their own evidence. See [verification](docs/verification-0.5.6.md).
 
+Further reference diagnostics isolate a size-dependent failure before compaction: two ~206K arms recovered every final-part marker but none from the preceding part, despite complete delivery and linked conversation ancestry. Reducing inert filler to ~93K with the same records/associations and two-part flow recovered 12/12. Keeping the original ~206K input while using High for both parts still recovered only 5/12. Neither successful sends nor eliminating the effort switch establishes a larger inference window. See the [partition evidence](docs/evidence/context-partition-0.5.6.json); these transport sizing estimates are separate from the counts-only usage card.
+
 ## Local context and usage estimates
 
 ChatGPT does not expose an official token count for this browser transport. Magpie usage is therefore a local estimate, not an OpenAI token count, quota reading or billing record. The plugin computes all values below before or while the turn runs:
