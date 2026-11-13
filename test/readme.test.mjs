@@ -23,7 +23,46 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.5\.3`\. Historical host verification used: magpie `0\.1\.3930`/);
+  assert.match(prose, /Plugin version: `0\.5\.4`\. Historical host verification used: magpie `0\.1\.3930`/);
+});
+
+test('README separates supported plan fields from unknown account allowance and live evidence', () => {
+  const section = readme.split('## Account quota and token accounting\n')[1]?.split('\n## ')[0];
+  assert.ok(section, 'account quota section exists');
+  assert.match(section, /`auth\.usage`.*Usage > Overview > Quota/);
+  assert.match(section, /`account\.planType`.*when the response contains a recognized code/);
+  assert.match(section, /`account\.isDelinquent === true`/);
+  assert.match(section, /Remaining allowance and reset times.*\*\*Unknown\*\*.*with a reason/);
+  assert.match(section, /omits `used` rather than reporting a fabricated 0% used or 100% remaining/);
+  assert.match(section, /live session response has not been inspected for this quota fix/);
+  assert.match(section, /valid session can lack `account` or a recognized plan code/);
+  assert.match(section, /Session expiry is not a quota reset or subscription renewal date/);
+  assert.match(section, /Plan names, advertised caps, local token totals and Codex `\/wham\/usage` counters are never used to infer ChatGPT remaining allowance/);
+  assert.match(section, /do not constitute live verification of the updated quota card/);
+  assert.doesNotMatch(prose, /no dedicated[^.]*quota-display workflow/i);
+});
+
+test('README keeps quota reads non-interactive and separate from request token accounting', () => {
+  const section = readme.split('## Account quota and token accounting\n')[1]?.split('\n## ')[0];
+  assert.ok(section, 'account quota section exists');
+  assert.match(section, /non-interactive `GET \/api\/auth\/session`.*10-second budget and cancellation/);
+  assert.match(section, /does not submit a model request or open a browser/);
+  assert.match(section, /session credentials and raw upstream errors are not returned/);
+  assert.match(section, /Request token accounting remains separate/);
+  assert.match(section, /per-turn input\/output records in `magpie usage --csv`/);
+  assert.match(section, /Text-route counts remain the local estimates/);
+  assert.match(section, /quota card emits no additional `input\.magpie\.usage` event/);
+});
+
+test('CHANGELOG 0.5.4 records quota support without claiming measured remaining allowance', async () => {
+  const changelog = (await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const section = changelog.split('## 0.5.4 — 2026-11-13\n')[1]?.split('\n## ')[0];
+  assert.ok(section, '0.5.4 release section exists');
+  assert.match(section, /auth\.usage/);
+  assert.match(section, /recognized plan labels and payment-attention status/);
+  assert.match(section, /remaining allowance and reset times are not fabricated or inferred/);
+  assert.match(section, /Live availability of these account fields has not been verified/);
+  assert.match(section, /Quota refresh emits no additional `input\.magpie\.usage` event/);
 });
 
 test('README records the exact verified host identity with its evidence citation', () => {

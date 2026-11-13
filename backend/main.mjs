@@ -6,6 +6,7 @@ import { LoginStates, createLoginFlow, sessionCredential, browserRead, DEFAULT_S
 import { TurnDriver } from './turn.mjs';
 import { ensureNative, hasNative, stopNative } from '../src/native/index.mjs';
 import { accountCapabilities } from '../src/native/models.mjs';
+import { readQuota } from './quota.mjs';
 
 export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
   const turnDrivers = new Map();
@@ -178,6 +179,11 @@ export async function serve(input, output, { handlers = {}, close = async () => 
           return catalogue;
         } finally { release(); }
       }
+      case 'quota': {
+        const { client, release } = clientFor(command);
+        try { return await readQuota(client, signal); }
+        finally { release(); }
+      }
       case 'session': {
         const { client, release } = clientFor(command);
         try {
@@ -224,7 +230,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
     let budgetExpired = false;
-    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, command.method === 'session' ? Math.min(timeout, 10_000) : command.method === 'nativeProvision' ? Math.max(timeout, 20 * 60_000) : timeout);
+    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, ['session', 'quota'].includes(command.method) ? Math.min(timeout, 10_000) : command.method === 'nativeProvision' ? Math.max(timeout, 20 * 60_000) : timeout);
     const entry = { controller };
     pending.set(command.id, entry);
     entry.work = (async () => {

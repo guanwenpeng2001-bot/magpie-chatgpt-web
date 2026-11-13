@@ -6,7 +6,7 @@ import { compile } from '../backend/prompt.mjs';
 import { compactToolDefinitions } from './tool-emulation.mjs';
 import { API, PROVIDER } from './hooks/config.mjs';
 import { nativeRoute } from './native/models.mjs';
-import { restore, NONCE } from './native/provenance.mjs';
+import { restore, NONCE, CHECKED, TICKET } from './native/provenance.mjs';
 import { isCompaction, textFallback } from './native/fallback.mjs';
 import { nativeTurnHeaders } from './native/compaction.mjs';
 import { adaptResponsesStream } from './native/stream.mjs';
@@ -42,19 +42,23 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
             // reasoning and compaction markers cannot select the native endpoint.
             const route = nativeRoute(request.model);
             if (route && route.profile !== current.profile) throw new BackendError('invalidRequest');
-            if (route?.daemonSupported && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
-              // restore replaces root fields with a detached snapshot. Preserve
-              // the transformed request for text fallback if native is unavailable.
-              const nativeRequest = { ...request };
-              const hasProof = nativeRequest.client_metadata?.[NONCE] !== undefined;
-              const restoreNative = () => {
-                try { restore(nativeRequest, current.profile, PROVIDER, { headerEffort }); }
-                catch (err) { throw Object.assign(new BackendError('invalidRequest'), { diagnostic: { reason: err?.message } }); }
-              };
-              if (hasProof) restoreNative();
+            // Any proof marker must validate, even with native disabled or an
+            // unsupported route. Partial/legacy proof is not an unproven turn.
+            const hasProof = [NONCE, CHECKED].some(key => Object.hasOwn(request.client_metadata ?? {}, key))
+              || (Array.isArray(request.input) && request.input.some(item => Object.hasOwn(item ?? {}, TICKET)));
+            // Restore only a detached copy; text fallback keeps the masked body.
+            const nativeRequest = { ...request };
+            if (hasProof) {
+              try { restore(nativeRequest, current.profile, PROVIDER, { headerEffort }); }
+              catch (err) { throw Object.assign(new BackendError('invalidRequest'), { diagnostic: { reason: err?.message } }); }
+              canonicalCompaction = isCompaction(nativeRequest, path, nativeTurnHeaders(nativeRequest, headers));
+            }
+            // Ordinary unproven requests use strict text conversion without
+            // starting native. Compaction retains its separate read-only path.
+            if (route?.daemonSupported && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)
+                && (hasProof || isCompaction(request, path, headers))) {
               const forwardedHeaders = nativeTurnHeaders(nativeRequest, headers);
               const compact = isCompaction(nativeRequest, path, forwardedHeaders);
-              if (hasProof) canonicalCompaction = compact;
               const target = nativeRoute(nativeRequest.model, nativeRequest.reasoning?.effort ?? headerEffort);
               if (target?.daemonSupported) {
                 let runtime;
@@ -69,8 +73,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                   preflight = false;
                   return await runtime.compaction(payload, forwardedHeaders, signal, path);
                 }
-                if (!compact && runtime && await runtime.health(signal)) {
-                  if (!hasProof) restoreNative(); // Ordinary native turns require proof.
+                if (!compact && hasProof && runtime && await runtime.health(signal)) {
                   preflight = false;
                   // Once submitted, never replay through text: tools may have run.
                   return adaptResponsesStream(await runtime.responses(payload, forwardedHeaders, signal), request);
@@ -83,10 +86,15 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
             const fallbackHeaders = new Headers(headers);
             const fallbackRoute = nativeRoute(request.model, request.reasoning?.effort ?? headerEffort);
             const effort = request.reasoning?.effort ?? headerEffort ?? fallbackRoute?.effort ?? (route ? route.slug.endsWith('-pro') ? 'max' : route.slug.endsWith('-instant') || route.slug.endsWith('-luna') ? 'low' : 'high' : undefined);
-            if (effort) fallbackHeaders.set('x-magpie-effort', effort);
-            return await textFallback(request, compact, text => loader.fetch(`${API}/messages`, {
-              body: JSON.stringify(text), headers: fallbackHeaders, signal,
-            }), signal);
+            return await textFallback(request, compact, text => {
+              // Text conversion preserves fixed Pro effort; the browser picker
+              // consumes this header, not reasoning_effort in the body.
+              const textEffort = text.reasoning_effort ?? effort;
+              if (textEffort) fallbackHeaders.set('x-magpie-effort', textEffort);
+              return loader.fetch(`${API}/messages`, {
+                body: JSON.stringify(text), headers: fallbackHeaders, signal,
+              });
+            }, signal);
           }
           const prepared = prepare(request, init.headers ?? (resource instanceof Request ? resource.headers : undefined));
           let inputEstimate = estimatePreparedInput(prepared);

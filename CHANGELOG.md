@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.4 — 2026-11-13
+
+### Native routing and responses
+
+- Publish explicit GPT-5.6 Pro and GPT-6 Pro Native selectors for Pro accounts even when Bigger Context is off. Default Plus/Pro catalogues contain 36/38 entries; Bigger Context contains 38/40. Core aliases retain their conservative limits.
+- Preserve Pro's fixed maximum effort during text fallback and honor `parallel_tool_calls: false`. Auxiliary requests without any provenance markers use strict text conversion; partial, invalid and cross-account proofs still fail closed, including when Native mode is disabled.
+- Repair multiline Markdown table cells in the checksum-pinned reference converter without changing code blocks. Recognize visible terminal service alerts in the bound response, including observed Chinese errors, without treating user text or generated Markdown as site failures.
+
+Live checks: GPT-5.6 Pro and GPT-6 Pro each read the invoice fixture, reproduced two failing tests, changed the implementation with a real tool call and passed all three tests in a second turn. The test files remained unchanged. A fresh GPT-6 Pro read-only control also passed. These are small-context checks, not proof of full-window capacity. The large-input attempts encountered upstream service alerts; the multipart attempt reached its first staging message but did not complete. An earlier additional-context trial was truncated by Codex and is explicitly excluded from capacity evidence.
+
+### Account quota
+
+- Add Magpie's `auth.usage` hook so signed-in ChatGPT Web accounts can supply an allowance card instead of being omitted and falling back to the CLI's generic Balance URL placeholder.
+- Read recognized plan labels and payment-attention status from `/api/auth/session` without model requests or browser fallback. Missing account fields, unsupported plans and read failures produce explicit unknown reasons; remaining allowance and reset times are not fabricated or inferred from plans, local token totals or Codex quotas. Live availability of these account fields has not been verified for this fix.
+- Keep existing per-request input/output token accounting unchanged. Quota refresh emits no additional `input.magpie.usage` event. Add offline coverage for the installed host contract, unknown values, cancellation, account isolation and duplicate-event prevention.
+
 ## 0.5.3 — 2026-11-13
 
 - Generate Native turn capabilities from 160 CSPRNG bits using 32 lowercase Crockford characters. Live saved-chat inspection reproduced a model changing the final token character's case. Exact schema, broker lookup and revocation remain enforced; no guessed or case-normalized tool credential is accepted.

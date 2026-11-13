@@ -94,14 +94,16 @@ export function describeNativeCatalogue(source, profile, capabilities = {}) {
         },
       }];
     }));
-    // Core aliases retain their Instant-safe limit. Expose only the larger
-    // reasoning/Pro routes, without replacing any existing model identity.
-    if (capabilities.experimentalBiggerContext === true && capabilities.solAvailable === true) {
-      for (const row of available.filter(row => /-(?:sol|pro)$/.test(row.slug))) {
+    // Pro is a stable model selection, independent of the experimental window.
+    // Core aliases retain their Instant-safe limit; Bigger additionally exposes
+    // dedicated reasoning routes without replacing any existing model identity.
+    if (capabilities.solAvailable === true) {
+      const bigger = capabilities.experimentalBiggerContext === true;
+      for (const row of available.filter(row => row.slug.endsWith('-pro') || bigger && row.slug.endsWith('-sol'))) {
         const slug = row.slug.slice('chatgpt-web/'.length);
         const id = `native/${profile}/${slug}`;
         if (!Object.hasOwn(descriptors, id)) {
-          descriptors[id] = nativeDescriptor(id, `${row.display_name} — Bigger Context`, [row]);
+          descriptors[id] = nativeDescriptor(id, `${row.display_name}${bigger ? ' — Bigger Context' : ''}`, [row]);
         }
       }
     }

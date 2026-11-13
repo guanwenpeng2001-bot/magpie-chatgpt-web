@@ -182,14 +182,14 @@ test('daemon applies deferred config only on next launch, owns checkpoint home a
 
 
 
-test('18 text plus 18 native rows stay 36 when disabled; Bigger adds only exact reasoning and Pro routes', () => {
+test('Pro selectors survive Bigger Context toggles; only their budgets and labels change', () => {
   const source = Object.fromEntries(['gpt-6', 'gpt-5-6', ...Array.from({ length: 16 }, (_, i) => `fixture-${i}`)]
     .map(slug => [slug, { name: slug, limit: { context: 90000 }, variants: {} }]));
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
     const caps = { solAvailable: true, proAvailable, extraHighAvailable };
     const off = describeNativeCatalogue(source, 'counts', caps);
     const on = describeNativeCatalogue(source, 'counts', { ...caps, experimentalBiggerContext: true });
-    assert.equal(Object.keys({ ...source, ...off }).length, 36);
+    assert.equal(Object.keys({ ...source, ...off }).length, proAvailable ? 38 : 36);
     assert.equal(Object.keys({ ...source, ...on }).length, proAvailable ? 40 : 38);
     assert.deepEqual(on['native/counts/gpt-6'], off['native/counts/gpt-6']);
     for (const key of Object.keys(off)) assert.ok(Object.hasOwn(on, key));
@@ -207,7 +207,21 @@ test('18 text plus 18 native rows stay 36 when disabled; Bigger adds only exact 
       }
     }
     assert.equal(on['native/counts/gpt-6-sol'].limit.context, proAvailable ? 240000 : 120000);
-    if (proAvailable) assert.equal(on['native/counts/gpt-6-pro'].limit.context, 316667);
+    for (const family of ['gpt-6', 'gpt-5.6']) {
+      const key = `native/counts/${family}-pro`;
+      if (proAvailable) {
+        assert.equal(off[key].limit.context, 105556);
+        assert.equal(on[key].limit.context, 316667);
+        assert.doesNotMatch(off[key].name, /Bigger Context/);
+        assert.match(on[key].name, /Bigger Context/);
+        assert.deepEqual(Object.keys(off[key].variants), ['max']);
+        assert.deepEqual(Object.keys(on[key].variants), ['max']);
+        assert.equal(nativeRoute(key, 'high').effort, 'max');
+      } else {
+        assert.equal(off[key], undefined);
+        assert.equal(on[key], undefined);
+      }
+    }
     assert.equal(on['native/counts/gpt-5.6-sol'].limit.context, proAvailable ? 316667 : 266667);
     const duplicate = { ...source, 'gpt-6-sol': { name: 'Existing Sol' } };
     const merged = describeNativeCatalogue(duplicate, 'counts', { ...caps, experimentalBiggerContext: true });

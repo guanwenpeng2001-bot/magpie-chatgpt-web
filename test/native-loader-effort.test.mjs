@@ -6,8 +6,8 @@ import { onProvider } from '../src/native/middleware.js';
 
 const auth = { type: 'oauth', refresh: 'fixture', profile: 'effort-test' };
 
-function capturedRequest(t, { reasoning, metadata = { thread_id: 'effort-thread', turn_id: 'effort-turn' }, trigger = false, source = {} } = {}) {
-  const model = `native/${auth.profile}/gpt-6`;
+function capturedRequest(t, { slug = 'gpt-6', reasoning, metadata = { thread_id: 'effort-thread', turn_id: 'effort-turn' }, trigger = false, source = {} } = {}) {
+  const model = `native/${auth.profile}/${slug}`;
   const body = { model: `chatgpt-web/${model}`, stream: false,
     input: [{ type: 'message', id: 'user-1', role: 'user', content: 'Inspect the fixture.',
       internal_chat_message_metadata_passthrough: { turn_id: 'effort-turn', content_item_kinds: ['user_message'] } },
@@ -180,6 +180,42 @@ for (const state of ['unavailable', 'unhealthy']) {
     assert.match(commands[0].prompt, /\{\{PATH_ab12cd34\}\}/);
     assert.doesNotMatch(commands[0].prompt, /Inspect the fixture\./);
   });
+}
+
+for (const state of ['startup-failed', 'unhealthy', 'disabled']) {
+  for (const [slug, selectionModel] of [['gpt-5.6-pro', 'gpt-5-6-pro'], ['gpt-6-pro', 'gpt-6-pro'], ['gpt-6', 'gpt-6-high']]) {
+    test(`${slug} preserves its text selection and masked content when native is ${state}`, async t => {
+      const body = capturedRequest(t, { slug });
+      body.reasoning = { effort: 'high' }; // Provider conversion default, after canonical capture.
+      body.input[0].content = 'Inspect {{PATH_ab12cd34}}.';
+      const commands = [];
+      let lookups = 0;
+      const loader = await makeLoader({
+        input: { magpie: { option: (_provider, name) => name === 'native-tools' ? state !== 'disabled' : undefined } },
+        native: { runtime: async () => {
+          lookups++;
+          if (state === 'startup-failed') throw new Error('fixture startup failure');
+          return { health: async () => false, responses: () => assert.fail('must not submit native') };
+        } },
+        bridge: { async open(command) {
+          commands.push(command);
+          const stream = (async function* () { yield { type: 'delta', index: 0, text: 'Done.' }; yield { type: 'finish', reason: 'complete' }; })();
+          stream.close = () => {};
+          return stream;
+        } },
+      })(async () => auth);
+      const response = await loader.fetch('http://127.0.0.1:1/v1/responses', {
+        body: JSON.stringify(body), headers: { 'x-magpie-effort': 'high' },
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('x-chatgptweb-engine'), 'text-fallback');
+      assert.equal(lookups, state === 'disabled' ? 0 : 1);
+      assert.equal(commands.length, 1);
+      assert.match(commands[0].prompt, /\{\{PATH_ab12cd34\}\}/);
+      assert.doesNotMatch(commands[0].prompt, /Inspect the fixture\./);
+      assert.equal(commands[0].selectionModel, selectionModel);
+    });
+  }
 }
 
 test('unavailable native compaction retains canonical intent and rejects text summarization', async t => {

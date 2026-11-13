@@ -68,11 +68,18 @@ export function toTextRequest(body, compact = false) {
     'gpt-5.6-luna': 'auto',
   };
   const model = !route ? body.model : (legacyMap[slug] ?? slug);
+  // Fixed Pro identities must survive vendor defaults such as effort=high.
+  const effort = route && ['gpt-5.6-pro', 'gpt-6-pro'].includes(slug) ? 'max' : body.reasoning?.effort;
   const choice = body.tool_choice;
+  let toolChoice = choice ? typeof choice === 'string' ? { type: choice === 'required' ? 'any' : choice }
+    : { type: 'tool', name: choice.namespace ? `${choice.namespace}.${choice.name}` : choice.name } : undefined;
+  if (!compact && body.parallel_tool_calls === false) {
+    // An omitted Responses choice still permits at most one call.
+    toolChoice = { ...(toolChoice ?? { type: 'auto' }), disable_parallel_tool_use: true };
+  }
   return { model, system, messages, tools, stream: false, max_tokens: body.max_output_tokens ?? 34834,
-    ...(body.reasoning?.effort ? { reasoning_effort: body.reasoning.effort } : {}),
-    ...(!compact && choice ? { tool_choice: typeof choice === 'string' ? { type: choice === 'required' ? 'any' : choice }
-      : { type: 'tool', name: choice.namespace ? `${choice.namespace}.${choice.name}` : choice.name } } : {}) };
+    ...(effort ? { reasoning_effort: effort } : {}),
+    ...(!compact && toolChoice ? { tool_choice: toolChoice } : {}) };
 }
 
 // v6.1.18 responses/compaction.ts SUMMARY_PREFIX: v1 and memento install
