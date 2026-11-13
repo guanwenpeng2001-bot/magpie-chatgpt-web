@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5 — 2026-11-13
+
+- Shorten quota-card status to Chinese, including `剩余额度` and `未知：接口未返回额度`. Keep distinct failure reasons, text-only rendering, account state and token accounting behavior.
+- Document the installed per-model windows, Codex's separate 95% effective display and 90% compaction trigger, variable summary length, and checkpoint restart behavior. Do not advertise universal 1M Web support or successful full-window retention.
+- Clarify that reference v6.1.18 Limits uses local send receipts and static policies, not a verified upstream remaining/reset interface.
+
 ## 0.5.4 — 2026-11-13
 
 ### Native routing and responses

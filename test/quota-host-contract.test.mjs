@@ -59,7 +59,7 @@ test('installed Magpie usage contract preserves unknown quota and cancellation (
     assert.equal(result.windows[0].balance, null);
     assert.equal(result.windows[0].aside, true);
     assert.equal(result.error, '', 'show the fixed reason as a text window, not a hidden tooltip');
-    assert.match(result.windows[0].display, /^Unknown — .+/);
+    assert.match(result.windows[0].display, /^未知：.+/);
     assert.equal(result.signIn, value?.code === 'expired' ? 'expired' : 'kept');
     assert.equal(result.until, '');
     assert.equal(result.windows[0].resetsAt, '');
@@ -128,8 +128,8 @@ test('installed UI treats Go-normalized text windows as unknown, not 100% left',
   });
   // Sanitized window shape from diagnosis-054-quota-live.json. No account id,
   // email, credentials or live reads belong in this regression fixture.
-  const window = { name: 'ChatGPT allowance', used: 0, remaining: 100,
-    display: 'Unknown — ChatGPT did not report remaining allowance or reset times in the verified account response.', text: true };
+  const window = { name: '剩余额度', used: 0, remaining: 100,
+    display: '未知：接口未返回额度', text: true };
   const card = { provider: 'chatgpt-web', name: 'ChatGPT Web', kind: 'subscription',
     plan: 'ChatGPT Pro (prolite)', windows: [window] };
   for (const left of [false, true]) {
@@ -139,10 +139,10 @@ test('installed UI treats Go-normalized text windows as unknown, not 100% left',
     assert.equal(ui.quotaPace({ ...window, startsAt: '2026-01-01', resetsAt: '2026-02-01' }, Date.parse('2026-01-15')), null);
     const rendered = ui.quotaWindows(card);
     assert.equal(tracks(rendered), 0, 'text-only window must not attach a percentage meter');
-    assert.match(visibleText(rendered), /Unknown/);
+    assert.match(visibleText(rendered), /未知/);
     assert.doesNotMatch(visibleText(rendered), /\d+(?:\.\d+)?%/);
     const panel = ui.panelQuotaCard(card);
-    assert.match(visibleText(panel), /Unknown/);
+    assert.match(visibleText(panel), /未知/);
     assert.doesNotMatch(visibleText(panel), /\d+(?:\.\d+)?%|Not used yet/);
 
     // Positive control: an explicitly measured zero must still show its meter

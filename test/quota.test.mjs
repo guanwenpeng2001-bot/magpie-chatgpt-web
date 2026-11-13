@@ -16,7 +16,7 @@ const session = { accessToken: 'private-access', refresh: 'private-cookie', user
   expires: '2099-01-01T00:00:00Z' };
 const noShare = result => {
   assert.equal(result.windows.length, 1);
-  assert.match(result.windows[0].display, /^Unknown — .+/);
+  assert.match(result.windows[0].display, /^未知：.+/);
   assert.equal(result.windows[0].aside, true);
   for (const field of ['used', 'amount', 'limit', 'balance', 'resetsAt', 'resetSecs']) {
     assert.equal(Object.hasOwn(result.windows[0], field), false, `${field} must not be fabricated`);
@@ -86,7 +86,7 @@ test('missing/unsupported plans and payment problems remain explicit unknowns', 
     assert.deepEqual(snapshot, { state: 'unknown', reason, ...(planType ? { planType } : {}) });
     const result = await usageHook({ bridge: { call: async () => snapshot } })(async () => auth);
     noShare(result);
-    if (reason === 'payment-attention') assert.match(result.windows[0].display, /payment issue/);
+    if (reason === 'payment-attention') assert.match(result.windows[0].display, /订阅付款异常/);
   }
 });
 
@@ -104,7 +104,7 @@ test('read failures show fixed reasons, never vendor error text or an invented p
     noShare(result);
     assert.equal(result.signIn, code === 'expired' ? 'expired' : 'kept');
     assert.doesNotMatch(JSON.stringify(result), /private-/);
-    if (code === 'cooldown') assert.match(result.windows[0].display, /does not establish/);
+    if (code === 'cooldown') assert.match(result.windows[0].display, /查询限流/);
   }
   const result = await usageHook({ bridge: { call: async () => { throw Error('private-cookie'); } } })(async () => auth);
   noShare(result);
@@ -116,7 +116,7 @@ test('malformed backend replies never become quota readings', async () => {
   for (const response of [null, {}, { state: 'known', used: 10 }, { state: 'unknown', reason: 'secret' }]) {
     const result = await usageHook({ bridge: { call: async () => response } })(async () => auth);
     noShare(result);
-    assert.match(result.windows[0].display, /supported format/);
+    assert.match(result.windows[0].display, /响应格式不支持/);
   }
 });
 

@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.5.4`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.5.5`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Native tools mode
 
@@ -138,7 +138,31 @@ The text provider declares `npm: '@ai-sdk/anthropic'` for **Anthropic-wire emula
 
 In the text backend, visible browser turns read only the rendered DOM answer, so hidden intermediate stream messages cannot terminate a normal thinking response. Headless mode retains its optional SSE reader. DOM snapshots are the primary answer carrier, polled every 500 ms. That polling interval is an implementation setting, not measured delivery cadence. A best-effort SSE reader may carry the answer; `x-chatgptweb-route: dom|sse` identifies the route. DOM text can lose formatting. Clone unavailability is logged as an observation change, not a fabricated successful answer or an independent failure code. Whole-block delivery is acceptable; progressive or token-level streaming is not verified. An interrupted or unterminated answer remains an error.
 
+## Context windows and compaction in Codex
+
+Web entries do **not** all have a verified 1M context window. A model's underlying capacity, the browser request envelope, and the catalogue value used by Codex are different limits. Increasing a catalogue value does not increase the browser's ability to retain history.
+
+The following values were read from the installed Magpie catalogue on the tested Pro-capable account. Bigger Context was enabled; it remains experimental. `K` means 1,000 tokens. Other account capabilities or host overrides can change these values.
+
+| Entry | Published window | Codex effective display (95%) | Default compaction trigger (90%) |
+| --- | ---: | ---: | ---: |
+| Native GPT-5.6 Pro / GPT-6 Pro | 105,556 | 100,278 | 95,000 |
+| Native GPT-6 Sol, Bigger Context | 240,000 | 228,000 | 216,000 |
+| Native GPT-5.6 Sol, Bigger Context | 316,667 | 300,833 | 285,000 |
+| Text reasoning / Work and their Text fallback entries | 90,000 | 85,500 | 81,000 |
+| Text mini / conservative unknown routes | 41,000 | 38,950 | 36,900 |
+
+These are configuration values, not successful full-window recall results. Without Bigger Context, supported Native Sol and Pro entries on this account publish 105,556 tokens. Grouped entries use the smallest window among their efforts. Unsupported entries do not become usable merely because a window is listed. GPT-6 Sol's reference target is 220,000, but this Magpie plugin contract cannot forward a separate per-model compaction threshold: Codex's 90% default starts at 216,000, earlier than that target. The current global Codex configuration has no `model_context_window` or `model_auto_compact_token_limit` override.
+
+The reference's 1,050,000 Luna value is a separate rolling-checkpoint route. Its ordinary Free browser request budget is 28,000 tokens. That value is not evidence that a single Web request, every Work model, or the two Pro models can retain 1M tokens. Reference Bigger Context itself also uses smaller, model-specific limits.
+
+Codex monitors estimated context usage and starts compaction at its configured threshold; `/compact` can request it explicitly. **90% is the trigger, not a fixed summary compression ratio.** The Native adapter asks the model for a continuation summary preserving progress, decisions, constraints, relevant results and unfinished work. Codex continues from the summary and retained messages. Summary length varies, and summarization can lose detail; it does not provide lossless expansion of the model window. Files already edited on disk remain on disk and can be read again.
+
+The Native daemon records authenticated continuation state in an account-owned encrypted checkpoint store. A short live session compacted, survived a daemon restart, then read files and passed tests again. If that daemon or checkpoint state is unavailable, the plugin rejects Native compaction/continuation rather than silently substituting an unauthenticated text summary. Full large-window retention remains unverified: the Pro ~276K trials recovered only 4/12 markers. Pro expansion is consequently disabled, with a 112,193 compiled-input guard. See [the live evidence](docs/verification-0.5.4.md).
+
 ## Account quota and token accounting
+
+Version 0.5.5 uses compact Chinese card wording: **剩余额度 / 未知：接口未返回额度**. Expiry, verification, payment issues and query failures retain distinct short reasons. The inspected reference v6.1.18 Limits screen counts local send receipts against static policies; it explicitly excludes usage outside its launcher. It does not supply a verified upstream remaining/reset response. This plugin does not present those local counts as actual ChatGPT quota.
 
 From 0.5.4, the plugin supplies Magpie's `auth.usage` hook for the signed-in account's card under **Usage > Overview > Quota**. Without that hook, `magpie quota chatgpt-web --json` can return the host's generic `kind: "balance"` placeholder asking for a Balance URL and Balance field. That placeholder does not establish that ChatGPT Web needs a balance endpoint.
 
