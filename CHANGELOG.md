@@ -2,6 +2,7 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Preserve discovered tool contracts in Native tool-search results delivered through the live broker and prompt replay. Use the existing browser inventory projection for names, schemas, tool kinds and polling limits; oversized results direct the model to paginated inventory instead of dropping or truncating schema fields. Host arguments and authentication are unchanged.
 - Add automatic-compaction guidance to preserve original names, labels and key/value associations, prefer source evidence over assistant relabeling, and retain uncertainty instead of reconstructing missing history. Applies to inline and multipart final prompts with existing budgeting; does not promise lossless recall.
 - Add opt-in Native CLI `--skills-context-tokens 1..10000` for skill discovery within the existing context budget. Omission restores base/default inheritance; other profiles and model/compaction limits are unchanged.
 - Add an isolated `--native` Codex CLI profile using built-in OpenAI and Magpie's validated `/backend-api/codex` endpoint. Preserve Native provenance and catalogue limits without changing the user's main config, credentials or generic HTTP profile.
