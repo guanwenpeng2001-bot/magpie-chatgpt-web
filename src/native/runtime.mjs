@@ -35,6 +35,7 @@ const ownershipEntry = 'let Qe=ed(e,f),N=await De.getOrCreateAfterOwnerRetiremen
 // unchanged so existing authenticated continuation records remain readable.
 const executionIdentity = 'function Nu(e,t){return xs("sha256").update(JSON.stringify({modelId:e.modelId,reasoning:e.options.reasoning,payload:t})).digest("hex")}';
 const instructionIdentity = 'let t=_i(e).map((r)=>xs("sha256").update(JSON.stringify([r.itemId??null,r.content])).digest("hex")),n=t.pop();';
+const summaryDecoder = 'function $n(e){if(!e.startsWith(ni))return null;';
 const cliSha256 = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
 const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})';
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
@@ -206,6 +207,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     const executionIdentity = ${JSON.stringify(executionIdentity)}, instructionIdentity = ${JSON.stringify(instructionIdentity)};
     if (source.split(executionIdentity).length !== 2 || source.split(instructionIdentity).length !== 2)
       throw new Error('Native semantic identity compatibility mismatch');
+    const summaryDecoder = ${JSON.stringify(summaryDecoder)};
+    if (source.split(summaryDecoder).length !== 2) throw new Error('Native summary decoder compatibility mismatch');
     const usageStart = ${JSON.stringify(usageSubmissionStart)}, usageEnd = ${JSON.stringify(usageSubmissionEnd)};
     if (source.split(usageStart).length !== 2 || source.split(usageEnd).length !== 2)
       throw new Error('Native send receipt compatibility mismatch');
@@ -241,6 +244,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     let contents = source.replace(before, ${JSON.stringify('console.info("[chatgpt-web] compaction_phase entered");' + sharedCompactionGate)})
       .replace(executionIdentity, executionIdentity.replace('JSON.stringify(', 'identityJson('))
       .replace(instructionIdentity, instructionIdentity.replace('JSON.stringify(', 'identityJson('))
+      .replace(summaryDecoder, 'function $n(e){if(e.startsWith("magpie1:"))return decodeMagpieSummary(e);if(!e.startsWith(ni))return null;')
       .replace(retirement, 'console.info("[chatgpt-web] compaction_phase retiring");' + retirement + ';console.info("[chatgpt-web] compaction_phase retired")')
       .replace(ownership, 'let Qe=ed(e,f),magpieLineage=$f(f),magpieOwnership=ownershipSnapshot({executionKey:re,ownerKey:O,sourceKey:f._compactionRequest?p+":"+$u(f):undefined,instruction:magpieLineage,model:f.modelId,reasoning:f.options.reasoning,identity:ve,revision:_i(f).at(-1),compaction:f._compactionRequest===true});if(magpieOwnership)console.info("[chatgpt-web] ownership "+JSON.stringify(magpieOwnership));let N=await De.getOrCreateAfterOwnerRetirement(re,O,()=>C(f,D,Qe,R),Qe,v.abortSignal,qe,ve.threadId,magpieLineage),K=Df(f)')
       .replace(usageStart, 'let magpieUsageIndex=0,magpieLegacyUsage=async()=>{if(!o)return;let E=ho(),z;')
@@ -268,6 +272,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { ownershipSnapshot } from ' + JSON.stringify(new URL('./ownership-diagnostics.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { identityJson } from ' + JSON.stringify(new URL('./identity-json.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { decodeMagpieSummary } from ' + JSON.stringify(new URL('./summary-envelope.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
     contents = patchReferenceFixes(contents);
     return { contents, loader: 'js' };

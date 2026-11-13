@@ -2,6 +2,7 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Read Magpie's transparent `magpie1:` compaction envelope after canonical request restoration, so completed-work summaries reach Native models and survive daemon restart. Require canonical base64 and valid UTF-8; keep exact checkpoint scope/summary authentication and existing `ocx1:` support.
 - Ignore JSON object key order in process-local Native execution, round and instruction identities. Automatic compaction can now match a pending source tool when Magpie re-encodes identical content in a different field order. Preserve string/array ordering, exact capabilities, ownership checks and the existing encrypted checkpoint format.
 - Add durable account-scoped physical-Send accounting for Native and text Chat: rolling 24-hour/7-day counts, model/effort breakdowns, deduplication, multipart/compaction attribution, recording start and observation gaps. Show recorded counts only, without estimated remaining allowance, historical budgets or forecasts. Unreported account allowance is labeled 未提供. Refreshing the card does not add usage or change routing availability.
 - Classify visible terminal service alerts before initial assistant selection or after an established assistant binding disappears, only when the original submitted user message is proven and no competing turn exists. Support virtualized multipart history using local formatter provenance; preserve ordinary rebinding, bounded observation recovery and error identities. Alerts behind surviving stale bindings remain outside this fallback.
