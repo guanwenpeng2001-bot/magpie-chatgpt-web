@@ -36,6 +36,13 @@ const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url
 const markdownGfmSetup = 'Vt.use(fC);';
 const proContextGuard = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
 const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
+// Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
+// and multipart reconciliation. This classifies failure only; it never rebinds.
+const submittedAlertAnchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
+// Provenance is recorded only at the actual local multipart formatter call sites,
+// never inferred from user-supplied text that happens to resemble a wrapper.
+const submittedStageBaseline = 'let V=await this.captureSubmissionBaseline(O,z.text,ze);';
+const submittedFinalBaseline = 'let oe=await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),ae=';
 
 // The 275K live multipart test delivered all stages but recovered only 4/12
 // independent markers, even when all stages used Pro. Do not advertise or
@@ -165,6 +172,7 @@ export function compactionPreloadSource(cliPath) {
   // is unchanged and the verified download is never modified. Fail closed on drift.
   return `import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
+import { patchReferenceFixes } from ${JSON.stringify(new URL('./reference-fixes.mjs', import.meta.url).href)};
 const entry = ${JSON.stringify(resolve(cliPath))};
 Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
   build.onLoad({ filter: /[\\\\/]cli\\.js$/ }, async ({ path }) => {
@@ -183,6 +191,12 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(markdown).length !== 2) throw new Error('Native markdown table compatibility mismatch');
     const terminal = ${JSON.stringify(terminalErrorDetector)};
     if (source.split(terminal).length !== 2) throw new Error('Native terminal alert compatibility mismatch');
+    const submittedAlert = ${JSON.stringify(submittedAlertAnchor)};
+    if (source.split(submittedAlert).length !== 2) throw new Error('Native submitted alert compatibility mismatch');
+    const submittedStage = ${JSON.stringify(submittedStageBaseline)};
+    const submittedFinal = ${JSON.stringify(submittedFinalBaseline)};
+    if (source.split(submittedStage).length !== 2 || source.split(submittedFinal).length !== 2)
+      throw new Error('Native submitted multipart provenance compatibility mismatch');
     const contextGuard = ${JSON.stringify(proContextGuard)};
     if (source.split(contextGuard).length !== 2) throw new Error('Native Pro context guard compatibility mismatch');
     const roundGuard = ${JSON.stringify(proRoundGuard)};
@@ -194,8 +208,11 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(tokenFactory).length !== 2) throw new Error('Native turn token compatibility mismatch');
     if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
       throw new Error('Native checkpoint persistence compatibility mismatch');
-    const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+    let contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
+      .replace(submittedAlert, 'await this.reconcileMultipartHistory(e,t,i,r);await nativeSubmittedTerminalAlert(this,e,t,n,i,r,q,nativeTerminalErrorAlert);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])')
+      .replace(submittedStage, 'let V=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,z.text,ze),A,"stage",E+1,c.multipart.parts.length,z.text);')
+      .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
       .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')
       .replace(roundGuard, 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
@@ -209,7 +226,9 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
       + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
       + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
-      + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')};
+      + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
+    contents = patchReferenceFixes(contents);
     return { contents, loader: 'js' };
   });
 } });

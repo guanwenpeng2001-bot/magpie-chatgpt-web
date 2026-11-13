@@ -18,6 +18,14 @@ integration added later. The codex-chatgpt-web MIT notice is retained below.
 
 Native runtime integration (src/native/runtime.mjs and src/native/daemon.mjs):
 
+src/native/reference-fixes.mjs ports bounded browser/environment fixes from
+codex-chatgpt-web commit f08d16509e6a5447a0d0f2943abb172c69705160 onto the
+checksum-pinned v6.1.18 bundle (source baseline
+1cc49aaa627a995d3f0cf2f971fde7f764996649): atomic restored-draft replacement,
+Mermaid preview-shell cleanup, UUID subagent inventories in calendar deltas,
+and capability-menu activation. These in-memory adaptations retain the MIT
+notice below; they do not replace or update the downloaded runtime bundle.
+
 - codex-chatgpt-web v6.1.18 Windows amd64 runtime:
   https://github.com/miuuyy/codex-chatgpt-web/releases/download/v6.1.18/codex-chatgpt-web-windows-amd64.zip
   Archive SHA-256: 813690d379fd2fc91b0c95a54ab94026e9f53c53a5d43c39eeca98947cbf3fea

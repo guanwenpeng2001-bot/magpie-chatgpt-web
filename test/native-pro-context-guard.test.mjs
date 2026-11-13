@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import { patchReferenceFixes } from '../src/native/reference-fixes.mjs';
 import { compactionPreloadSource, nativeRoot } from '../src/native/runtime.mjs';
 
 const pinnedHash = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
@@ -22,9 +23,10 @@ async function preload(bytes, checksum = pinnedHash) {
   const script = compactionPreloadSource(entry)
     .replace("import { createHash } from 'node:crypto';", '')
     .replace("import { resolve } from 'node:path';", '')
+    .replace(`import { patchReferenceFixes } from ${JSON.stringify(new URL('../src/native/reference-fixes.mjs', import.meta.url).href)};`, '')
     .replace(pinnedHash, checksum);
   runInNewContext(script, {
-    createHash, resolve, Buffer, TextDecoder,
+    createHash, resolve, Buffer, TextDecoder, patchReferenceFixes,
     Bun: {
       plugin({ setup }) { setup({ onLoad(_options, callback) { onLoad = callback; } }); },
       file(path) {

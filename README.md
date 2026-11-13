@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.5.5`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.5.6`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Native tools mode
 
@@ -181,6 +181,8 @@ The live JSON window contains `used: 0`, `remaining: 100` and `text: true`. Thos
 Request token accounting remains separate. The reported live checks for both Pro models already produced per-turn input/output records in `magpie usage --csv`; a missing quota card did not mean those requests were uncounted. Text-route counts remain the local estimates described above. Reading or refreshing the quota card emits no additional `input.magpie.usage` event, so it does not double-count requests. Offline tests additionally cover the installed Magpie 0.1.3930 hook contract, normalized text-window rendering and the absence of duplicate usage events. Neither the live quota result nor these tests establishes a measured remaining allowance.
 
 ## Release verification status
+
+**0.5.6 follow-up:** Near-threshold trials on installed 0.5.5 verified GPT-6 Pro read/edit/test, automatic compaction, and 12/12 marker recall after a daemon restart. GPT-5.6 Pro's automatic compaction failed once; an explicit same-thread retry succeeded, and after restart it recovered 12/12 markers, completed the edit and passed tests. Bigger GPT-6 Sol stress ended in a service error; the no-tool control failed during its first stage. Neither proves full-window retention. See [follow-up evidence and limitations](docs/verification-0.5.6.md). This release ports the reference's restored-draft, Mermaid preview, UUID calendar inventory and capability-menu fixes while keeping the original runtime checksum.
 
 **0.5.4 local verification:** GPT-5.6 Pro and GPT-6 Pro each completed a real two-turn CLI read/failing-test/edit/passing-test cycle. After installation, GPT-6 Pro compacted a short session, survived a daemon restart and read files/passed tests in that same session. Large-context transmission reached about 276K input tokens, but only 4/12 independent markers were recovered. The same retention failure occurred with no tool calls and with all-Pro staging; the experimental staging change was reverted. Pro Bigger Context is therefore disabled: stable Pro selectors publish about 105.6K and the runtime enforces the ordinary 112,193-token compiled-input boundary. No full-window success is claimed. See [verification evidence](docs/verification-0.5.4.md).
 
