@@ -5,14 +5,25 @@ export function nativeCatalog(capabilities = {}) {
   const solAvailable = capabilities?.solAvailable === true;
   const proAvailable = capabilities?.proAvailable === true;
   const extraHighAvailable = capabilities?.extraHighAvailable === true;
-  const row = (slug, context, efforts) => ({ slug: `chatgpt-web/${slug}`, display_name: slug,
-    context_window: context, supported_reasoning_levels: efforts.map(effort => ({ effort })), input_modalities: ['text', 'image'] });
-  if (!solAvailable) return [row('gpt-5.6-luna', 1050000, ['low', 'medium'])];
+  const row = (slug, context, autoCompact, efforts) => ({ slug: `chatgpt-web/${slug}`, display_name: slug,
+    context_window: context, auto_compact_token_limit: autoCompact,
+    supported_reasoning_levels: efforts.map(effort => ({ effort })), input_modalities: ['text', 'image'] });
+  if (!solAvailable) return [row('gpt-5.6-luna', 1050000, 1050000, ['low', 'medium'])];
   return ['gpt-6', 'gpt-5.6'].flatMap(family => [
-    row(`${family}-sol-instant`, proAvailable ? 111193 : 41000, ['low']),
-    row(`${family}-sol`, proAvailable ? 111193 : 90000, ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]),
-    ...(proAvailable ? [row(`${family}-pro`, 112193, ['max'])] : []),
+    row(`${family}-sol-instant`, proAvailable ? 111193 : 41000, proAvailable ? 95000 : 32000, ['low']),
+    row(`${family}-sol`, proAvailable ? 111193 : 90000, proAvailable ? 95000 : 80000, ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]),
+    ...(proAvailable ? [row(`${family}-pro`, 112193, 95000, ['max'])] : []),
   ]);
+}
+
+// Codex compacts at 90% of a model's window when the catalog names no
+// threshold, and a plugin cannot name one through Magpie. Publishing the
+// window whose 90% is the reference's measured auto-compact limit makes Codex
+// compact where the reference does, never above the real window.
+const CODEX_COMPACT_RATIO = 0.9;
+export function publishedWindow(row) {
+  const auto = Number.isSafeInteger(row.auto_compact_token_limit) ? row.auto_compact_token_limit : row.context_window;
+  return Math.min(row.context_window, Math.ceil(auto / CODEX_COMPACT_RATIO));
 }
 
 function coreFamily(slug) {
@@ -27,7 +38,7 @@ function nativeDescriptor(id, name, rows) {
     api: { id, npm: '@ai-sdk/openai', url: 'http://127.0.0.1:1/v1' },
     // Core aliases group Instant, reasoning and Pro. The published limit must
     // fit every advertised effort, including the smallest Instant window.
-    limit: { context: Math.min(...rows.map(row => row.context_window)), output: 0 },
+    limit: { context: Math.min(...rows.map(publishedWindow)), output: 0 },
     prefer_websockets: false,
     capabilities: { reasoning: true, toolcall: true, attachment: image, temperature: false,
       input: { text: true, image }, output: { text: true } },

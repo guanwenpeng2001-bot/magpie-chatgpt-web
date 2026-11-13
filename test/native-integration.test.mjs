@@ -308,14 +308,14 @@ test('namespace/custom tools retain their identity through text fallback', async
 test('catalog uses reference context windows and per-model OpenAI NPM', () => {
   assert.deepEqual(nativeCatalog({ solAvailable: false }).map(row => row.context_window), [1050000]);
   const plus = describeNativeCatalogue(nativeCatalog({ solAvailable: true }), auth.profile);
-  assert.equal(plus[model].limit.context, 90000);
-  assert.equal(plus[`${model}-instant`].limit.context, 41000);
+  assert.equal(plus[model].limit.context, 88889);
+  assert.equal(plus[`${model}-instant`].limit.context, 35556);
   assert.equal(plus[model].api.npm, '@ai-sdk/openai');
   assert.equal(plus[model].capabilities.toolcall, true);
   assert.equal(plus[model].variants.xhigh, undefined);
   const pro = describeNativeCatalogue(nativeCatalog({ solAvailable: true, proAvailable: true, extraHighAvailable: true }), auth.profile);
-  assert.equal(pro[model].limit.context, 111193);
-  assert.equal(pro['native/account-a/gpt-6-pro'].limit.context, 112193);
+  assert.equal(pro[model].limit.context, 105556);
+  assert.equal(pro['native/account-a/gpt-6-pro'].limit.context, 105556);
   assert.deepEqual(pro[model].variants.xhigh, {});
 });
 
@@ -436,7 +436,7 @@ test('native catalogue aligns 18 native-capable or explicit fallback rows with 1
     if (['gpt-6', 'gpt-5-6'].includes(slug)) {
       assert.match(descriptor.name, /\(Native tools\)$/);
       assert.equal(descriptor.capabilities.toolcall, true);
-      assert.equal(descriptor.limit.context, 41000);
+      assert.equal(descriptor.limit.context, 35556);
     } else {
       assert.equal(descriptor.capabilities.toolcall, false);
       assert.equal(descriptor.name, `${allModels[slug].name} (${['research', 'gpt-6-mini', 'chatgpt-image'].includes(slug) ? 'Native unavailable' : 'Text fallback'})`);
