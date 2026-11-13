@@ -138,36 +138,30 @@ export async function createRuntimeKeyViaUi(page, {
     const existing = page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
     requireValue(await existing.count() === 0, 'keyUi');
     await create.click();
-    const dialog = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Create secret key', exact: true }) });
+    const dialog = page.getByRole('dialog', { name: 'Create new secret key' });
     await dialog.waitFor({ state: 'visible', timeout: timeoutMs });
-    await choose(dialog, page, 'Owned by', 'You');
-    await (await visibleChoice([
-      dialog.getByRole('textbox', { name: 'Name', exact: true }),
-      dialog.getByLabel('Name', { exact: true }),
-      dialog.getByRole('textbox', { name: 'Name (optional)', exact: true }),
-    ])).fill(name);
-    await choose(dialog, page, 'Project', projectName);
-    await choose(dialog, page, 'Permissions', 'Restricted');
-    const tunnels = dialog.getByRole('row').filter({ has: page.getByText('Tunnels', { exact: true }) });
-    requireValue(await tunnels.count() === 1, 'keyUi');
-    const use = tunnels.getByRole('radio', { name: 'Use', exact: true });
-    if (await use.count() === 1 && await use.isVisible()) {
-      await use.check();
-    } else {
-      const picker = await visibleChoice([
-        tunnels.getByRole('combobox'),
-        tunnels.getByRole('button', { name: /^(None|Read|Write|Use|All)$/ }),
-      ]);
-      if (await picker.evaluate(element => element.tagName) === 'SELECT') {
-        await picker.selectOption({ label: 'Use' });
-      } else {
-        await picker.click();
-        await (await visibleChoice([
-          page.getByRole('option', { name: 'Use', exact: true }),
-          page.getByRole('menuitem', { name: 'Use', exact: true }),
-        ])).click();
-      }
+    // Measured 2026-11-13: owner and permission groups are Radix radio buttons;
+    // Project and each permission row use a span[role=button] select trigger
+    // whose listbox renders in a separate popover outside the dialog.
+    await dialog.getByRole('radio', { name: 'You', exact: true }).click();
+    await dialog.locator('input').first().fill(name);
+    await dialog.locator('span[role=button]').filter({ hasText: /Select project/ }).click();
+    await page.getByRole('option', { name: projectName, exact: true }).first().click();
+    // Create stays disabled until an expiration is chosen; the picker may open
+    // by itself right after the project is selected.
+    const never = page.getByRole('option', { name: /^(Never|永不过期)$/ }).first();
+    if (!await never.isVisible().catch(() => false)) {
+      await dialog.locator('span[role=button]').filter({ hasText: /Select an expiration|选择有效期/ }).click();
     }
+    await never.click();
+    await dialog.getByRole('radio', { name: 'Restricted', exact: true }).click();
+    const tunnelsTrigger = await dialog.getByRole('button', { name: 'Tunnels', exact: true })
+      .evaluate(element => element.parentElement?.querySelector('span[role=button]')?.id ?? '');
+    requireValue(tunnelsTrigger, 'keyUi');
+    await page.locator(`[id="${tunnelsTrigger}"]`).click();
+    await page.getByRole('listbox').getByRole('option', { name: 'Use', exact: true }).click();
+    await page.locator(`[id="${tunnelsTrigger}"]`).click();
+    requireValue(/2 selected permissions/.test(await dialog.getByText(/selected permission/).innerText()), 'keyUi');
     const responsePromise = page.waitForResponse(
       response => matchesPost(response, `${API}/dashboard/organizations/${organizationId}/projects/${projectId}/api_keys`),
       { timeout: timeoutMs },
@@ -269,8 +263,8 @@ function checked(response, code, allow404 = false) {
   return response.data;
 }
 
-function connectorFrom(data) { return data?.connector ?? data; }
-function linkFrom(data) { return data?.link ?? data; }
+function connectorFrom(data) { return data && Object.hasOwn(data, 'connector') ? data.connector : data; }
+function linkFrom(data) { return data && Object.hasOwn(data, 'link') ? data.link : data; }
 
 /**
  * Provision one profile, serially (the caller must serialize use of stateFile).
@@ -430,7 +424,7 @@ export async function provisionNativeHarness({
     if (state.linkId) requireValue(link?.id === state.linkId);
     if (link) {
       requireValue(!link.connector_id || link.connector_id === state.connectorId);
-      requireValue(link.name === connectorName);
+      requireValue(!link.name || link.name === connectorName);
     } else {
       link = linkFrom(checked(await request('/backend-api/aip/connectors/links/noauth', {
         method: 'POST', body: { connector_id: state.connectorId, name: connectorName, action_names: [] },

@@ -216,7 +216,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
     let budgetExpired = false;
-    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, command.method === 'session' ? Math.min(timeout, 10_000) : timeout);
+    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, command.method === 'session' ? Math.min(timeout, 10_000) : command.method === 'nativeProvision' ? Math.max(timeout, 20 * 60_000) : timeout);
     const entry = { controller };
     pending.set(command.id, entry);
     entry.work = (async () => {
@@ -246,7 +246,6 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         }
         await send({ id: command.id, event: 'done', ...metadata });
       } catch (error) {
-        if (process.env.MAGPIE_CHATGPT_WEB_DEBUG) process.stderr.write('DEBUG ' + command.method + ' ' + (error?.stack ?? error) + '\n');
         if (!stopping) await send({ id: command.id, event: 'error', error: publicError(budgetExpired ? new BackendError('requestBudget') : error) }).catch(() => {});
       } finally {
         clearTimeout(timer);

@@ -34,10 +34,25 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
           const path = new URL(resource instanceof Request ? resource.url : resource).pathname;
           if (/\/responses(?:\/compact)?$/.test(path)) {
             const headers = init.headers ?? (resource instanceof Request ? resource.headers : undefined);
-            const compact = isCompaction(request, path);
+            const compact = isCompaction(request, path, headers);
             if (path.endsWith('/responses/compact') && request.stream === undefined) request.stream = false;
             const route = nativeRoute(request.model);
             if (route && route.profile !== current.profile) throw new BackendError('invalidRequest');
+            if (compact && route && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
+              let runtime;
+              try { runtime = await native.runtime(current); } catch { /* retain legacy fallback if native is unavailable */ }
+              if (runtime?.compaction) {
+                // Restore filtered canonical history when it carries the local routing proof.
+                // Header-only compact requests also arrive without item provenance; this
+                // dedicated read-only runtime cannot bind or invoke a local tool environment.
+                if (request.client_metadata?.['x-magpie-native-nonce']) {
+                  try { restore(request, current.profile, PROVIDER); }
+                  catch { throw new BackendError('invalidRequest'); }
+                }
+                preflight = false;
+                return await runtime.compaction({ ...request, model: route.model }, headers, signal, path);
+              }
+            }
             if (!compact && route && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
               let runtime;
               try { runtime = await native.runtime(current); } catch { /* use text when startup failed */ }

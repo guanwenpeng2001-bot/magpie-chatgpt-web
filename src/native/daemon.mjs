@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { CompactionService, compactionProxy } from './compaction.mjs';
 
 export async function writePrivate(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -24,10 +25,11 @@ export async function freePort() {
 
 export const quoteMcpCommand = args => args.map(arg => '"' + String(arg).replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"').join(' ');
 
-export function daemonProxy({ port, controlToken }, fetchImpl = globalThis.fetch) {
+export function daemonProxy({ port, controlToken, compaction }, fetchImpl = globalThis.fetch) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid native daemon port');
   const base = `http://127.0.0.1:${port}`;
   return {
+    ...(compaction ? { compaction: compactionProxy(compaction, fetchImpl) } : {}),
     async health(signal) {
       try {
         const response = await fetchImpl(`${base}/healthz`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2000)]) : AbortSignal.timeout(2000), redirect: 'error' });
@@ -51,14 +53,17 @@ export function daemonProxy({ port, controlToken }, fetchImpl = globalThis.fetch
 export class NativeDaemon {
   constructor({ home, runtimeCommand, tunnelBinary, chromeExecutablePath, storageState, capabilities = {}, appName = 'Codex Magpie',
     spawn = spawnProcess, fetch = globalThis.fetch, allocatePort = freePort, sleep = delay,
-    startupTimeoutMs = 30_000, pollMs = 200, restartBaseMs = 1000, restartMaxMs = 30_000, env = process.env }) {
+    startupTimeoutMs = 30_000, pollMs = 200, restartBaseMs = 1000, restartMaxMs = 30_000, env = process.env,
+    compactionIdleMs = 60_000 }) {
     Object.assign(this, { home, runtimeCommand, tunnelBinary, chromeExecutablePath, storageState, capabilities, appName,
       spawn, fetch, allocatePort, sleep, startupTimeoutMs, pollMs, restartBaseMs, restartMaxMs, env });
     this.ready = false;
     this.desired = false;
     this.failures = 0;
+    this.compactionIdleMs = compactionIdleMs;
   }
-  descriptor() { return { port: this.config.port, controlToken: this.config.controlToken, capabilities: this.capabilities }; }
+  descriptor() { return { port: this.config.port, controlToken: this.config.controlToken, capabilities: this.capabilities,
+    ...(this.compactionService ? { compaction: this.compactionService.descriptor() } : {}) }; }
   start(credentials) {
     if (this.stopping) return this.stopping.then(() => this.start(credentials));
     this.credentials = credentials ?? this.credentials;
@@ -132,6 +137,9 @@ export class NativeDaemon {
       return status.process_running === true && status.healthy === true && status.ready === true;
     }, signal);
     signal.throwIfAborted();
+    this.compactionService = new CompactionService(this, { writePrivate, idleMs: this.compactionIdleMs });
+    await this.compactionService.listen();
+    signal.throwIfAborted();
     this.ready = true;
     this.startedAt = Date.now();
     return this;
@@ -185,6 +193,8 @@ export class NativeDaemon {
   }
   responses(body, headers, signal) { return this.proxy.responses(body, headers, signal); }
   async cleanup() {
+    await this.compactionService?.stop();
+    this.compactionService = null;
     const child = this.child;
     const done = this.childDone;
     this.child = null;

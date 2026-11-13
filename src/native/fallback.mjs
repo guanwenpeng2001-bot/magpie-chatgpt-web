@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { nativeRoute } from './models.mjs';
 
-export function isCompaction(body, path) {
+export function isCompaction(body, path, headers) {
   if (path.endsWith('/responses/compact')) return true;
-  let turn = body.client_metadata?.['x-codex-turn-metadata'];
+  if (Array.isArray(body?.input) && body.input.some(item => item?.type === 'compaction_trigger')) return true;
+  let turn = new Headers(headers).get('x-codex-turn-metadata') ?? body?.client_metadata?.['x-codex-turn-metadata'];
   if (typeof turn === 'string') { try { turn = JSON.parse(turn); } catch { return false; } }
   return turn?.request_kind === 'compaction';
 }

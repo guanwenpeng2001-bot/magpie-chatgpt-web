@@ -36,51 +36,109 @@ function browserResponse(url, data, status = 200, method = 'POST') {
 }
 
 class FakeLocator {
-  constructor(page, kind, name, parent) { Object.assign(this, { page, kind, name, parent }); }
-  getByRole(kind, { name } = {}) { return new FakeLocator(this.page, kind, name, this); }
+  constructor(page, kind, name, parent, exact = false) { Object.assign(this, { page, kind, name, parent, exact }); }
+  getByRole(kind, { name, exact } = {}) { return new FakeLocator(this.page, kind, name, this, exact); }
+  getByText(name, { exact } = {}) { return new FakeLocator(this.page, 'text', name, this, exact); }
   getByLabel(name) { return new FakeLocator(this.page, 'label', name, this); }
-  getByText(name) { return new FakeLocator(this.page, 'text', name, this); }
-  filter({ has }) { this.filterName = has.name; return this; }
+  locator(selector) { return new FakeLocator(this.page, 'selector', selector, this); }
+  first() { this.firstOnly = true; return this; }
+  filter({ has, hasText }) { this.has = has; this.hasText = hasText; return this; }
+  matches(value) { return this.name instanceof RegExp ? this.name.test(value) : this.exact ? this.name === value : value.includes(this.name); }
   async count() {
-    const { server } = this.page;
+    const { page } = this;
+    const { server } = page;
+    const inDialog = this.parent?.kind === 'dialog' && await this.parent.count() === 1;
+    const inForm = inDialog && page.phase === 'form';
     if (this.kind === 'row') {
-      if (this.filterName === KEY_NAME) return server.keys.filter(key => key.name === KEY_NAME).length;
-      return this.filterName === 'Tunnels' && !server.missingTunnelsRow ? 1 : 0;
+      return page.phase === 'list' && this.has?.kind === 'text'
+        ? server.keys.filter(key => this.has.matches(key.name)).length : 0;
     }
-    if (this.kind === 'dialog') return this.page.phase === 'form' || this.page.phase === 'secret' ? 1 : 0;
-    if (this.kind === 'radio') return server.uiMode === 'radio' && ['You', 'Restricted', 'Use'].includes(this.name) ? 1 : 0;
-    if (this.kind === 'label') return this.name === 'Project' || (server.uiMode !== 'radio' && ['Owned by', 'Permissions'].includes(this.name)) ? 1 : 0;
-    if (this.kind === 'combobox') return 1;
-    if (this.kind === 'textbox') return this.name === (server.optionalName ? 'Name (optional)' : 'Name') ? 1 : 0;
-    if (this.kind === 'option') return 1;
-    if (this.kind === 'menuitem' || this.kind === 'text') return 0;
-    if (this.kind === 'button') return ['Create new secret key', 'Create secret key', 'Done'].includes(this.name) ? 1 : 0;
+    if (this.kind === 'dialog') {
+      if (this.parent !== page) return 0;
+      return (page.phase === 'form' && (!this.name || this.matches('Create new secret key')))
+        || (page.phase === 'secret' && !this.name) ? 1 : 0;
+    }
+    if (this.kind === 'label') return inForm && server.nameLabel && this.matches(server.nameLabel) ? 1 : 0;
+    if (this.kind === 'radio') return inForm && ['You', 'Restricted'].some(name => this.matches(name)) ? 1 : 0;
+    if (this.kind === 'selector') {
+      // The first input is the name field, even when its accessible label varies.
+      if (inForm && this.name === 'input') return this.firstOnly ? 1 : 2;
+      if (inForm && this.name === 'span[role=button]') {
+        return (this.hasText?.test('Select project') && !page.form.project)
+          || (this.hasText?.test('Select an expiration') && page.form.project && !page.form.expiration) ? 1 : 0;
+      }
+      if (this.parent === page && this.name === `[id="${server.tunnelsTriggerId}"]`) {
+        return page.phase === 'form' && page.form.permissions === 'Restricted' && !server.missingTunnelsRow ? 1 : 0;
+      }
+      return 0;
+    }
+    // Both menus are portals outside the dialog. Use remains open after selection.
+    if (this.kind === 'listbox') return this.parent === page && page.openMenu === 'tunnels' ? 1 : 0;
+    if (this.kind === 'option') {
+      if (this.parent === page && page.openMenu === 'project' && this.matches('Default project')) return 1;
+      if (this.parent === page && page.openMenu === 'expiration' && this.matches('Never')) return 1;
+      return this.parent?.kind === 'listbox' && await this.parent.count() === 1 && this.matches('Use') ? 1 : 0;
+    }
+    if (this.kind === 'text') return inForm && page.form.permissions === 'Restricted' && this.matches(page.permissionText()) ? 1 : 0;
+    if (this.kind === 'button') {
+      if (this.name === 'Create new secret key') return this.parent === page && page.phase === 'list' ? 1 : 0;
+      if (this.name === 'Tunnels') return inForm && page.form.permissions === 'Restricted' && !server.missingTunnelsRow ? 1 : 0;
+      if (this.name === 'Create secret key') return inForm && !page.openMenu ? 1 : 0;
+      if (this.name === 'Done') return inDialog && page.phase === 'secret' ? 1 : 0;
+    }
     return 0;
   }
   async isVisible() { return (await this.count()) === 1; }
   async waitFor() { assert.equal(await this.isVisible(), true); }
-  async evaluate(fn) { return fn({ tagName: this.page.server.uiMode === 'select' ? 'SELECT' : 'BUTTON' }); }
-  async selectOption({ label }) { this.page.recordChoice(label); }
-  async check() { assert.equal(await this.count(), 1); this.page.recordChoice(this.name); }
-  async fill(value) { assert.equal(await this.count(), 1); this.page.form.name = value; }
+  async evaluate(fn) {
+    assert.equal(await this.count(), 1);
+    assert.equal(this.kind, 'button');
+    assert.equal(this.name, 'Tunnels');
+    return fn({ parentElement: { querySelector: selector => {
+      assert.equal(selector, 'span[role=button]');
+      return this.page.server.missingTunnelsTrigger ? null : { id: this.page.server.tunnelsTriggerId };
+    } } });
+  }
+  async innerText() { assert.equal(await this.count(), 1); return this.page.permissionText(); }
+  async fill(value) {
+    assert.equal(await this.count(), 1);
+    assert.equal(this.kind, 'selector');
+    assert.equal(this.name, 'input');
+    assert.equal(this.firstOnly, true);
+    this.page.form.name = value;
+  }
   async click() {
     const { page } = this;
     assert.equal(await this.count(), 1);
+    if (this.kind === 'selector') {
+      if (this.name === 'span[role=button]') {
+        page.openMenu = this.hasText?.test('Select an expiration') ? 'expiration' : 'project';
+      }
+      else { page.openMenu = page.openMenu === 'tunnels' ? null : 'tunnels'; page.tunnelsTriggerClicks++; }
+      return;
+    }
+    if (this.kind === 'radio') { page.recordChoice(this.name); return; }
     if (this.name === 'Create new secret key') { page.phase = 'form'; return; }
     if (this.name === 'Create secret key') {
       page.server.trip('keySubmit');
-      assert.deepEqual(page.form, { owner: 'You', name: KEY_NAME, project: 'Default project', permissions: 'Restricted', tunnels: 'Use' });
+      assert.deepEqual(page.form, { owner: 'You', name: KEY_NAME, project: 'Default project', expiration: 'Never', permissions: 'Restricted', tunnels: 'Use' });
+      assert.equal(page.openMenu, null);
+      assert.equal(page.tunnelsTriggerClicks, 2);
       page.server.keys.push({ name: page.form.name });
       page.server.created.key++;
       page.phase = 'secret';
       // Wrong methods, origins and projects must never satisfy the interceptor.
       page.emit(browserResponse(KEY_URL, { key: { sensitive_id: 'sk-wrong-method' } }, 200, 'GET'));
+      page.emit(browserResponse(KEY_URL.replace('https://api.openai.com', 'https://example.com'), { key: { sensitive_id: 'sk-wrong-origin' } }));
       page.emit(browserResponse(KEY_URL.replace('proj-initial', 'proj-other'), { key: { sensitive_id: 'sk-wrong-project' } }));
       page.emit(browserResponse(KEY_URL, { key: { sensitive_id: page.server.keyValue } }, page.server.keyStatus));
       return;
     }
     if (this.name === 'Done') { page.server.trip('closeDialog'); page.phase = 'list'; return; }
-    if (this.kind === 'option') page.recordChoice(this.name);
+    if (this.kind === 'option') {
+      page.recordChoice(this.name instanceof RegExp ? 'Never' : this.name);
+      if (page.openMenu === 'project' || page.openMenu === 'expiration') page.openMenu = null;
+    }
   }
 }
 
@@ -91,10 +149,16 @@ class FakePage extends FakeLocator {
     this.server = server;
     this.waiters = [];
     this.form = {};
+    this.openMenu = null;
+    this.tunnelsTriggerClicks = 0;
     this.closed = false;
   }
+  permissionText() {
+    const count = this.server.selectedPermissionCount ?? (this.form.tunnels === 'Use' ? 2 : 0);
+    return `${count} selected permissions`;
+  }
   recordChoice(name) {
-    const field = { You: 'owner', Restricted: 'permissions', Use: 'tunnels', 'Default project': 'project' }[name];
+    const field = { You: 'owner', Restricted: 'permissions', Use: 'tunnels', 'Default project': 'project', Never: 'expiration' }[name];
     assert.ok(field, `Unknown UI choice: ${name}`);
     this.form[field] = name;
   }
@@ -146,7 +210,7 @@ class FakeServer {
     this.loginStatus = 200;
     this.keyStatus = 200;
     this.keyValue = KEY;
-    this.uiMode = 'radio';
+    this.tunnelsTriggerId = 'radix-:tunnels:';
     this.tunnels = [];
     this.keys = [];
     this.connectors = [];
@@ -434,11 +498,10 @@ test('tunnel polling ends at two minutes without real sleeps or connector creati
   assert.equal(server.created.connector, 0);
 });
 
-for (const mode of ['radio', 'select', 'dropdown']) {
-  test(`key UI helper supports ${mode} controls and checkpoints before closing`, async () => {
+for (const nameLabel of ['Name', 'Name (optional)', '']) {
+  test(`key UI helper fills the first input (${nameLabel || 'unlabeled'}) and checkpoints before closing`, async () => {
     const server = new FakeServer();
-    server.uiMode = mode;
-    server.optionalName = true;
+    server.nameLabel = nameLabel;
     const page = new FakePage(server);
     let saved = false;
     const key = await createRuntimeKeyViaUi(page, {
@@ -471,6 +534,26 @@ test('missing Tunnels permission row fails before submitting a broad-permission 
   await rejectsSafely(() => provision(options), 'keyUi');
   assert.equal(server.created.key, 0);
 });
+
+test('missing Tunnels trigger fails before key submission', async t => {
+  const { options, server } = await fixture(t);
+  server.missingTunnelsTrigger = true;
+  await rejectsSafely(() => provision(options), 'keyUi');
+  assert.equal(server.created.key, 0);
+});
+
+for (const count of [0, 1, 3]) {
+  test(`wrong selected permission count (${count}) fails before submitting or saving a key`, async t => {
+    const { options, server, state, pages } = await fixture(t);
+    server.selectedPermissionCount = count;
+    await rejectsSafely(() => provision(options), 'keyUi');
+    assert.equal(pages[0].tunnelsTriggerClicks, 2);
+    assert.equal(pages[0].openMenu, null);
+    assert.equal(server.created.key, 0);
+    assert.deepEqual(server.secrets, []);
+    assert.equal((await state()).runtimeKey, undefined);
+  });
+}
 
 test('invalid key response never reaches saveSecret or checkpoint', async t => {
   const { options, server, state } = await fixture(t);
