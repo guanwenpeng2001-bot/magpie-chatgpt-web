@@ -83,10 +83,20 @@ export function checkpointStore(home) {
       let temporary;
       try {
         while (map.size > 256) map.delete(map.keys().next().value);
-        const next = serialize(map);
-        validated(JSON.parse(next));
+        let next = serialize(map);
+        const entries = JSON.parse(next);
+        validated(entries);
+        let size = Buffer.byteLength(next, 'utf8');
+        // Bound both entry count and retained bytes. A full byte budget must
+        // not permanently prevent new tasks from replacing older checkpoints.
+        let removed = 0;
+        while (size > MAX_BYTES && map.size > 1) {
+          size -= Buffer.byteLength(JSON.stringify(entries[removed]), 'utf8') + 1;
+          map.delete(entries[removed++][0]);
+        }
+        if (size > MAX_BYTES) throw fail();
+        if (removed) next = serialize(map);
         const bytes = Buffer.from(next, 'utf8');
-        if (bytes.length > MAX_BYTES) throw fail();
         // Refuse replaced/link targets and keys instead of silently overwriting.
         let current;
         try { current = regular(statePath, MAX_BYTES + 64); } catch (error) { if (error.code !== 'ENOENT') throw error; }

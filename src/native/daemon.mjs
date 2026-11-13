@@ -249,7 +249,10 @@ export class NativeDaemon {
     return new Promise((resolve, reject) => {
       signal?.throwIfAborted();
       let output = '', settled = false;
-      const child = this.spawn(this.tunnelBinary, args, { cwd: this.home, env: this.childEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      // The broker's MCP subprocess reads no checkpoints and must not become
+      // a second store owner through the tunnel client's inherited environment.
+      const { MAGPIE_NATIVE_CHECKPOINT_HOME: _checkpointHome, ...tunnelEnv } = this.childEnv;
+      const child = this.spawn(this.tunnelBinary, args, { cwd: this.home, env: tunnelEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       this.commandChildren.add(child);
       const finish = (error, data) => {
         if (settled) return;

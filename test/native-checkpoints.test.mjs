@@ -79,3 +79,56 @@ test('invalid scope or source digest is rejected and cannot persist authorizatio
     assert.equal(store.map.size, 0);
   }
 });
+
+
+function ordinaryEntry(n, content) {
+  return { summaryHash: digest(`summary-${n}`), sourceHashes: new Set([digest([`turn-${n}`, content])]),
+    source: { turnId: `turn-${n}`, itemId: `task-${n}`, content }, sourceWasSyntheticInstruction: false };
+}
+
+test('32 MiB cumulative budget evicts least recently used ordinary tasks and permits further durable writes', t => {
+  const home = fixture(t), store = checkpointStore(home);
+  // Each source is 12 MiB in UTF-8 but only 4 Mi characters: enforce bytes,
+  // independently of the 256-record limit and JavaScript string length.
+  const content = '中'.repeat(4 * 1024 * 1024);
+  assert.equal(Buffer.byteLength(content, 'utf8'), 12 * 1024 * 1024);
+  store.map.set(scope(1), ordinaryEntry(1, content));
+  store.map.set(scope(2), ordinaryEntry(2, content));
+  store.commit();
+  assert.deepEqual([...checkpointStore(home).map.keys()], [scope(1), scope(2)]);
+  const touched = store.map.get(scope(1));
+  store.map.delete(scope(1)); store.map.set(scope(1), touched);
+  store.map.set(scope(3), ordinaryEntry(3, content));
+  store.commit();
+  assert.deepEqual([...store.map.keys()], [scope(1), scope(3)], 'byte eviction honors the LRU touch and protects the newest task');
+  const reopened = checkpointStore(home);
+  assert.deepEqual([...reopened.map.keys()], [scope(1), scope(3)]);
+  assert.equal(reopened.map.get(scope(3)).source.content, content);
+  assert.ok(reopened.map.get(scope(3)).sourceHashes instanceof Set);
+  reopened.map.set(scope(4), ordinaryEntry(4, content));
+  reopened.commit();
+  const final = checkpointStore(home);
+  assert.deepEqual([...final.map.keys()], [scope(3), scope(4)], 'a reopened full store must keep accepting new tasks');
+  assert.equal(final.map.get(scope(4)).source.content, content);
+  assert.ok(readFileSync(join(home, 'checkpoints.bin')).length <= 32 * 1024 * 1024 + 28);
+});
+
+test('a single oversized newest task rejects and restores prior authorization, disk bytes and LRU order', t => {
+  const home = fixture(t), store = checkpointStore(home);
+  store.map.set(scope(1), entry(1)); store.map.set(scope(2), entry(2)); store.commit();
+  const file = join(home, 'checkpoints.bin'), before = readFileSync(file);
+  const durable = checkpointStore(home).map;
+  store.map.get(scope(1)).summaryHash = digest('uncommitted replacement');
+  // Content alone reaches the limit; its valid checkpoint framing exceeds it.
+  store.map.set(scope(3), ordinaryEntry(3, 'a'.repeat(32 * 1024 * 1024)));
+  assert.throws(() => store.commit(), /Native checkpoint persistence unavailable/);
+  assert.deepEqual(readFileSync(file), before);
+  assert.deepEqual(store.map, durable, 'rollback must restore records temporarily evicted while attempting the oversized commit');
+  assert.deepEqual([...store.map.keys()], [scope(1), scope(2)]);
+  assert.deepEqual(checkpointStore(home).map, durable);
+  store.map.set(scope(3), ordinaryEntry(3, 'small retry'));
+  store.commit();
+  const restored = checkpointStore(home).map;
+  assert.deepEqual([...restored.keys()], [scope(1), scope(2), scope(3)]);
+  assert.equal(restored.get(scope(3)).source.content, 'small retry');
+});

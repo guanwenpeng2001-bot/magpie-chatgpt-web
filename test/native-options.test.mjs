@@ -164,7 +164,18 @@ test('daemon applies deferred config only on next launch, owns checkpoint home a
   assert.equal(children.length, 2);
   assert.equal(daemon.config.experimentalBiggerContext, true);
   assert.equal(daemon.config.useTemporaryChats, false);
-  for (const call of calls) assert.equal(call.options.env.MAGPIE_NATIVE_CHECKPOINT_HOME, home);
+  await daemon.stop(); // Include shutdown tunnel cleanup in the isolation check.
+  const serves = calls.filter(call => call.args.includes('serve'));
+  const tunnelCommands = calls.filter(call => !call.args.includes('serve'));
+  assert.equal(serves.length, 2);
+  assert.ok(tunnelCommands.some(call => call.args.includes('connect')));
+  assert.ok(tunnelCommands.some(call => call.args.includes('stop')));
+  for (const call of serves) assert.equal(call.options.env.MAGPIE_NATIVE_CHECKPOINT_HOME, home);
+  for (const call of tunnelCommands) {
+    assert.equal(Object.hasOwn(call.options.env, 'MAGPIE_NATIVE_CHECKPOINT_HOME'), false, call.args.join(' '));
+    assert.equal(call.options.env.CODEX_CHATGPT_WEB_HOME, home, 'tunnel retains its ordinary account configuration');
+  }
+  assert.equal(daemon.childEnv.MAGPIE_NATIVE_CHECKPOINT_HOME, home, 'filtering tunnel env must not mutate serve env');
   const saved = JSON.parse(await readFile(join(home, 'config.json'), 'utf8'));
   assert.equal(saved.useTemporaryChats, false);
 });
