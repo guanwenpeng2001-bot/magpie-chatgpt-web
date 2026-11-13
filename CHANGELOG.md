@@ -2,6 +2,7 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Withdraw GPT-6/GPT-5.6 Sol Bigger windows on Pro-capable accounts after complete-fragment stress tests lost marker values during compaction. Retain route identities and baseline catalogue limits, remove misleading Bigger labels, and reject oversized full inputs before sending or trimming compaction history. Other capability tiers are unchanged and remain separately unverified.
 - Read Magpie's transparent `magpie1:` compaction envelope after canonical request restoration, so completed-work summaries reach Native models and survive daemon restart. Require canonical base64 and valid UTF-8; keep exact checkpoint scope/summary authentication and existing `ocx1:` support.
 - Ignore JSON object key order in process-local Native execution, round and instruction identities. Automatic compaction can now match a pending source tool when Magpie re-encodes identical content in a different field order. Preserve string/array ordering, exact capabilities, ownership checks and the existing encrypted checkpoint format.
 - Add durable account-scoped physical-Send accounting for Native and text Chat: rolling 24-hour/7-day counts, model/effort breakdowns, deduplication, multipart/compaction attribution, recording start and observation gaps. Show recorded counts only, without estimated remaining allowance, historical budgets or forecasts. Unreported account allowance is labeled 未提供. Refreshing the card does not add usage or change routing availability.

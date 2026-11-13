@@ -43,7 +43,7 @@ const local = await readUsage(scope, { signal });
 Parent integration points (outside this feature's file ownership):
 
 1. Native: prepare the receipt at the existing pinned `usageSubmission` closure, using its stable physical-Send UUID and authenticated account hash. Confirm only on the proven `onSubmitted` callback, including each real multipart Send. Pass selected family/effort, not the requested alias or token usage.
-2. Text: use a stable physical-Send ID across challenge/observation recovery; conservative confirmation can require the first nonempty generated output or completed nonempty response. An accepted-but-unconfirmed outcome is a gap. A new actual Send gets a new ID. Work/image routes are excluded from Chat estimates.
+2. Text: use a stable physical-Send ID across challenge/observation recovery; conservative confirmation can require the first nonempty generated output or completed nonempty response. An accepted-but-unconfirmed outcome is a gap. A new actual Send gets a new ID. Work/image routes are excluded from Chat Send counts.
 3. Backend quota dispatch: `readQuota(client, signal, { profile: usageProfile(command.auth.profile) })`. The reader derives the current account hash from the same noninteractive session read, adds sanitized `local` statistics, and leaves actual allowance state `unknown`.
 
 ## Persistence and validation

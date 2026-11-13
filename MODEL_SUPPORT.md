@@ -18,6 +18,12 @@ The six ordinary Chat alias catalogue rows (`-instant`, `-thinking`, `-pro` for 
 
 Explicit Native GPT-5.6 Pro and GPT-6 Pro selectors remain available with Bigger Context off. Their published window stays approximately 105.6K with a reference 95K compaction target. Bigger Context does not enlarge Pro: ~276K live requests delivered all parts but recovered only 4/12 distributed markers in tool/no-tool controls. The runtime rejects compiled Pro input at or above 112,193 tokens before browser work, including clients holding an older 316.7K catalogue. This is the ordinary reference boundary, not a claim that every input below it has been exhaustively validated. The source history is never truncated to make it fit.
 
+## Sol large-context limitation (0.5.6)
+
+On Pro-capable accounts, Native GPT-6 Sol and GPT-5.6 Sol now retain baseline 111,193 input / 95,000 compaction settings even when Bigger Context is enabled; the published window is 105,556. Their dedicated route IDs remain available, without a Bigger Context label. Renewed near-window tests delivered every fragment, but compaction summaries preserved only 7/12 and 4/12 marker values respectively. GPT-6 finished the tool workflow; GPT-5.6 timed out after compaction. Neither passed the full-window retention gate.
+
+The runtime rejects affected full inputs at or above 111,193 before browser work, including tools and stale-catalogue requests. Compaction rejects before dropping records to fit. This is conservative mitigation, not a measured safe capacity or a lossless repair for already oversized history. Other capability tiers require their own evidence. See [verification](docs/verification-0.5.6.md).
+
 ## Local context and usage estimates
 
 ChatGPT does not expose an official token count for this browser transport. Magpie usage is therefore a local estimate, not an OpenAI token count, quota reading or billing record. The plugin computes all values below before or while the turn runs:

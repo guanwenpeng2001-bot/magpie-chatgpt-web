@@ -48,6 +48,10 @@ const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url
 const markdownGfmSetup = 'Vt.use(fC);';
 const proContextGuard = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
 const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
+// Xt is the pinned compiler. I contains all restored records here, before
+// compaction fit recovery can splice older messages out of T.
+const solCompileGuard = 'A=T.length,I=v(T);if(!e._compactionRequest)return I;';
+const solTrimGuard = 'while(b()&&T.length>1){let y=_===0?1:0;';
 // Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
 // and multipart reconciliation. This classifies failure only; it never rebinds.
 const submittedAlertAnchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
@@ -68,6 +72,25 @@ const submittedFinalBaseline = 'let oe=await this.captureSubmissionBaseline(O,Be
 export function assertNativeProContext(inputTokens, effort, AdapterError) {
   if (effort === 'max' && inputTokens >= 112193) {
     throw new AdapterError('Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+      status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
+    });
+  }
+}
+
+// Routing normalizes both Sol families to gpt-5.6-sol, preserving the actual
+// family in _chatgptModelFamily (worker modelFamily). Do not infer family from
+// a UI label, the staging effort, the Bigger toggle or caller window metadata.
+export function nativeSolContextGuarded(modelId, family, effort, capabilities) {
+  return modelId === 'gpt-5.6-sol' && (family === '6' || family === '5.6') && capabilities?.proAvailable === true
+    && ['medium', 'high', 'xhigh'].includes(effort);
+}
+
+export function assertNativeSolContext(inputTokens, modelId, family, effort, capabilities, AdapterError, requiresTrimming = false) {
+  if (!nativeSolContextGuarded(modelId, family, effort, capabilities)) return;
+  if (requiresTrimming || inputTokens >= 111193) {
+    throw new AdapterError(requiresTrimming
+      ? `GPT-${family} Sol compaction cannot fit the complete history without dropping records. Reduce the supplied history explicitly or use another verified route; no history was silently removed.`
+      : `GPT-${family} Sol input exceeds the guarded 111,193-token baseline limit for Pro-capable accounts. Larger-context retention has not passed verification. Reduce the supplied history explicitly or use another verified route; automatic compaction of this oversized history is not guaranteed.`, {
       status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
     });
   }
@@ -234,6 +257,9 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(contextGuard).length !== 2) throw new Error('Native Pro context guard compatibility mismatch');
     const roundGuard = ${JSON.stringify(proRoundGuard)};
     if (source.split(roundGuard).length !== 2) throw new Error('Native Pro round guard compatibility mismatch');
+    const solCompileGuard = ${JSON.stringify(solCompileGuard)}, solTrimGuard = ${JSON.stringify(solTrimGuard)};
+    if (source.split(solCompileGuard).length !== 2 || source.split(solTrimGuard).length !== 2)
+      throw new Error('Native Sol pre-trim context guard compatibility mismatch');
     const registry = ${JSON.stringify(checkpointRegistry)};
     const remember = ${JSON.stringify(checkpointRememberTail)};
     const touch = ${JSON.stringify(checkpointTouch)};
@@ -255,8 +281,10 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       .replace(submittedInitialAlert, 'if(magpieSubmittedFailure)throw magpieSubmittedFailure.error;' + submittedInitialAlert)
       .replace(submittedStage, 'let V=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,z.text,ze),A,"stage",E+1,c.multipart.parts.length,z.text);')
       .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
-      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')
-      .replace(roundGuard, 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs')
+      .replace(roundGuard, 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{let magpieInput=wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens;assertNativeProContext(magpieInput,y.effort,q);assertNativeSolContext(magpieInput,f.modelId,f._chatgptModelFamily,y.effort,R,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(solCompileGuard, 'A=T.length,I=v(T);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;')
+      .replace(solTrimGuard, 'if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
@@ -268,6 +296,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
       + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
       + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
+      + '\\n' + ${JSON.stringify(nativeSolContextGuarded.toString())}
+      + '\\n' + ${JSON.stringify(assertNativeSolContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { ownershipSnapshot } from ' + JSON.stringify(new URL('./ownership-diagnostics.mjs', import.meta.url).href) + ';')}

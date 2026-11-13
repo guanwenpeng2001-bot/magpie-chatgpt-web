@@ -17,7 +17,7 @@ export function authHook(env) {
     options: [{ key: 'visible-turns', label: 'Show browser during chats',
       description: 'Keep installed Chrome visible during chats. Leave this off for background chats; verification automatically reveals the same Chrome window for recovery.', default: false },
       { key: 'native-tools', label: 'Native tools mode', description: 'Set up native Codex tools and an OpenAI tunnel. Native mode sends the original Codex history and local paths to ChatGPT without gateway masking, so tools can use the trusted environment. Text mode remains available.', default: true },
-      { key: 'native-bigger-context', label: 'Native Bigger Context', description: 'Experimental staged context for native reference mode. Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: false },
+      { key: 'native-bigger-context', label: 'Native Bigger Context', description: 'Experimental staged context for eligible native models. Pro and GPT-6/GPT-5.6 Sol on Pro-capable accounts retain baseline limits; larger-context retention has not passed verification. / Pro 及支持 Pro 的账号上的 GPT-6/GPT-5.6 Sol 保持基础窗口，大窗口保留验证未通过。 Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: false },
       { key: 'native-temporary-chats', label: 'Native temporary chats', description: 'Use temporary ChatGPT chats in native reference mode. Turn off to save ordinary chats in ChatGPT history. Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: true }],
     async refresh(auth) { return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot }); },
     loader: makeLoader(env),

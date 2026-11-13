@@ -32,14 +32,14 @@ test('provider boolean defaults and ordinary-chat retention are explicit', () =>
   assert.match(temporary.description, /Turn off to save ordinary chats in ChatGPT history/);
 });
 
-test('Bigger Context preserves existing Sol/Luna budgets and guards Pro at baseline for every capability tier', () => {
+test('Bigger Context bounds Pro-capable Sol reasoning and Pro while preserving other tiers', () => {
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
     const rows = nativeCatalog({ solAvailable: true, proAvailable, extraHighAvailable, experimentalBiggerContext: true });
     const expected = {
       'gpt-6-sol-instant': proAvailable ? [111193, 95000] : [41000, 32000],
-      'gpt-6-sol': proAvailable ? [240000, 220000] : [120000, 110000],
+      'gpt-6-sol': proAvailable ? [111193, 95000] : [120000, 110000],
       'gpt-5.6-sol-instant': proAvailable ? [333579, 285000] : [123000, 96000],
-      'gpt-5.6-sol': proAvailable ? [333579, 285000] : [270000, 240000],
+      'gpt-5.6-sol': proAvailable ? [111193, 95000] : [270000, 240000],
       ...(proAvailable ? { 'gpt-6-pro': [112193, 95000], 'gpt-5.6-pro': [112193, 95000] } : {}),
     };
     assert.equal(rows.length, Object.keys(expected).length);
@@ -52,6 +52,29 @@ test('Bigger Context preserves existing Sol/Luna budgets and guards Pro at basel
   }
   const [luna] = nativeCatalog({ experimentalBiggerContext: true });
   assert.deepEqual([luna.context_window, luna.auto_compact_token_limit, publishedWindow(luna)], [84000, 59424, 66027]);
+});
+
+test('both Pro-capable Sol reasoning routes keep baseline budgets and honest labels with Bigger on', () => {
+  for (const extraHighAvailable of [false, true]) for (const experimentalBiggerContext of [false, true]) {
+    const caps = { solAvailable: true, proAvailable: true, extraHighAvailable, experimentalBiggerContext };
+    const rows = nativeCatalog(caps);
+    const array = describeNativeCatalogue(rows, 'guarded');
+    const object = describeNativeCatalogue({ 'gpt-6': { name: 'GPT-6' }, 'gpt-5-6': { name: 'GPT-5.6' } }, 'guarded', caps);
+    for (const family of ['gpt-6', 'gpt-5.6']) {
+      const row = rows.find(row => row.slug === `chatgpt-web/${family}-sol`);
+      assert.deepEqual([row.context_window, row.auto_compact_token_limit], [111193, 95000]);
+      const id = `native/guarded/${family}-sol`;
+      assert.equal(array[id].limit.context, 105556);
+      assert.doesNotMatch(array[id].name, /Bigger Context/);
+      if (experimentalBiggerContext) {
+        assert.equal(object[id].limit.context, 105556);
+        assert.doesNotMatch(object[id].name, /Bigger Context/);
+        assert.equal(nativeRoute(id, 'high').model, row.slug);
+      }
+    }
+  }
+  assert.match(authHook({}).options.find(row => row.key === 'native-bigger-context').description,
+    /GPT-6\/GPT-5.6 Sol on Pro-capable accounts retain baseline limits/);
 });
 
 test('native client sends live settings on provision, runtime and site capabilities; effective catalogue wins', async t => {
@@ -195,7 +218,8 @@ test('Pro selectors keep guarded budgets and names across Bigger Context toggles
     for (const key of Object.keys(off)) assert.ok(Object.hasOwn(on, key));
     const added = Object.keys(on).filter(key => !Object.hasOwn(off, key));
     for (const key of added) {
-      assert.match(on[key].name, /Bigger Context/);
+      if (proAvailable && key.endsWith('-sol')) assert.doesNotMatch(on[key].name, /Bigger Context/);
+      else assert.match(on[key].name, /Bigger Context/);
       assert.match(key, /-sol$/);
       assert.deepEqual(Object.keys(on[key].variants), ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]);
       for (const effort of Object.keys(on[key].variants)) {
@@ -205,7 +229,7 @@ test('Pro selectors keep guarded budgets and names across Bigger Context toggles
         assert.equal(route.effort, effort);
       }
     }
-    assert.equal(on['native/counts/gpt-6-sol'].limit.context, proAvailable ? 240000 : 120000);
+    assert.equal(on['native/counts/gpt-6-sol'].limit.context, proAvailable ? 105556 : 120000);
     for (const family of ['gpt-6', 'gpt-5.6']) {
       const key = `native/counts/${family}-pro`;
       if (proAvailable) {
@@ -222,7 +246,7 @@ test('Pro selectors keep guarded budgets and names across Bigger Context toggles
         assert.equal(on[key], undefined);
       }
     }
-    assert.equal(on['native/counts/gpt-5.6-sol'].limit.context, proAvailable ? 316667 : 266667);
+    assert.equal(on['native/counts/gpt-5.6-sol'].limit.context, proAvailable ? 105556 : 266667);
     const duplicate = { ...source, 'gpt-6-sol': { name: 'Existing Sol' } };
     const merged = describeNativeCatalogue(duplicate, 'counts', { ...caps, experimentalBiggerContext: true });
     assert.equal(merged['native/counts/gpt-6-sol'].name, 'Existing Sol (Native tools)');
