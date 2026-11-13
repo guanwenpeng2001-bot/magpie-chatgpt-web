@@ -76,7 +76,7 @@ export async function stopNative() {
 }
 
 /** Plugin-side facade: no browser ownership or credentials copied into requests. */
-export function nativeClient({ bridge, profileRoot, fetch = globalThis.fetch }) {
+export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch = globalThis.fetch }) {
   return {
     provision: auth => bridge.call({ method: 'nativeProvision', auth, profileRoot }),
     async runtime(auth) {
@@ -84,11 +84,12 @@ export function nativeClient({ bridge, profileRoot, fetch = globalThis.fetch }) 
       return descriptor ? daemonProxy(descriptor, fetch) : null;
     },
     async models(auth, baseModels) {
-      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot });
-      if (!descriptor) return {};
       if (baseModels && typeof baseModels === 'object' && !Array.isArray(baseModels) && Object.keys(baseModels).length) {
+        if (!await hasNative(auth, root)) return {};
         return describeNativeCatalogue(baseModels, auth.profile);
       }
+      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot });
+      if (!descriptor) return {};
       return describeNativeCatalogue(nativeCatalog(descriptor.capabilities), auth.profile);
     },
   };

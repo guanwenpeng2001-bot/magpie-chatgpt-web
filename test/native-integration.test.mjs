@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureNative, stopNative, nativeClient } from '../src/native/index.mjs';
@@ -264,7 +264,13 @@ for (const enabled of [true, false]) test(`sign-in native-tools=${enabled} is no
   assert.equal(JSON.stringify(logs).includes('secret-bearing-error'), false);
 });
 
-test('native catalogue aligns 1-to-1 with text models (18 + 18 = 36) and maps efforts to daemon routes', async () => {
+test('native catalogue aligns 1-to-1 with text models (18 + 18 = 36) and maps efforts to daemon routes', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-36-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'accounts', auth.profile), { recursive: true });
+  await writeFile(join(root, 'accounts', auth.profile, 'native.json'), JSON.stringify({
+    profile: auth.profile, tunnelId: 'tunnel_00000000000000000000000000000000', runtimeKey: 'sk-x', connectorId: 'c1', linkId: 'l1',
+  }));
   const rawCatalogue = {
     models: [
       { slug: 'gpt-5-6', title: 'GPT-5.6 Sol', enabled_tools: ['image_gen_tool_enabled'] },
@@ -287,11 +293,9 @@ test('native catalogue aligns 1-to-1 with text models (18 + 18 = 36) and maps ef
     ],
   };
   const bridge = {
-    call: async command => command.method === 'models'
-      ? rawCatalogue
-      : { port: 12345, controlToken: 'tok', capabilities: { solAvailable: true, proAvailable: true, extraHighAvailable: true } },
+    call: async () => rawCatalogue,
   };
-  const client = nativeClient({ bridge, profileRoot: 'fixture' });
+  const client = nativeClient({ bridge, profileRoot: 'fixture', root });
   const hooks = _internal.createHooks({ bridge, native: client });
   const allModels = await hooks.provider.models({}, { auth });
   const keys = Object.keys(allModels);
