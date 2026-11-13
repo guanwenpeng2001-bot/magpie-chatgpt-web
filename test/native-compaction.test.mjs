@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { NativeDaemon, daemonProxy } from '../src/native/daemon.mjs';
-import { compactionProxy } from '../src/native/compaction.mjs';
+import { nativeTurnHeaders, compactionProxy } from '../src/native/compaction.mjs';
 import { isCompaction } from '../src/native/fallback.mjs';
 import { makeLoader } from '../src/loader.mjs';
 import { prepare, complete } from '../src/native/provenance.mjs';
@@ -44,7 +44,9 @@ async function fixture(t, overrides = {}) {
       child.kill = () => { child.killed = true; child.emit('exit', 0); };
       calls.push({ file, args, options }); children.push(child);
       if (!args.includes('serve')) queueMicrotask(() => {
-        child.stdout.end(JSON.stringify({ process_running: true, healthy: true, ready: true })); child.emit('close', 0);
+        const result = args[0] === 'runtimes' && args[1] === 'list'
+          ? { aliases: [] } : { process_running: true, healthy: true, ready: true };
+        child.stdout.end(JSON.stringify(result)); child.emit('close', 0);
       });
       return child;
     },
@@ -290,4 +292,20 @@ test('loader never replays a failed compaction submission through text', async (
     native: { runtime: async () => ({ compaction: async () => { throw new Error('fixture'); } }) },
   })(async () => ({ type: 'oauth', refresh: 'fixture', profile: 'account-a' }));
   assert.equal((await loader.fetch('http://localhost/responses/compact', { body: JSON.stringify({ ...body(), model: nativeModel }) })).status, 502);
+});
+
+for (const representation of ['string', 'object']) test(`Unicode ${representation} turn metadata survives headers and both proxy hops`, async t => {
+  const metadata = { thread_id: '线程😀', turn_id: '轮次🚀', workspaces: { 'C:/项目/😀': { note: '中文\n换行 "quoted"' } } };
+  const value = representation === 'string' ? JSON.stringify(metadata) : metadata;
+  const payload = { ...body(), client_metadata: { 'x-codex-turn-metadata': value } };
+  const before = structuredClone(payload);
+  const headers = nativeTurnHeaders(payload);
+  assert.match(headers.get('x-codex-turn-metadata'), /^[\x20-\x7e]+$/);
+  assert.deepEqual(JSON.parse(headers.get('x-codex-turn-metadata')), metadata);
+  const { proxy, requests } = await fixture(t);
+  await (await proxy.compaction(payload)).text();
+  const sent = requests.find(request => request.url.endsWith('/responses/compact'));
+  assert.deepEqual(JSON.parse(sent.options.headers.get('x-codex-turn-metadata')), metadata);
+  assert.deepEqual(JSON.parse(sent.options.body).client_metadata['x-codex-turn-metadata'], value);
+  assert.deepEqual(payload, before);
 });

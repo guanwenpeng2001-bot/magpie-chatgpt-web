@@ -66,9 +66,12 @@ export async function capturePlatformSession(page, { timeoutMs = 30_000, signinT
       response => matchesPost(response, `${API}/v1/dashboard/onboarding/login`) && response.ok(),
       { timeout: signinTimeoutMs },
     );
-    await page.goto(`${PLATFORM}/settings/organization/tunnels`, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-    await page.bringToFront?.().catch?.(() => {});
-    const response = await responsePromise;
+    // Observe both promises immediately: navigation can fail before the waiter
+    // rejects, and the waiter can time out while navigation is still pending.
+    const [response] = await Promise.all([responsePromise, (async () => {
+      await page.goto(`${PLATFORM}/settings/organization/tunnels`, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      await page.bringToFront?.().catch?.(() => {});
+    })()]);
     requireValue(response.ok(), 'platformSignin');
     const { user } = await response.json();
     const org = user?.orgs?.data?.find(item => item.is_default);

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2 — 2026-11-13
+
+- Serialize Unicode turn metadata as JSON-safe ASCII HTTP headers, preserving Chinese workspace paths and emoji for native turns and compaction.
+- Refuse text fallback for native compaction and checkpoint history when the native runtime is unavailable, instead of reporting a successful but incompatible summary or dropping continuation state.
+- Hold an operating-system account ownership lock while the native daemon runs, preventing a second process from removing a live owner's tunnel alias. Surface stale-alias cleanup failures before connecting a new alias.
+- Propagate request cancellation through native runtime startup and prevent cancelled requests from falling through to text submission.
+- Observe Platform login navigation and response waiting together, preventing an unhandled delayed rejection from terminating the backend after a failed login.
+- Clarify reference feature coverage, mode-specific history and model contracts, and the downloaded runtime's third-party notices.
+
 ## 0.5.1 — 2026-11-13
 
 - Stop and remove earlier tunnel aliases of the account's profile when the native daemon starts, and remove the current alias on shutdown, so restarts no longer accumulate local runtime metadata. The remote tunnel and aliases of other profiles or tunnels are kept.

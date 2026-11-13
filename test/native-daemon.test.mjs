@@ -5,6 +5,7 @@ import { PassThrough } from 'node:stream';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn as spawnProcess } from 'node:child_process';
 import { NativeDaemon, daemonProxy, quoteMcpCommand } from '../src/native/daemon.mjs';
 
 async function fixture(t, overrides = {}) {
@@ -17,7 +18,7 @@ async function fixture(t, overrides = {}) {
     child.kill = () => { child.killed = true; child.emit('exit', null); };
     children.push(child);
     if (!args.includes('serve')) queueMicrotask(() => {
-      child.stdout.end(JSON.stringify({ process_running: true, healthy: true, ready: true }));
+      child.stdout.end(JSON.stringify(args[1] === 'list' ? { aliases: [] } : { process_running: true, healthy: true, ready: true }));
       child.emit('close', 0);
     });
     return child;
@@ -257,8 +258,9 @@ test('startup stops and removes stale aliases of this profile only, keeping the 
       { alias: foreign, profile_dir: join(home, 'other'), tunnel_id: credentials.tunnelId },
       { alias: otherTunnel, profile_dir: profileDir, tunnel_id: 'another-tunnel' },
       { alias: 'user-alias', profile_dir: profileDir, tunnel_id: credentials.tunnelId },
+      { alias: 'magpie-' + 'a'.repeat(36), profile_dir: profileDir, tunnel_id: credentials.tunnelId },
+      { alias: 'magpie-' + '-'.repeat(36), profile_dir: profileDir, tunnel_id: credentials.tunnelId },
     ] });
-    if (args[1] === 'stop' && args[2] === staleA) return Promise.reject(new Error('already stopped'));
     return original(args, signal);
   };
   await daemon.start(credentials);
@@ -274,9 +276,161 @@ test('startup stops and removes stale aliases of this profile only, keeping the 
   assert.deepEqual(commands.slice(-2).map(args => [args[1], args[2]]), [['stop', current], ['rm', current]]);
 });
 
-test('an unreadable alias list does not block startup', async t => {
-  const { daemon } = await fixture(t);
+test('an unreadable alias list blocks startup before connect and permits retry', async t => {
+  const { daemon, calls } = await fixture(t);
   const original = daemon.command.bind(daemon);
   daemon.command = (args, signal) => args[1] === 'list' ? Promise.reject(new Error('list failed')) : original(args, signal);
+  await assert.rejects(daemon.start(credentials), /startup failed/);
+  assert.equal(calls.some(call => call.args[1] === 'connect'), false);
+  daemon.command = original;
   assert.equal(await daemon.start(credentials), daemon);
+});
+
+test('same normalized home rejects a second owner before writes or commands, then stop releases it', async t => {
+  const first = await fixture(t);
+  const home = process.platform === 'win32' ? first.home.toUpperCase() : first.home;
+  const second = await fixture(t, { home: home + '/unused/..' });
+  await first.daemon.start(credentials);
+  const before = await readFile(join(first.home, 'config.json'), 'utf8');
+  await assert.rejects(second.daemon.start(credentials));
+  assert.equal(second.calls.length, 0);
+  assert.equal(await readFile(join(first.home, 'config.json'), 'utf8'), before);
+  assert.equal(second.daemon.restartTimer, null, 'contender must not retry stealing ownership');
+  await second.daemon.stop();
+  assert.equal(second.calls.length, 0);
+  await first.daemon.stop();
+  await second.daemon.start(credentials);
+  const count = first.calls.length;
+  await first.daemon.stop();
+  assert.equal(first.calls.length, count, 'old stop cannot clean a successor');
+});
+
+test('different homes can own native daemons concurrently', async t => {
+  const a = await fixture(t), b = await fixture(t);
+  await Promise.all([a.daemon.start(credentials), b.daemon.start(credentials)]);
+  assert.equal(a.daemon.ready && b.daemon.ready, true);
+});
+
+test('startup failure releases ownership after cleanup', async t => {
+  const a = await fixture(t, { restartBaseMs: 60_000, fetch: async () => Response.json({}), startupTimeoutMs: 10 });
+  const b = await fixture(t, { home: a.home });
+  await assert.rejects(a.daemon.start(credentials), /startup failed/);
+  await b.daemon.start(credentials);
+  const count = a.calls.length;
+  await a.daemon.stop();
+  assert.equal(a.calls.length, count);
+});
+
+for (const method of ['stop', 'rm']) {
+  test(`stale alias ${method} failure prevents connect and permits retry`, async t => {
+    const { daemon, home, calls } = await fixture(t, { restartBaseMs: 60_000 });
+    const original = daemon.command.bind(daemon);
+    const alias = 'magpie-11111111-1111-4111-8111-111111111111';
+    daemon.command = (args, signal) => {
+      if (args[1] === 'list') return Promise.resolve({ aliases: [{ alias, profile_dir: join(home, 'tunnel'), tunnel_id: credentials.tunnelId }] });
+      if (args[1] === method && args[2] === alias) return Promise.reject(new Error('private diagnostic'));
+      return original(args, signal);
+    };
+    await assert.rejects(daemon.start(credentials), error => error.message === 'Native daemon startup failed' && !error.cause);
+    assert.equal(calls.some(call => call.args[1] === 'connect'), false);
+    daemon.command = original;
+    await daemon.start(credentials);
+  });
+
+  test(`shutdown ${method} failure retains ownership until a successful retry`, async t => {
+    const a = await fixture(t), b = await fixture(t, { home: a.home });
+    await a.daemon.start(credentials);
+    const original = a.daemon.command.bind(a.daemon);
+    a.daemon.command = (args, signal) => args[1] === 'list'
+      ? Promise.resolve({ aliases: [{ alias: a.daemon.config.tunnel.alias }] })
+      : args[1] === method ? Promise.reject(new Error('private diagnostic')) : original(args, signal);
+    await assert.rejects(a.daemon.stop(), error => !error.message.includes('private diagnostic') && !error.cause);
+    await assert.rejects(b.daemon.start(credentials));
+    assert.equal(b.calls.length, 0);
+    a.daemon.command = original;
+    await a.daemon.stop();
+    await b.daemon.start(credentials);
+  });
+}
+
+for (const mode of ['crash', 'explicit']) {
+  test(`${mode} restart holds ownership through tunnel cleanup`, async t => {
+    const a = await fixture(t), b = await fixture(t, { home: a.home });
+    await a.daemon.start(credentials);
+    let entered, release;
+    const cleaning = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const original = a.daemon.command.bind(a.daemon);
+    a.daemon.command = async (args, signal) => {
+      if (args[1] === 'rm') { entered(); await gate; }
+      return original(args, signal);
+    };
+    const old = a.daemon.config.tunnel.alias;
+    a.daemon.allocatePort = async () => {
+      await assert.rejects(b.daemon.start(credentials), 'ownership must survive the cleanup-to-launch gap');
+      assert.equal(b.calls.length, 0);
+      return 43210;
+    };
+    let restarting;
+    if (mode === 'crash') a.children[0].emit('exit', 1);
+    else restarting = a.daemon.restart();
+    await cleaning;
+    try { await assert.rejects(b.daemon.start(credentials)); assert.equal(b.calls.length, 0); }
+    finally { release(); }
+    if (restarting) await restarting;
+    for (let i = 0; i < 100 && (!a.daemon.ready || a.daemon.config.tunnel.alias === old); i++) await new Promise(r => setTimeout(r, 5));
+    assert.equal(a.daemon.ready, true);
+    assert.notEqual(a.daemon.config.tunnel.alias, old);
+    await assert.rejects(b.daemon.start(credentials));
+  });
+}
+
+test('OS ownership rejects another process and is released after process death', { timeout: 10_000 }, async t => {
+  const { daemon, home } = await fixture(t);
+  const moduleURL = new URL('../src/native/daemon.mjs', import.meta.url).href;
+  const source = `import { NativeDaemon } from ${JSON.stringify(moduleURL)};
+    const daemon = new NativeDaemon({home:process.argv[1],runtimeCommand:[],
+      allocatePort:async()=>{process.send('owned');return new Promise(()=>{});}});
+    daemon.start({tunnelId:'fixture',runtimeKey:'fixture'}).catch(()=>process.exit(2));
+    setInterval(()=>{},1000);`;
+  const child = spawnProcess(process.execPath, ['--input-type=module', '-e', source, home], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  t.after(async () => { child.kill(); await exited; });
+  await new Promise((resolve, reject) => { child.once('message', resolve); child.once('error', reject); child.once('exit', () => reject(new Error('owner exited early'))); });
+  await assert.rejects(daemon.start(credentials));
+  child.kill();
+  await exited;
+  await daemon.start(credentials);
+});
+
+for (const inventory of [{}, { aliases: null }, { aliases: {} }]) {
+  test(`invalid inventory ${JSON.stringify(inventory)} fails closed before connect`, async t => {
+    const { daemon, calls } = await fixture(t, { restartBaseMs: 60_000 });
+    const original = daemon.command.bind(daemon);
+    daemon.command = (args, signal) => args[1] === 'list' ? Promise.resolve(inventory) : original(args, signal);
+    await assert.rejects(daemon.start(credentials), /startup failed/);
+    assert.equal(calls.some(call => call.args[1] === 'connect'), false);
+    daemon.command = original;
+    await daemon.start(credentials);
+  });
+}
+
+test('a timed-out tunnel command must exit before ownership can pass to another daemon', async t => {
+  const a = await fixture(t, { startupTimeoutMs: 100 }), b = await fixture(t, { home: a.home });
+  await a.daemon.start(credentials);
+  const original = a.daemon.spawn;
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.kill = () => true; // kill requested, but OS has not confirmed exit/close.
+  a.daemon.spawn = (file, args, options) => args[1] === 'stop' ? child : original(file, args, options);
+  try {
+    await assert.rejects(a.daemon.stop());
+    await assert.rejects(b.daemon.start(credentials));
+    assert.equal(b.calls.length, 0);
+  } finally {
+    a.daemon.spawn = original;
+    child.emit('close', 1);
+  }
+  await a.daemon.stop();
+  await b.daemon.start(credentials);
 });

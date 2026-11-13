@@ -58,7 +58,9 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
               const target = nativeRoute(nativeRequest.model, nativeRequest.reasoning?.effort ?? headerEffort);
               if (target?.daemonSupported) {
                 let runtime;
-                try { runtime = await native.runtime(current); } catch { /* use text when startup failed */ }
+                try { runtime = await native.runtime(current, signal); } catch { /* use text when startup failed */ }
+                // Cancellation is not a startup failure eligible for fallback.
+                signal?.throwIfAborted();
                 const payload = { ...nativeRequest, model: target.model,
                   ...(target.effort ? { reasoning: { ...nativeRequest.reasoning, effort: target.effort } } : {}),
                   ...(path.endsWith('/responses/compact') && nativeRequest.stream === undefined ? { stream: false } : {}) };
