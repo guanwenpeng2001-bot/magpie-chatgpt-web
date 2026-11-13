@@ -41,6 +41,26 @@ test('restores all native item metadata and opaque fields without retaining mess
   assert.deepEqual(body, {...expected, model:route});
 });
 
+test('Responses Lite routing lifts additional tools and removes only transport metadata', t => {
+  const input = original();
+  input.input.unshift({type:'additional_tools', role:'system', tools:[{type:'namespace', name:'functions', tools:[]}],
+    internal_chat_message_metadata_passthrough:{turn_id:turn, content_item_kinds:['additional_tools']}});
+  input.input[2].namespace = 'functions';
+  input.reasoning = {effort:'high', context:'all_turns'};
+  input.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite = 'true';
+  const {body} = routed(t, input);
+  assert.equal(body.input[0][TICKET], undefined);
+  body.input.shift();
+  delete body.input[1].namespace;
+  delete body.reasoning.context;
+  delete body.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite;
+  restore(body, 'account-a');
+  assert.equal(body.input[0].internal_chat_message_metadata_passthrough.turn_id, turn);
+  assert.deepEqual(body.input[1].encrypted_function_args, []);
+  assert.equal(body.input[2].encrypted_content, 'sealed-agent');
+  assert.equal(body.client_metadata.extra, 'keep');
+});
+
 for (const field of ['sandbox_mode', 'workspaces', 'turn_trigger', 'window_number']) {
   test(`binds full turn metadata, including ${field}`, t => {
     const {body} = routed(t);

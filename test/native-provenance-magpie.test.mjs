@@ -163,6 +163,15 @@ test('installed Magpie preserves native provenance through both Responses routes
     const mutation = structuredClone(original);
     mutation.client_metadata.extra = 'mutation-probe';
     requests.push({path:paths[0], body:mutation});
+    const lite = structuredClone(original);
+    const tools = lite.tools;
+    delete lite.tools;
+    lite.input.unshift({type:'additional_tools', role:'system', tools:[{type:'namespace', name:'functions', tools}],
+      internal_chat_message_metadata_passthrough:{turn_id:turnId, content_item_kinds:['additional_tools']}});
+    lite.input[3].namespace = 'functions';
+    lite.reasoning = {...lite.reasoning, context:'all_turns'};
+    lite.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite = 'true';
+    requests.push(...paths.map(path => ({path, body:lite})));
     for (const {path, body} of requests) {
       const response = await fetch(`http://127.0.0.1:${gatewayPort}${path}`, {method:'POST',
         headers:{'content-type':'application/json', authorization:'Bearer fixture', 'user-agent':'codex_cli_rs/0.162.1',
@@ -219,6 +228,13 @@ test('installed Magpie preserves native provenance through both Responses routes
         assert.equal(provider.body.input[0].internal_chat_message_metadata_passthrough.hook_mutation, true);
         assert.equal(fetched.body.__probeMiddlewareMutation, true);
         expected.input[0].internal_chat_message_metadata_passthrough.hook_mutation = true;
+      }
+      if (sent === lite) {
+        expected.input.shift();
+        delete expected.input[2].namespace;
+        expected.tools = tools;
+        delete expected.reasoning.context;
+        delete expected.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite;
       }
       assert.deepEqual(calls[index].body, expected);
       t.diagnostic(JSON.stringify({path, mutationProbe:index === 2, url:fetched.url, headers:fetched.headers,

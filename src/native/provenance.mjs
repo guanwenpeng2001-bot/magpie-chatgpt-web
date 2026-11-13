@@ -47,6 +47,8 @@ function metadataDigest(body) {
   const client = { ...body.client_metadata };
   delete client[NONCE];
   delete client[CHECKED];
+  // Plugin providers leave Responses Lite: Magpie removes this transport marker.
+  delete client.ws_request_header_x_openai_internal_codex_responses_lite;
   let raw = client["x-codex-turn-metadata"];
   if (typeof raw === "string") {
     if (raw.length > 65536) throw new Error("Native turn metadata is too large");
@@ -95,8 +97,9 @@ function strippedFields(item) {
   if (!KEPT_SEALS.has(item.type) && item.encrypted_content !== undefined) out.encrypted_content = item.encrypted_content;
   return out;
 }
-function sameIdentity(item, expected) {
-  return IDENTITY.every(field => item[field] === expected[field]);
+function sameIdentity(item, expected, fromLite) {
+  return IDENTITY.every(field => item[field] === expected[field]
+    || (fromLite && field === 'namespace' && expected[field] === 'functions' && item[field] === undefined));
 }
 
 // Magpie removes Codex item metadata before calling a normal provider. Keep
@@ -122,10 +125,14 @@ export function prepare(body, ctx = {}, provider = PROVIDER) {
   if (records.size >= MAX_RECORDS) return body;
   if (!object(body.client_metadata)) body.client_metadata = {};
   const nonce = random(), tickets = new Map();
+  const fromLite = body.input.some(item => item?.type === 'additional_tools');
   let valid = true, bytes = 0, metadata;
   try { metadata = metadataDigest(body); } catch { valid = false; }
   for (const item of body.input) {
     if (!object(item)) { valid = false; continue; }
+    // fromLite lifts these schemas into body.tools; the item is not a message.
+    // Its passthrough metadata has no surviving item to attach to.
+    if (item.type === 'additional_tools') continue;
     try {
       const fields = strippedFields(item);
       if (!Object.keys(fields).length) continue;
@@ -139,7 +146,7 @@ export function prepare(body, ctx = {}, provider = PROVIDER) {
       item[TICKET] = ticket;
     } catch { valid = false; }
   }
-  records.set(nonce, { created: Date.now(), provider: activeProvider, route, tickets, bytes, metadata, valid, claimed: false });
+  records.set(nonce, { created: Date.now(), provider: activeProvider, route, tickets, bytes, metadata, valid, fromLite, claimed: false });
   const entry = records.get(nonce);
   entry.unmaskedClientMetadata = structuredClone(body.client_metadata);
   entry.unmaskedInput = structuredClone(body.input);
@@ -220,7 +227,7 @@ export function restore(body, profile, provider = PROVIDER) {
       continue;
     }
     const stored = typeof ticket === "string" && record.tickets.get(ticket);
-    if (!stored || seen.has(ticket) || !sameIdentity(item, stored.identity)) throw new Error("Native item ticket is invalid");
+    if (!stored || seen.has(ticket) || !sameIdentity(item, stored.identity, record.fromLite)) throw new Error("Native item ticket is invalid");
     if (Object.keys(strippedFields(item)).length) throw new Error("Unexpected native metadata");
     seen.add(ticket);
     changes.push([item, stored.fields]);
