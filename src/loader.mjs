@@ -34,11 +34,18 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
           const path = new URL(resource instanceof Request ? resource.url : resource).pathname;
           if (/\/responses(?:\/compact)?$/.test(path)) {
             const headers = init.headers ?? (resource instanceof Request ? resource.headers : undefined);
+            const headerEffort = new Headers(headers).get('x-magpie-effort') ?? undefined;
             const compact = isCompaction(request, path, headers);
             if (path.endsWith('/responses/compact') && request.stream === undefined) request.stream = false;
-            const route = nativeRoute(request.model);
+            const route = nativeRoute(request.model, request.reasoning?.effort ?? headerEffort);
             if (route && route.profile !== current.profile) throw new BackendError('invalidRequest');
-            if (compact && route && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
+            const buildDaemonPayload = () => ({
+              ...request,
+              model: route.model,
+              ...(route.effort && request.reasoning ? { reasoning: { ...request.reasoning, effort: route.effort } }
+                : route.effort && headerEffort ? { reasoning: { effort: route.effort } } : {}),
+            });
+            if (compact && route?.daemonSupported && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
               let runtime;
               try { runtime = await native.runtime(current); } catch { /* retain legacy fallback if native is unavailable */ }
               if (runtime?.compaction) {
@@ -50,10 +57,10 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                   catch { throw new BackendError('invalidRequest'); }
                 }
                 preflight = false;
-                return await runtime.compaction({ ...request, model: route.model }, headers, signal, path);
+                return await runtime.compaction(buildDaemonPayload(), headers, signal, path);
               }
             }
-            if (!compact && route && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
+            if (!compact && route?.daemonSupported && native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
               let runtime;
               try { runtime = await native.runtime(current); } catch { /* use text when startup failed */ }
               if (runtime && await runtime.health(signal)) {
@@ -62,12 +69,12 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                 preflight = false;
                 // Once submitted, never replay a failed native turn through text:
                 // native tools may already have executed.
-                return await runtime.responses({ ...request, model: route.model }, headers, signal);
+                return await runtime.responses(buildDaemonPayload(), headers, signal);
               }
             }
             preflight = false;
             const fallbackHeaders = new Headers(headers);
-            const effort = request.reasoning?.effort ?? (route ? route.slug.endsWith('-pro') ? 'max' : route.slug.endsWith('-instant') || route.slug.endsWith('-luna') ? 'low' : 'high' : undefined);
+            const effort = request.reasoning?.effort ?? headerEffort ?? route?.effort ?? (route ? route.slug.endsWith('-pro') ? 'max' : route.slug.endsWith('-instant') || route.slug.endsWith('-luna') ? 'low' : 'high' : undefined);
             if (effort) fallbackHeaders.set('x-magpie-effort', effort);
             return await textFallback(request, compact, text => loader.fetch(`${API}/messages`, {
               body: JSON.stringify(text), headers: fallbackHeaders, signal,

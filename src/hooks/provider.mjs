@@ -12,7 +12,7 @@ export function providerHook({ bridge, profileRoot, native, input }) {
         const models = describeCatalogue(await bridge.call({ method: 'models', auth: requireAuth(auth), profileRoot }));
         if (native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
           try {
-            const nativeModels = await native.models(auth);
+            const nativeModels = await native.models(auth, models);
             if (Object.keys(nativeModels).length) return { ...nativeModels, ...models };
           } catch { /* account remains usable through text mode */ }
         }

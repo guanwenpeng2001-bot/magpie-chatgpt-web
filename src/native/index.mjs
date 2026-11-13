@@ -83,9 +83,13 @@ export function nativeClient({ bridge, profileRoot, fetch = globalThis.fetch }) 
       const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot });
       return descriptor ? daemonProxy(descriptor, fetch) : null;
     },
-    async models(auth) {
+    async models(auth, baseModels) {
       const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot });
-      return descriptor ? describeNativeCatalogue(nativeCatalog(descriptor.capabilities), auth.profile) : {};
+      if (!descriptor) return {};
+      if (baseModels && typeof baseModels === 'object' && !Array.isArray(baseModels) && Object.keys(baseModels).length) {
+        return describeNativeCatalogue(baseModels, auth.profile);
+      }
+      return describeNativeCatalogue(nativeCatalog(descriptor.capabilities), auth.profile);
     },
   };
 }

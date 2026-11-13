@@ -62,7 +62,12 @@ export function toTextRequest(body, compact = false) {
   });
   const route = nativeRoute(body.model);
   const slug = route?.slug ?? body.model;
-  const model = !route ? body.model : slug.startsWith('gpt-6') ? 'gpt-6' : slug.startsWith('gpt-5.6-sol') || slug === 'gpt-5.6-pro' ? 'gpt-5-6' : 'auto';
+  const legacyMap = {
+    'gpt-6-sol-instant': 'gpt-6', 'gpt-6-sol': 'gpt-6', 'gpt-6-pro': 'gpt-6',
+    'gpt-5.6-sol-instant': 'gpt-5-6', 'gpt-5.6-sol': 'gpt-5-6', 'gpt-5.6-pro': 'gpt-5-6',
+    'gpt-5.6-luna': 'auto',
+  };
+  const model = !route ? body.model : (legacyMap[slug] ?? slug);
   const choice = body.tool_choice;
   return { model, system, messages, tools, stream: false, max_tokens: body.max_output_tokens ?? 34834,
     ...(body.reasoning?.effort ? { reasoning_effort: body.reasoning.effort } : {}),

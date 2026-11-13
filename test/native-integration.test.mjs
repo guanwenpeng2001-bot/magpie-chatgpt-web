@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureNative, stopNative, nativeClient } from '../src/native/index.mjs';
-import { nativeCatalog, describeNativeCatalogue } from '../src/native/models.mjs';
+import { nativeCatalog, describeNativeCatalogue, nativeRoute } from '../src/native/models.mjs';
 import { prepare, restore, complete, NONCE, CHECKED, TICKET } from '../src/native/provenance.mjs';
 import { onProvider } from '../src/native/middleware.js';
 import { makeLoader } from '../src/loader.mjs';
@@ -262,4 +262,58 @@ for (const enabled of [true, false]) test(`sign-in native-tools=${enabled} is no
   assert.equal((await (await hooks.auth.methods[0].authorize()).callback()).type, 'success');
   assert.equal(count, Number(enabled));
   assert.equal(JSON.stringify(logs).includes('secret-bearing-error'), false);
+});
+
+test('native catalogue aligns 1-to-1 with text models (18 + 18 = 36) and maps efforts to daemon routes', async () => {
+  const rawCatalogue = {
+    models: [
+      { slug: 'gpt-5-6', title: 'GPT-5.6 Sol', enabled_tools: ['image_gen_tool_enabled'] },
+      { slug: 'gpt-6', title: 'GPT-6' },
+      { slug: 'gpt-5.6-sol-wm', title: 'GPT-5.6 Sol' },
+      { slug: 'gpt-6-sol-wm', title: 'GPT-6 Sol' },
+      { slug: 'gpt-6-luna-wm', title: 'GPT-6 Luna' },
+      { slug: 'gpt-6.1-sol-wm', title: 'GPT-6.1 Sol' },
+      { slug: 'gpt-5.6-terra-wm', title: 'GPT-5.6 Terra' },
+      { slug: 'gpt-5.6-luna-wm', title: 'GPT-5.6 Luna' },
+      { slug: 'gpt-6-astra-wm', title: 'GPT-6 Astra' },
+      { slug: 'gpt-6.1-terra-wm', title: 'GPT-6.1 Terra' },
+      { slug: 'gpt-5-6-mini', title: 'GPT-5.6 Luna' },
+      { slug: 'gpt-5-6-t-mini', title: 'GPT-5.6 Luna Thinking' },
+      { slug: 'gpt-6-t-mini', title: 'GPT-6 Thinking' },
+      { slug: 'gpt-6-mini', title: 'GPT-6' },
+      { slug: 'research', title: 'Deep Research' },
+      { slug: 'chatgpt_alpha_model_external_access_reserved_gate_13', title: 'Gate 13' },
+      { slug: 'chatgpt_alpha_model_external_access_reserved_gate_12', title: 'Gate 12' },
+    ],
+  };
+  const bridge = {
+    call: async command => command.method === 'models'
+      ? rawCatalogue
+      : { port: 12345, controlToken: 'tok', capabilities: { solAvailable: true, proAvailable: true, extraHighAvailable: true } },
+  };
+  const client = nativeClient({ bridge, profileRoot: 'fixture' });
+  const hooks = _internal.createHooks({ bridge, native: client });
+  const allModels = await hooks.provider.models({}, { auth });
+  const keys = Object.keys(allModels);
+  const nativeKeys = keys.filter(key => key.startsWith(`native/${auth.profile}/`));
+  const textKeys = keys.filter(key => !key.startsWith('native/'));
+  assert.equal(textKeys.length, 18);
+  assert.equal(nativeKeys.length, 18);
+  assert.equal(keys.length, 36);
+  assert.deepEqual(nativeKeys.map(key => key.slice(`native/${auth.profile}/`.length)), textKeys);
+  assert.deepEqual(Object.keys(allModels[`native/${auth.profile}/gpt-6`].variants), ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(Object.keys(allModels[`native/${auth.profile}/gpt-6.1-sol-wm`].variants), ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.deepEqual(nativeRoute(`native/${auth.profile}/gpt-6`, 'low'), {
+    profile: auth.profile, slug: 'gpt-6', model: 'chatgpt-web/gpt-6-sol-instant', daemonSupported: true, effort: 'low',
+  });
+  assert.deepEqual(nativeRoute(`native/${auth.profile}/gpt-6`, 'xhigh'), {
+    profile: auth.profile, slug: 'gpt-6', model: 'chatgpt-web/gpt-6-sol', daemonSupported: true, effort: 'xhigh',
+  });
+  assert.deepEqual(nativeRoute(`native/${auth.profile}/gpt-6`, 'max'), {
+    profile: auth.profile, slug: 'gpt-6', model: 'chatgpt-web/gpt-6-pro', daemonSupported: true, effort: 'max',
+  });
+  assert.deepEqual(nativeRoute(`native/${auth.profile}/gpt-6.1-sol-wm`, 'ultra'), {
+    profile: auth.profile, slug: 'gpt-6.1-sol-wm', model: 'chatgpt-web/gpt-6-pro', daemonSupported: true, effort: 'max',
+  });
+  assert.equal(nativeRoute(`native/${auth.profile}/chatgpt-image`).daemonSupported, false);
 });
