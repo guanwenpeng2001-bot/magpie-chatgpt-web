@@ -215,7 +215,13 @@ export function restore(body, profile, provider = PROVIDER) {
     for (const item of body.input) if (object(item)) delete item[TICKET];
     return body;
   }
-  if (metadataDigest(body) !== record.metadata) throw new Error("Native client metadata or cache identity changed during routing");
+  if (metadataDigest(body) !== record.metadata) {
+    const before = record.unmaskedClientMetadata, after = body.client_metadata;
+    const ignored = new Set([NONCE, CHECKED, 'ws_request_header_x_openai_internal_codex_responses_lite']);
+    const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+      .filter(key => !ignored.has(key) && canonical(before[key]) !== canonical(after[key]));
+    throw new Error(`Native client metadata or cache identity changed during routing (${changed.join(', ') || 'prompt_cache_key'})`);
+  }
   const bodyDigest = createHash("sha256").update(canonical(body)).digest("hex");
   if (record.claimed && record.digest !== bodyDigest) throw new Error("Native request retry changed after forwarding");
   const seen = new Set(), changes = [];
@@ -232,7 +238,10 @@ export function restore(body, profile, provider = PROVIDER) {
     seen.add(ticket);
     changes.push([item, stored.fields]);
   }
-  if (seen.size !== record.tickets.size) throw new Error("A native item was lost during routing");
+  if (seen.size !== record.tickets.size) {
+    const types = [...record.tickets].filter(([ticket]) => !seen.has(ticket)).map(([, entry]) => entry.identity.type || entry.identity.role || 'message');
+    throw new Error(`A native item was lost during routing (${types.join(', ')})`);
+  }
   // A retry may reuse proof only for the identical filtered body and account.
   // The account runtime owns browser-round replay and cancellation.
   if (!record.claimed) {
