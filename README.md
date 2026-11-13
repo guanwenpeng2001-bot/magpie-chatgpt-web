@@ -78,7 +78,16 @@ Magpie owns the Codex Desktop route. The plugin must not edit `config.toml`, cho
 
 The plugin's responsibility ends at its ChatGPT Web provider: browser sign-in, the persistent Chrome profile, verification recovery, model selection, the shared Anthropic-compatible SSE route, client tool rounds, context preflight and usage estimates. Magpie remains responsible for installation, the Desktop gateway address, provider selection, model catalogue generation and reconnect behavior.
 
-For an isolated Codex CLI profile, the helper can write one separate file without touching Magpie's Desktop config:
+For Native tools in Codex CLI, use the separate Native profile. It uses the built-in OpenAI route through Magpie to preserve authenticated message metadata:
+
+```powershell
+npm run codex-profile -- --native --apply
+codex -p chatgpt-web-native
+```
+
+This writes only `chatgpt-web-native.config.toml` in the Codex configuration directory. It requires the existing `openai_base_url` to point to Magpie's `/backend-api/codex` endpoint and a readable model catalogue. An explicit `--base-url` may supply that endpoint. Model windows and compaction settings come from the catalogue/base config; this profile does not impose the generic 41K/32,768 limits. `--native --check` inspects without writing; `--native --rollback` removes only the managed Native profile and its backup. Login credentials and the main configuration are unchanged.
+
+The generic HTTP profile remains available for text routes. It does not preserve the Native environment provenance required by long conversations and should not be used for Native tools:
 
 ```powershell
 npm run codex-profile -- --apply

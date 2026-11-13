@@ -55,6 +55,10 @@ const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
 // protect both Pro and guarded Sol without changing their separate budgets.
 const solCompileGuard = 'A=T.length,I=v(T);if(!e._compactionRequest)return I;';
 const solTrimGuard = 'while(b()&&T.length>1){let y=_===0?1:0;';
+// Xt/Ai/Nt/gs/Pe/pn/Pi/v_/y_ are verified by the pinned bundle checksum.
+// In particular v_ and y_ are pure staging selection and multipart preflight;
+// they require no worker, browser or mutable account state.
+const compactionTransportFallback = 'if(!o&&!u&&!c&&!s.localTools&&e.modelId===Wn&&t.proAvailable===!0&&(e._chatgptModelFamily==="6"||e._chatgptModelFamily==="5.6")&&(s.effort==="max"||nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))&&rf(I.text)>Fx)return chooseNativeCompactionTransport(e,t,n,r,s.effort,{compile:Xt,messages:Ai,inputTokens:Nt,messageTokens:gs,textTokens:Pe,skillTokens:pn,imageTokens:Pi,stagingMode:v_,assertMultipart:y_,AdapterError:q});';
 // Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
 // and multipart reconciliation. This classifies failure only; it never rebinds.
 const submittedAlertAnchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
@@ -265,6 +269,9 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     const solCompileGuard = ${JSON.stringify(solCompileGuard)}, solTrimGuard = ${JSON.stringify(solTrimGuard)};
     if (source.split(solCompileGuard).length !== 2 || source.split(solTrimGuard).length !== 2)
       throw new Error('Native Sol pre-trim context guard compatibility mismatch');
+    for (const pure of ['function Ai(e){', 'function gs(e,t){', 'function Nt(e,t){', 'function Pi(e){', 'function v_(e,t,n,r){', 'function y_(e,t,n,r,o,i,a,s,c){']) {
+      if (source.split(pure).length !== 2) throw new Error('Native compaction transport preflight compatibility mismatch');
+    }
     const registry = ${JSON.stringify(checkpointRegistry)};
     const remember = ${JSON.stringify(checkpointRememberTail)};
     const touch = ${JSON.stringify(checkpointTouch)};
@@ -288,7 +295,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
       .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs')
       .replace(roundGuard, 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{let magpieInput=wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens;assertNativeProContext(magpieInput,y.effort,q);assertNativeSolContext(magpieInput,f.modelId,f._chatgptModelFamily,y.effort,R,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
-      .replace(solCompileGuard, 'A=T.length,I=v(T);if(s.effort==="max")assertNativeProContext(Nt(I,e.modelId),s.effort,q);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;')
+      .replace(solCompileGuard, 'A=T.length,I=v(T);if(s.effort==="max")assertNativeProContext(Nt(I,e.modelId),s.effort,q);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;' + ${JSON.stringify(compactionTransportFallback)})
       .replace(solTrimGuard, 'if(s.effort==="max"&&b())assertNativeProContext(0,s.effort,q,!0);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
@@ -304,6 +311,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(nativeSolContextGuarded.toString())}
       + '\\n' + ${JSON.stringify(assertNativeSolContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { chooseNativeCompactionTransport } from ' + JSON.stringify(new URL('./compaction-transport.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { ownershipSnapshot } from ' + JSON.stringify(new URL('./ownership-diagnostics.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { identityJson } from ' + JSON.stringify(new URL('./identity-json.mjs', import.meta.url).href) + ';')}
