@@ -58,6 +58,11 @@ test('all five exact anchors reject drift, duplicates, and repeat application', 
   // interpret $&, $`, or $' embedded in injected JavaScript as replacement tokens.
   assert.ok(patchReferenceFixes(original + '\n// unrelated preload patch').endsWith('// unrelated preload patch'));
   assert.ok(patchReferenceFixes(original).includes('await this.insertPromptText(e,` ${t}`,o)'));
+  const claimStart = original.indexOf('if(e.method==="claim"){');
+  const claimEnd = original.indexOf('let n=e.bindingId;', claimStart);
+  assert.ok(claimEnd > claimStart);
+  assert.ok(patchReferenceFixes(original).includes(original.slice(claimStart, claimEnd)),
+    'the entire already-parity claim path stays byte-for-byte unchanged');
 });
 
 test('preload composition checks original bytes before the reference patches', pinned, async () => {
@@ -97,7 +102,7 @@ test('preload composition checks original bytes before the reference patches', p
 // Load the WHOLE real bundle, with its shipped dependencies and actual methods.
 // Only disable the unique CLI entry call and expose native bindings for tests.
 // No copied implementations, install, daemon, live CDP endpoint, or account.
-async function runPinned(t, suite) {
+async function runPinned(t, suite, applyFixes = true) {
   const { bytes } = await readPinnedFixture();
   const scratch = await mkdtemp(join(tmpdir(), 'native-reference-fixes-'));
   t.after(async () => {
@@ -118,10 +123,10 @@ Bun.plugin({name:'isolated-reference-fixture',setup(build){
     assert.equal(resolve(path),resolve(entry));
     const bytes=readFileSync(path);
     assert.equal(createHash('sha256').update(bytes).digest('hex'),${JSON.stringify(pinnedHash)});
-    const source=patchReferenceFixes(bytes.toString('utf8'));
+    const source=${applyFixes ? "patchReferenceFixes(bytes.toString('utf8'))" : "bytes.toString('utf8')"};
     const startup='Rk().catch((e)=>{process.stderr.write(\x60codex-chatgpt-web: \x24{e instanceof Error?e.message:String(e)}\\n\x60),process.exitCode=1});';
     assert.equal(source.split(startup).length,2,'unique CLI startup disabled');
-    return {contents:source.replace(startup,'')+'\\nexport { Cs as Worker, ff as chromium, CC as convert, Rl as MarkdownBuffer, ma as probe, Vu as Store, Fn as parseRequest, Zl as calendarDelta, Oh as remember, ue as identity, zt as summaryPrefix };',loader:'js'};
+    return {contents:source.replace(startup,'')+'\\nexport { dn as Broker, Cs as Worker, ff as chromium, CC as convert, Rl as MarkdownBuffer, ma as probe, Vu as Store, Fn as parseRequest, Zl as calendarDelta, Oh as remember, ue as identity, zt as summaryPrefix };',loader:'js'};
   });
 }});
 const native=await import(pathToFileURL(entry).href);
@@ -150,6 +155,118 @@ console.log('reference fixture passed');
     t.diagnostic(stdout.trim());
   } finally { clearTimeout(timeout); }
 }
+
+for (const applyFixes of [false, true]) test(`real broker exact-token and retirement parity (${applyFixes ? 'patched' : 'original'})`, pinned, async t => {
+  await runPinned(t, async ({ Broker }) => {
+    // Exercise the shipped broker, not a copied validator. Only suppress socket
+    // startup: registration, claim, fences, dispatch and retirement are native.
+    const broker = new Broker('unused-offline-reference-fixture');
+    broker.start = async () => {};
+    const environment = { cwd: 'private-fixture-workspace', roots: [], writableRoots: [],
+      sandboxPolicy: { type: 'readOnly' }, tools: [{ name: 'private_fixture_tool',
+        description: 'private capability', parameters: { type: 'object' } }] };
+    const activityId = 'activity_0123456789abcdef';
+    const claim = (token, contract = 'native') => broker.dispatch({ method: 'claim', token, contract, activityId });
+    const guidance = contract => `${contract === 'safe' ? 'request id' : 'turn token'} is invalid, expired, or revoked. `
+      + `Copy ${contract === 'safe' ? 'request_id' : 'turn_token'} exactly from the current request; do not guess or reuse an earlier value.`;
+    const idle = (token, bindings = 0) => {
+      const channel = broker.channels.get(token);
+      assert.equal(channel.invocations.size, 0);
+      assert.equal(channel.queuedCallIds.length, 0);
+      assert.equal(channel.deliveredCallIds.size, 0);
+      assert.equal(channel.activities.size, 0);
+      assert.equal(channel.activityRevision, 0);
+      assert.equal(channel.bindingId, undefined);
+      assert.equal(broker.bindings.size, bindings);
+      assert.equal(broker.pending.has(token), true);
+    };
+    try {
+      const token = await broker.register(environment, undefined, 'fixture-native');
+      const wrong = token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A');
+      // Same-length transcription error, whitespace, case, invisible characters
+      // and lookalike encoding must never be normalized into the live capability.
+      for (const value of [wrong, ` ${token}`, `${token}\n`, token.toUpperCase(),
+        `${token}\u200b`, token.replace('_', '%5F'), token.replace('_', '\uff3f')]) {
+        assert.notEqual(value, token);
+        await assert.rejects(claim(value), { message: guidance('native') });
+        idle(token);
+        assert.equal(broker.channels.size, 1, 'no automatic re-registration');
+      }
+      for (const value of [undefined, null, '', 1, { token }, new String(token)]) {
+        await assert.rejects(claim(value), { message: 'turn token is required' });
+        idle(token);
+      }
+      await assert.rejects(claim(token, 'safe'), { message: 'Zero Risk MCP contract requires a Zero Risk request id' });
+      idle(token);
+      // A rejected claim grants no binding usable by invoke, including when the
+      // caller substitutes its wrong token or even the exact owner token.
+      for (const bindingId of [undefined, wrong, token]) {
+        await assert.rejects(broker.dispatch({ method: 'invoke', bindingId, wireName: 'private_fixture_tool' }),
+          /binding id is required|internal Codex turn binding is invalid or expired/);
+        idle(token);
+      }
+      const binding = await claim(token);
+      assert.deepEqual(binding.environment, environment);
+      assert.equal((await claim(token)).bindingId, binding.bindingId, 'exact claim retains its existing binding');
+      const result = { content: [{ type: 'text', text: 'offline owner result' }] };
+      const invocation = broker.dispatch({ method: 'invoke', bindingId: binding.bindingId,
+        wireName: 'private_fixture_tool', arguments: { fixture: true } });
+      const batch = await broker.nextToolBatch(token);
+      assert.equal(batch.length, 1);
+      assert.equal(batch[0].wireName, 'private_fixture_tool');
+      assert.deepEqual(batch[0].arguments, { fixture: true });
+      broker.completeTool(token, batch[0].callId, result);
+      assert.deepEqual(await invocation, result, 'exact token continues through actual dispatch and completion');
+      await broker.dispatch({ method: 'activity_complete', token, activityId });
+      const revision = broker.beginCompletionFence(token);
+      assert.equal(broker.commitCompletionFence(token, revision), true);
+      // Cover both a committed channel still in the map and its later tombstone.
+      const retired = { message: 'This turn_token was issued for Codex turn fixture-native, which has already finished. This Codex Native action can no longer run.' };
+      await assert.rejects(claim(token), retired);
+      assert.equal(broker.channels.get(token).completionCommitted, true);
+      assert.equal(broker.channels.get(token).activities.size, 0);
+      broker.revoke(token);
+      const current = await broker.register(environment, undefined, 'fixture-current');
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await assert.rejects(claim(token), retired);
+        await assert.rejects(broker.dispatch({ method: 'invoke', bindingId: binding.bindingId,
+          wireName: 'private_fixture_tool' }), /already finished/);
+        assert.equal(broker.channels.has(token), false);
+        idle(current);
+      }
+      // Even after retirement metadata is gone, an old capability cannot revive
+      // or silently rebind to the new current turn.
+      broker.retiredTokens.delete(token);
+      await assert.rejects(claim(token), { message: guidance('native') });
+      idle(current);
+      const currentBinding = await claim(current);
+      assert.notEqual(currentBinding.bindingId, binding.bindingId);
+      broker.revoke(current);
+
+      const nonce = 'offline_surface_nonce_0123456789';
+      const safe = await broker.registerSafe(environment, nonce, undefined, 'fixture-safe');
+      await assert.rejects(claim(`${safe} `, 'safe'), { message: guidance('safe') });
+      await assert.rejects(claim('', 'safe'), { message: 'request id is required' });
+      await assert.rejects(claim(safe), { message: 'Zero Risk request id requires the Zero Risk MCP contract' });
+      idle(safe);
+      broker.confirmSafeTurnSent(safe, nonce);
+      await assert.rejects(claim(safe, 'safe'),
+        { message: 'Zero Risk request is not connected yet. Call codex_turn_start with its request_id first' });
+      idle(safe);
+      broker.startSafeTurn(safe);
+      assert.ok((await claim(safe, 'safe')).bindingId);
+      broker.revoke(safe);
+      await assert.rejects(claim(safe, 'safe'),
+        { message: 'This request_id was issued for Codex turn fixture-safe, which has already finished. This Codex Native action can no longer run.' });
+      assert.equal(broker.channels.size, 0);
+      assert.equal(broker.pending.size, 0);
+      assert.equal(broker.bindings.size, 0);
+      console.log('broker: exact-only lookup, no rejected dispatch, explicit correct claim, committed/retired rejection, separate safe contract passed');
+    } finally {
+      for (const token of [...broker.channels.keys()]) broker.revoke(token);
+    }
+  }, applyFixes);
+});
 
 test('real composer, Mermaid snapshot/buffer, and capability methods in isolated Chrome', pinned, async t => {
   await runPinned(t, async ({ Worker, chromium, convert, MarkdownBuffer, probe }) => {
