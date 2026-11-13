@@ -182,7 +182,7 @@ for (const state of ['unavailable', 'unhealthy']) {
   });
 }
 
-test('unavailable native compaction retains canonical intent while summarizing masked history', async t => {
+test('unavailable native compaction retains canonical intent and rejects text summarization', async t => {
   const body = capturedRequest(t, { metadata: { thread_id: 'effort-thread', turn_id: 'effort-turn', request_kind: 'compaction' } });
   body.input[0].content = 'Inspect {{PATH_ab12cd34}}.';
   body.client_metadata['x-codex-turn-metadata'] = JSON.stringify({ request_kind: 'turn' });
@@ -194,9 +194,7 @@ test('unavailable native compaction retains canonical intent while summarizing m
     return stream;
   } } })(async () => auth);
   const response = await loader.fetch('http://127.0.0.1:1/v1/responses', { body: JSON.stringify(body) });
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get('x-chatgptweb-engine'), 'text-compaction');
-  assert.match(sent.prompt, /\{\{PATH_ab12cd34\}\}/);
-  assert.match(sent.system, /Summarize the conversation/);
-  assert.deepEqual(sent.tools, []);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'native_compaction_unavailable');
+  assert.equal(sent, undefined);
 });

@@ -75,7 +75,34 @@ export function toTextRequest(body, compact = false) {
       : { type: 'tool', name: choice.namespace ? `${choice.namespace}.${choice.name}` : choice.name } } : {}) };
 }
 
+// v6.1.18 responses/compaction.ts SUMMARY_PREFIX: v1 and memento install
+// readable user summaries instead of a typed v2 checkpoint. Recognizing this
+// marker only refuses degradation; it never grants continuation authority.
+const summaryPrefix = 'Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:';
+const checkpointTypes = new Set(['compaction', 'compaction_summary', 'context_compaction']);
+
+function hasCheckpoint(input) {
+  if (typeof input === 'string') return input.startsWith(summaryPrefix + '\n');
+  return Array.isArray(input) && input.some(item => {
+    if (checkpointTypes.has(item?.type)) return true;
+    if (item?.role !== 'user') return false;
+    const text = typeof item.content === 'string' ? item.content
+      : Array.isArray(item.content) ? item.content.filter(part =>
+        ['input_text', 'text'].includes(part?.type)).map(part => part.text ?? '').join('') : '';
+    return text.startsWith(summaryPrefix + '\n');
+  });
+}
+
 export async function textFallback(body, compact, fetchText, signal) {
+  // Text summaries cannot register a native daemon's authenticated checkpoint.
+  // Reject before conversion or submission, for both unary and streaming callers.
+  if (compact || isCompaction(body, '/responses') || hasCheckpoint(body.input)) {
+    const code = compact || isCompaction(body, '/responses')
+      ? 'native_compaction_unavailable' : 'native_checkpoint_unavailable';
+    return Response.json({ error: { type: 'upstream_error', code, retryable: true,
+      message: 'Native compaction or checkpoint continuation requires the same native daemon and its authenticated state. Retry when that daemon is available. If its state was lost, recover from trusted complete history or start a new turn with the original task; restarting alone does not restore checkpoint authorization. No text request was submitted.',
+    } }, { status: 503, headers: { 'retry-after': '5', 'cache-control': 'no-store' } });
+  }
   const request = toTextRequest(body, compact);
   const response = await fetchText(request);
   if (!response.ok) return response;

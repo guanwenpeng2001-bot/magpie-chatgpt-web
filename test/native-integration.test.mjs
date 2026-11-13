@@ -239,17 +239,46 @@ test('native submission failure is never retried via text', async () => {
   complete(nonce);
 });
 
-for (const path of ['/v1/responses', '/v1/responses/compact']) test(`compaction ${path} uses tool-free plain summary even with native available`, async () => {
-  const { loader, commands } = loaderFixture({ runtime: async () => { throw new Error('must not start'); } });
-  const body = { model, input: 'past work', tools: [{ type: 'function', name: 'run', parameters: { type: 'object' } }],
-    client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ request_kind: 'compaction' }) } };
-  const response = await (await loader).fetch(`http://127.0.0.1:1${path}`, { body: JSON.stringify(body) });
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get('x-chatgptweb-engine'), 'text-compaction');
-  if (path.endsWith('/compact')) assert.equal((await response.json()).object, 'response');
-  else assert.match(await response.text(), /response.completed/);
-  assert.equal(commands[0].tools.length, 0);
-  assert.match(commands[0].system, /plain-text summary/);
+const summaryPrefix = 'Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:';
+const fallbackCases = [
+  { kind: 'v1', path: '/v1/responses/compact', input: 'past work', code: 'native_compaction_unavailable' },
+  { kind: 'v2', input: [{ type: 'message', role: 'user', content: 'past work' }, { type: 'compaction_trigger' }], code: 'native_compaction_unavailable' },
+  { kind: 'memento-body', input: 'past work', client_metadata: { 'x-codex-turn-metadata': { request_kind: 'compaction', compaction: { implementation: 'responses', strategy: 'memento' } } }, code: 'native_compaction_unavailable' },
+  { kind: 'memento-header', input: 'past work', headers: { 'x-codex-turn-metadata': JSON.stringify({ request_kind: 'compaction', compaction: { implementation: 'responses', strategy: 'memento' } }) }, code: 'native_compaction_unavailable' },
+  ...['compaction', 'compaction_summary', 'context_compaction'].map(type => ({ kind: type, input: [{ type, encrypted_content: 'ocx1:c3VtbWFyeQ==' }], code: 'native_checkpoint_unavailable' })),
+  { kind: 'opaque-checkpoint', input: [{ type: 'compaction', encrypted_content: 'opaque' }], code: 'native_checkpoint_unavailable' },
+  ...['string', 'blocks'].map(form => ({ kind: `readable-${form}`, input: [{ type: 'message', role: 'user', content: form === 'string' ? `${summaryPrefix}\nsummary` : [{ type: 'input_text', text: `${summaryPrefix}\n\nsummary` }] }], code: 'native_checkpoint_unavailable' })),
+];
+for (const state of ['unprovisioned', 'startup-failed', 'unhealthy']) for (const scenario of fallbackCases) for (const stream of [false, true]) {
+  test(`native ${state} rejects ${scenario.kind} text fallback stream=${stream} without submitting history`, async () => {
+    const { loader, commands } = loaderFixture({ runtime: async () => {
+      if (state === 'startup-failed') throw new Error('fixture');
+      return state === 'unprovisioned' ? null : { health: async () => false };
+    } });
+    const body = { model, input: scenario.input, stream, ...(scenario.client_metadata ? { client_metadata: scenario.client_metadata } : {}) };
+    const before = structuredClone(body);
+    const response = await (await loader).fetch(`http://localhost${scenario.path ?? '/v1/responses'}`, { body: JSON.stringify(body), headers: scenario.headers });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '5');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const result = await response.json();
+    assert.equal(result.error.code, scenario.code);
+    assert.equal(result.error.retryable, true);
+    assert.match(result.error.message, /same native daemon/i);
+    assert.match(result.error.message, /trusted.*history/i);
+    assert.equal(result.output, undefined);
+    assert.equal(commands.length, 0);
+    assert.deepEqual(body, before);
+  });
+}
+
+test('textFallback guards protocol markers even without a caller compaction flag', async () => {
+  for (const scenario of fallbackCases.filter(item => !item.path && !item.headers)) {
+    const body = { model, input: scenario.input, client_metadata: scenario.client_metadata };
+    const response = await textFallback(body, false, () => assert.fail('must not submit text'));
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error.code, scenario.code);
+  }
 });
 
 test('cross-account models fail before native lookup or text fallback', async () => {

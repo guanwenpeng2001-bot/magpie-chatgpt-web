@@ -38,6 +38,9 @@ export function ensureNative(account, options = {}) {
       appName: `Codex Magpie ${profile.slice(0, 8)}`,
       browserEndpoint: endpoint,
       chromeExecutablePath: account.chromeExecutablePath ?? await findChromeExecutable(), capabilities, storageState: async () => storage });
+    // A failed startup may still own a live OS lease until cleanup succeeds.
+    // Retain it so the next attempt and shutdown can retry that cleanup.
+    accounts.set(home, daemon);
     const abort = () => { void daemon.stop().catch(() => {}); };
     options.signal?.addEventListener('abort', abort, { once: true });
     try {
@@ -58,7 +61,13 @@ export function ensureNative(account, options = {}) {
       await writePrivate(join(home, 'native.json'), JSON.stringify({ ...result, profile, capabilities }));
       accounts.set(home, daemon);
       return daemon;
-    } catch (error) { await daemon.stop(); throw error; }
+    } catch (error) {
+      try {
+        await daemon.stop();
+        if (accounts.get(home) === daemon) accounts.delete(home);
+      } catch { /* keep the owner reachable for a later cleanup retry */ }
+      throw error;
+    }
     finally { options.signal?.removeEventListener('abort', abort); }
   })().finally(() => pending.delete(home));
   pending.set(home, work);
@@ -73,16 +82,20 @@ export async function hasNative(account, root = nativeRoot()) {
 
 export async function stopNative() {
   await Promise.allSettled([...pending.values()]);
-  await Promise.allSettled([...accounts.values()].map(daemon => daemon.stop()));
-  accounts.clear();
+  await Promise.allSettled([...accounts.entries()].map(async ([home, daemon]) => {
+    await daemon.stop();
+    if (accounts.get(home) === daemon) accounts.delete(home);
+  }));
 }
 
 /** Plugin-side facade: no browser ownership or credentials copied into requests. */
 export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch = globalThis.fetch }) {
   return {
     provision: auth => bridge.call({ method: 'nativeProvision', auth, profileRoot }),
-    async runtime(auth) {
-      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot });
+    async runtime(auth, signal) {
+      signal?.throwIfAborted();
+      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot }, signal);
+      signal?.throwIfAborted();
       return descriptor ? daemonProxy(descriptor, fetch) : null;
     },
     async models(auth, baseModels) {

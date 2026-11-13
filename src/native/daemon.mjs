@@ -1,6 +1,6 @@
 import { spawn as spawnProcess } from 'node:child_process';
 import { createServer } from 'node:net';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -23,6 +23,22 @@ export async function freePort() {
   const port = server.address().port;
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   return port;
+}
+
+// The OS owns this lease: no PID files, and no probing/unlinking a live owner's
+// endpoint. Windows pipes and Linux abstract sockets disappear on process exit.
+async function lockAccount(home) {
+  const normalized = resolve(home);
+  const identity = createHash('sha256').update(process.platform === 'win32' ? normalized.toLowerCase() : normalized).digest('hex');
+  const address = process.platform === 'win32' ? '\\\\.\\pipe\\magpie-native-owner-' + identity
+    : process.platform === 'linux' ? '\0magpie-native-owner-' + identity
+      : join('/tmp', 'mno-' + identity + '.sock');
+  const server = createServer(socket => socket.destroy());
+  await new Promise((resolveLock, reject) => {
+    server.once('error', () => reject(new Error('Native daemon account ownership unavailable')));
+    server.listen(address, () => { server.unref(); resolveLock(); });
+  });
+  return server;
 }
 
 export const quoteMcpCommand = args => args.map(arg => '"' + String(arg).replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"').join(' ');
@@ -60,6 +76,8 @@ export class NativeDaemon {
     Object.assign(this, { home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities, appName,
       spawn, fetch, allocatePort, sleep, startupTimeoutMs, pollMs, restartBaseMs, restartMaxMs, env,
       shutdownRequestTimeoutMs, shutdownExitTimeoutMs });
+    this.home = resolve(home);
+    this.commandChildren = new Set();
     this.ready = false;
     this.desired = false;
     this.failures = 0;
@@ -78,7 +96,14 @@ export class NativeDaemon {
     this.controller = new AbortController();
     this.starting = this.launch(this.controller.signal).catch(async () => {
       this.ready = false;
-      await this.cleanup();
+      if (!this.ownerLock) this.desired = false; // A contender must never steal a later lease by retrying.
+      else {
+        try {
+          await this.cleanup();
+          // A running daemon keeps its lease across crash recovery/backoff.
+          if (!this.startedAt || !this.desired) await this.releaseOwnership();
+        } catch { /* retain ownership and pending cleanup for stop/start retry */ }
+      }
       throw new Error('Native daemon startup failed');
     }).finally(() => { this.starting = null; if (this.desired && !this.ready) this.scheduleRestart(); });
     return this.starting;
@@ -86,6 +111,11 @@ export class NativeDaemon {
   async launch(signal) {
     const { tunnelId, runtimeKey } = this.credentials ?? {};
     if (!tunnelId || !runtimeKey) throw new Error('Native tunnel is not provisioned');
+    signal.throwIfAborted();
+    this.ownerLock ??= await lockAccount(this.home);
+    // Explicit retries must finish the previous generation before replacing config.
+    await this.cleanup();
+    signal.throwIfAborted();
     const port = await this.allocatePort();
     const storageStatePath = join(this.home, 'browser/storage-state.json');
     const runtimeKeyFile = join(this.home, 'runtime.key');
@@ -129,7 +159,7 @@ export class NativeDaemon {
       if (this.child !== child) return;
       this.ready = false;
       this.controller.abort();
-      if (!this.starting && this.desired) this.scheduleRestart();
+      if (!this.starting && !this.cleaning && this.desired) this.scheduleRestart();
     };
     this.childDone = new Promise(resolve => {
       child.once('error', () => { childState.exited = true; resolve(); failed(); });
@@ -140,6 +170,7 @@ export class NativeDaemon {
     childState.httpReady = true;
     const tunnel = this.config.tunnel;
     await this.removeStaleAliases(tunnel, signal);
+    this.tunnelPending = true; // connect can fail after creating local state.
     await this.command(['runtimes', 'connect', '--alias', tunnel.alias, '--profile', tunnel.profileName,
       '--profile-dir', tunnel.profileDir, '--tunnel-client-bin', tunnel.binaryPath, '--tunnel-id', tunnelId,
       '--runtime-api-key', `file:${runtimeKeyFile}`, '--mcp-command', quoteMcpCommand([...this.runtimeCommand,
@@ -168,25 +199,49 @@ export class NativeDaemon {
   // profile are stopped and their local metadata removed; the remote tunnel
   // itself is kept (`runtimes rm` deletes only local metadata).
   async removeStaleAliases(tunnel, signal) {
-    let listed;
-    try { listed = await this.command(['runtimes', 'list', '--json'], signal); } catch { return; }
+    const listed = await this.command(['runtimes', 'list', '--json'], signal);
+    if (!Array.isArray(listed?.aliases)) throw new Error('Invalid native tunnel inventory');
     const owned = resolve(tunnel.profileDir).toLowerCase();
-    const stale = (Array.isArray(listed?.aliases) ? listed.aliases : [])
+    const stale = listed.aliases
       .filter(entry => entry && typeof entry.alias === 'string' && entry.alias !== tunnel.alias
-        && /^magpie-[0-9a-f-]{36}$/.test(entry.alias)
+        && /^magpie-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(entry.alias)
         && typeof entry.profile_dir === 'string' && resolve(entry.profile_dir).toLowerCase() === owned
         && (entry.tunnel_id === undefined || entry.tunnel_id === tunnel.tunnelId))
       .map(entry => entry.alias);
     for (const alias of stale) {
       signal.throwIfAborted();
-      await this.command(['runtimes', 'stop', alias, '--json'], signal).catch(() => {});
-      await this.command(['runtimes', 'rm', alias, '--json'], signal).catch(() => {});
+      await this.removeAlias(alias, signal);
     }
+  }
+  async removeAlias(alias, signal) {
+    try {
+      await this.command(['runtimes', 'stop', alias, '--json'], signal);
+      await this.command(['runtimes', 'rm', alias, '--json'], signal);
+    } catch {
+      // A failed/aborted connect or an earlier partial rm may leave no alias.
+      // Only a successful inventory proving absence makes cleanup idempotent.
+      try {
+        signal?.throwIfAborted();
+        const listed = await this.command(['runtimes', 'list', '--json'], signal);
+        if (Array.isArray(listed?.aliases) && !listed.aliases.some(entry => entry?.alias === alias)) return;
+      } catch { /* report a sanitized failure below */ }
+      throw new Error('Native tunnel cleanup failed');
+    }
+  }
+  async releaseOwnership() {
+    const lock = this.ownerLock;
+    if (!lock) return;
+    if (this.commandChildren.size) throw new Error('Native tunnel command still running');
+    await new Promise((resolveClose, reject) => lock.close(error => error ? reject(new Error('Native daemon ownership release failed')) : resolveClose()));
+    this.ownerLock = null;
+    this.startedAt = undefined;
   }
   command(args, signal) {
     return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
       let output = '', settled = false;
       const child = this.spawn(this.tunnelBinary, args, { cwd: this.home, env: this.childEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      this.commandChildren.add(child);
       const finish = (error, data) => {
         if (settled) return;
         settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort);
@@ -198,6 +253,7 @@ export class NativeDaemon {
       child.once('error', abort);
       child.stdout.on('data', bytes => { output += bytes; if (output.length > 1 << 20) finish(true); });
       child.once('close', code => {
+        this.commandChildren.delete(child);
         if (code !== 0) return finish(true);
         try { finish(false, output.trim() ? JSON.parse(output) : {}); } catch { finish(true); }
       });
@@ -210,8 +266,13 @@ export class NativeDaemon {
     const backoff = Math.min(this.restartMaxMs, this.restartBaseMs * 2 ** Math.min(this.failures++, 10));
     this.restartTimer = setTimeout(async () => {
       this.restartTimer = null;
-      await this.cleanup();
-      if (this.desired) void this.start().catch(() => {});
+      try {
+        await this.cleanup();
+        if (this.desired) await this.start();
+      } catch {
+        // Cleanup keeps the lease and old alias; retry before creating another.
+        if (this.desired) this.scheduleRestart();
+      }
     }, backoff);
     this.restartTimer.unref?.();
   }
@@ -225,16 +286,15 @@ export class NativeDaemon {
   responses(body, headers, signal) { return this.proxy.responses(body, headers, signal); }
   cleanup() {
     if (this.cleaning) return this.cleaning;
+    if (!this.ownerLock) return Promise.resolve();
     const compactionService = this.compactionService;
-    this.compactionService = null;
     const child = this.child;
     const done = this.childDone;
     const childState = this.childState;
     const config = this.config;
-    this.child = null;
     this.ready = false;
     this.cleaning = (async () => {
-      try { await compactionService?.stop(); }
+      try { await compactionService?.stop(); this.compactionService = null; }
       finally {
         try {
           if (child && !childState.exited) {
@@ -261,25 +321,34 @@ export class NativeDaemon {
               } catch { /* bounded forced cleanup when the daemon cannot shut down */ }
             }
             if (!childState.exited) { child.kill(); await waitForExit(); }
+            if (!childState.exited) throw new Error('Native daemon shutdown failed');
           }
+          this.child = null;
         } finally {
           // Cancellation may still need the MCP connection until the daemon exits.
-          if (config?.tunnel) {
-            await this.command(['runtimes', 'stop', config.tunnel.alias, '--json']).catch(() => {});
-            await this.command(['runtimes', 'rm', config.tunnel.alias, '--json']).catch(() => {});
+          if ((!child || childState.exited) && this.tunnelPending && config?.tunnel) {
+            await this.removeAlias(config.tunnel.alias);
+            this.tunnelPending = false;
           }
         }
       }
+      // kill() requests termination; a late command can still mutate alias state
+      // until close. Keep the lease and block a new generation in that interval.
+      if (this.commandChildren.size) throw new Error('Native tunnel command still running');
     })().finally(() => { this.cleaning = null; });
     return this.cleaning;
   }
-  stop() {
+  stop(keepOwnership = false) {
     if (this.stopping) return this.stopping;
     this.desired = false; this.ready = false;
     clearTimeout(this.restartTimer); this.restartTimer = null;
     this.controller?.abort();
-    this.stopping = (async () => { await this.starting?.catch(() => {}); await this.cleanup(); })().finally(() => { this.stopping = null; });
+    this.stopping = (async () => {
+      await this.starting?.catch(() => {});
+      await this.cleanup();
+      if (!keepOwnership) await this.releaseOwnership();
+    })().finally(() => { this.stopping = null; });
     return this.stopping;
   }
-  async restart() { await this.stop(); return this.start(); }
+  async restart() { await this.stop(true); return this.start(); }
 }

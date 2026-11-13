@@ -1,8 +1,11 @@
-Portions of src/protocol.mjs and src/tool-emulation.mjs are adapted from
+The protocol implementation now lives in src/wire/prepare.mjs,
+src/wire/translate.mjs and src/wire/sse.mjs (formerly src/protocol.mjs).
+Portions of that implementation and src/tool-emulation.mjs are adapted from
 magpie-claudeweb2api v0.1.3:
 https://github.com/mu-zi-lee/magpie-claudeweb2api
 Commit: 9fed0935012c2ae2f10871b69fea365126135462
-Tool protocol test cases are adapted from its test/protocol.test.mjs.
+Tool protocol cases in test/tool-protocol.test.mjs are adapted from its
+test/protocol.test.mjs.
 The process bridge, pipe lifecycle, account guard, conversation bindings and
 integration harness follow the sibling's architecture, reimplemented in Node.
 
@@ -10,7 +13,55 @@ backend/turn.mjs uses the multilingual rate-limit detection approach described
 in codex-chatgpt-web's browser-worker.ts at commit
 7cc8b8d8aadbbf729bd2bd43ca47fa15ea9965c0:
 https://github.com/miuuyy/codex-chatgpt-web
-No markdown buffer or engine was copied. Its notice is retained below.
+This historical text-backend attribution does not describe the native runtime
+integration added later. The codex-chatgpt-web MIT notice is retained below.
+
+Native runtime integration (src/native/runtime.mjs and src/native/daemon.mjs):
+
+- codex-chatgpt-web v6.1.18 Windows amd64 runtime:
+  https://github.com/miuuyy/codex-chatgpt-web/releases/download/v6.1.18/codex-chatgpt-web-windows-amd64.zip
+  Archive SHA-256: 813690d379fd2fc91b0c95a54ab94026e9f53c53a5d43c39eeca98947cbf3fea
+  Downloaded at setup and run as the Full-mode daemon, with its Bun runtime.
+  src/native/runtime.mjs supplies a checksum-guarded Bun preload that adapts
+  the compaction gate, browser acquisition and model-announcement parsing in
+  memory. The downloaded bundle is not rewritten.
+  Verified accompanying notices under the default installation root
+  ~/.config/magpie/chatgpt-web-native/runtime-6.1.18/payload/:
+  - LICENSE: MIT, copyright (c) 2026 codex-chatgpt-web contributors;
+    reproduced below.
+  - THIRD_PARTY_NOTICES.txt: bundled runtime JavaScript dependency notices
+    and Bun licensing/relinking information.
+  - LICENSES/Bun-1.4.0.md: Bun's MIT license description, JavaScriptCore /
+    WebKit LGPL information, relinking instructions and linked-library notices.
+  - LICENSES/tiktoken-MIT.txt: MIT, copyright (c) 2022 OpenAI, Shantanu Jain.
+  - LICENSES/libnotify-0.8.7-LGPL-2.1.md: LGPL-2.1-or-later notice for the
+    upstream Linux launcher's libnotify; its presence in this Windows payload
+    does not imply that this plugin runs or bundles a Linux launcher.
+  The runtime's MIT license does not replace these dependency notices.
+
+- OpenAI tunnel-client v0.0.16 Windows amd64 release, including cloudflared:
+  https://github.com/openai/tunnel-client/releases/download/v0.0.16/tunnel-client-v0.0.16-windows-amd64.zip
+  Archive SHA-256: edef7241b0c647fcb30f1a80ff376b6b25c51927960f257a3f01e21b17c2aba6
+  Downloaded separately at setup. src/native/runtime.mjs also pins checksums
+  for tunnel-client.exe, cloudflared.exe and cloudflared-manifest.json.
+  Verified accompanying notices under the default installation root
+  ~/.config/magpie/chatgpt-web-native/tunnel-0.0.16/payload/:
+  - LICENSE: Apache License, Version 2.0.
+  - NOTICE: copyright 2026 OpenAI and the Apache-2.0 notice.
+  - tunnel-client-v0.0.16-windows-amd64-licenses.txt: Windows amd64
+    dependency license report; lists Apache-2.0, BSD-2-Clause, BSD-3-Clause
+    and MIT, including github.com/cloudflare/cloudflared as Apache-2.0.
+  - tunnel-client-v0.0.16-windows-amd64.spdx.json: SPDX 2.3 package inventory.
+    Its tunnel-client and cloudflared package license fields are NOASSERTION;
+    the license descriptions above come from LICENSE, NOTICE and the license
+    report, not inferred SPDX declarations.
+
+Paths above are relative to the installation user's home directory. With an
+explicit installation root, the same release/payload paths apply below it.
+
+These downloads are separate from the plugin's declared playwright-core npm
+dependency. This notice records the verified source attribution and download
+pins; it does not replace upstream dependency notices.
 
 MIT License
 

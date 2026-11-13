@@ -10,7 +10,13 @@ const forwardedNames = ['x-codex-turn-metadata', 'x-codex-beta-features', 'sessi
 export function nativeTurnHeaders(body, headers) {
   const forwarded = new Headers(headers);
   const metadata = body.client_metadata?.['x-codex-turn-metadata'];
-  if (metadata !== undefined) forwarded.set('x-codex-turn-metadata', typeof metadata === 'string' ? metadata : JSON.stringify(metadata));
+  if (metadata !== undefined) {
+    const json = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
+    // Headers requires ByteString. Escape UTF-16 code units (including both
+    // halves of emoji) so JSON.parse restores the exact canonical value.
+    forwarded.set('x-codex-turn-metadata', json.replace(/[\u007f-\uffff]/g,
+      char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')));
+  }
   return forwarded;
 }
 

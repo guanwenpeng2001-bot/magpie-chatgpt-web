@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { inspect } from 'node:util';
+import { execFileSync } from 'node:child_process';
 import {
   provision, provisionNativeHarness, connectorNameFor, ProvisionError,
   capturePlatformSession, createRuntimeKeyViaUi,
@@ -569,6 +570,26 @@ test('platform session selects default org and initial project, ignoring unrelat
     bearer: BEARER, organizationId: 'org-default', projectId: 'proj-initial', projectName: 'Default project',
   });
 });
+
+for (const failure of ['navigation', 'response']) {
+  test(`platform ${failure} failure does not leave an unhandled response waiter`, () => {
+    // A strict child process catches delayed Playwright rejections after the
+    // public method has already returned its safe provisioning error.
+    const script = `
+      import assert from 'node:assert/strict';
+      import { setTimeout as delay } from 'node:timers/promises';
+      import { capturePlatformSession } from ${JSON.stringify(new URL('../src/native/provision.mjs', import.meta.url).href)};
+      const page = {
+        waitForResponse: async () => { await delay(10); throw new Error('fixture response failure'); },
+        goto: async () => { await delay(${failure === 'navigation' ? 1 : 30}); ${failure === 'navigation' ? "throw new Error('fixture navigation failure');" : ''} },
+      };
+      await assert.rejects(capturePlatformSession(page), error => error.code === 'platformSignin');
+      await delay(50);
+    `;
+    execFileSync(process.execPath, ['--unhandled-rejections=strict', '--input-type=module', '-e', script],
+      { windowsHide: true, timeout: 5000, stdio: 'pipe' });
+  });
+}
 
 test('missing dashboard session is a bilingual platformSignin error', async t => {
   const { options, server } = await fixture(t);
