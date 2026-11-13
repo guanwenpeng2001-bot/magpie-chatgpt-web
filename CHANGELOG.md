@@ -2,6 +2,8 @@
 
 ## 0.5.3 — 2026-11-13
 
+- Generate Native turn capabilities from 160 CSPRNG bits using 32 lowercase Crockford characters. Live saved-chat inspection reproduced a model changing the final token character's case. Exact schema, broker lookup and revocation remain enforced; no guessed or case-normalized tool credential is accepted.
+
 - Persist native continuation checkpoints across daemon restarts using atomic AES-256-GCM storage bound to each account directory, with a separate key, a 256-entry LRU and a 32 MiB serialized plaintext limit. Restore source-hash Sets and preserve task provenance, scope, summary and metadata checks. Compaction completion requires a successful durable commit; storage failures do not authorize the unsaved summary.
 - Reject damaged or replaced snapshots, missing committed state, invalid task-message schemas and unsafe checkpoint files. Checkpoints already lost by older versions cannot be recovered retroactively; recover trusted complete history or start a new turn with the original task.
 - Expose `native-bigger-context` (default false): the usual 18-text-model catalogue still has 36 entries by default; enabling Bigger Context adds two dedicated entries for Plus or four for Pro. Original aliases retain conservative Instant-safe windows.

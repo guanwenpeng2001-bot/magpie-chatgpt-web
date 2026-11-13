@@ -24,7 +24,20 @@ const restore = body => {
 const request = body => new Request('http://127.0.0.1/v1/responses', { method: 'POST', body: JSON.stringify(body) });
 const checkpoint = summary => ({ type: 'compaction', encrypted_content: `ocx1:${Buffer.from(summary).toString('base64')}` });
 
-if (phase === 'model-announcements') {
+if (phase === 'turn-tokens') {
+  const broker = new native.TurnBroker(config.brokerSocketPath);
+  try {
+    const token = await broker.register({});
+    assert.match(token, /^turn_[0123456789abcdefghjkmnpqrstvwxyz]{32}$/);
+    broker.updateEnvironment(token, {});
+    const wrong = token.slice(0, -1) + (token.endsWith('0') ? '1' : '0');
+    assert.throws(() => broker.updateEnvironment(wrong, {}), /invalid or expired/);
+    assert.throws(() => broker.updateEnvironment(token.toUpperCase(), {}), /invalid or expired/);
+    broker.revoke(token);
+    assert.throws(() => broker.updateEnvironment(token, {}), /invalid or expired/);
+    assert.match(native.opaqueId('binding'), /^binding_[A-Za-z0-9_-]{32}$/);
+  } finally { await broker.close(); }
+} else if (phase === 'model-announcements') {
   const html = await readFile(new URL('./native-model-picker-fixture.html', import.meta.url), 'utf8');
   const browser = await native.chromium.launch({
     executablePath: process.env.CHATGPT_DOM_TEST_BROWSER ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true,

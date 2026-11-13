@@ -71,6 +71,10 @@ pins; it does not replace upstream dependency notices.
 
 MIT License
 
+The v6.1.18 preload also changes only the native turn capability generator to
+160 random bits encoded as 32 lowercase Crockford characters. Other opaque IDs,
+case-sensitive credential validation, broker lookup and revocation are unchanged.
+
 Copyright (c) 2026 codex-chatgpt-web contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
