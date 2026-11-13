@@ -108,7 +108,7 @@ test('aligned core descriptors use the smallest reference limit across their ava
       const descriptor = models[id(slug)];
       assert.match(descriptor.name, /\(Native tools\)$/);
       assert.deepEqual(Object.keys(descriptor.variants), ['low', 'medium', 'high', ...(extraHighAvailable ? ['xhigh'] : []), ...(proAvailable ? ['max'] : [])]);
-      assert.equal(descriptor.limit.context, proAvailable ? 111193 : 41000);
+      assert.equal(descriptor.limit.context, proAvailable ? 105556 : 35556);
       assert.equal(descriptor.limit.output, 0);
       assert.equal(descriptor.capabilities.toolcall, true);
       assert.equal(descriptor.capabilities.reasoning, true);
@@ -117,6 +117,7 @@ test('aligned core descriptors use the smallest reference limit across their ava
         const reference = nativeCatalog(capabilities).find(row => row.slug === route.model);
         assert.ok(reference.supported_reasoning_levels.some(level => level.effort === route.effort));
         assert.ok(descriptor.limit.context <= reference.context_window);
+        assert.ok(Math.floor(descriptor.limit.context * 0.9) <= reference.auto_compact_token_limit);
       }
     }
   }
@@ -182,9 +183,9 @@ test('catalog loads capabilities from each saved native account without starting
   t.after(() => rm(root, { recursive: true, force: true }));
   const client = nativeClient({ root, bridge: { call: () => assert.fail('catalog must not start a runtime') } });
   const cases = [
-    ['plus', { solAvailable: true }, ['low', 'medium', 'high'], 41000],
-    ['pro', { solAvailable: true, proAvailable: true }, ['low', 'medium', 'high', 'max'], 111193],
-    ['xhigh', { solAvailable: true, extraHighAvailable: true }, ['low', 'medium', 'high', 'xhigh'], 41000],
+    ['plus', { solAvailable: true }, ['low', 'medium', 'high'], 35556],
+    ['pro', { solAvailable: true, proAvailable: true }, ['low', 'medium', 'high', 'max'], 105556],
+    ['xhigh', { solAvailable: true, extraHighAvailable: true }, ['low', 'medium', 'high', 'xhigh'], 35556],
     ['legacy', undefined, undefined, 90000],
   ];
   for (const [savedProfile, capabilities, efforts, context] of cases) {
@@ -199,4 +200,24 @@ test('catalog loads capabilities from each saved native account without starting
     else assert.match(descriptor.name, /Text fallback/);
   }
   assert.deepEqual(await client.models({ profile: 'not-provisioned' }, core), {});
+});
+
+test('published native windows make Codex compact at the reference auto-compact limits', () => {
+  const cases = [
+    [{ solAvailable: true }, { 'gpt-6-sol-instant': 32000, 'gpt-6-sol': 80000 }],
+    [{ solAvailable: true, proAvailable: true }, { 'gpt-6-sol-instant': 95000, 'gpt-6-sol': 95000, 'gpt-6-pro': 95000 }],
+  ];
+  for (const [capabilities, expected] of cases) {
+    const rows = nativeCatalog(capabilities);
+    const models = describeNativeCatalogue(rows, profile);
+    for (const [slug, threshold] of Object.entries(expected)) {
+      const row = rows.find(entry => entry.slug === `chatgpt-web/${slug}`);
+      const window = models[id(slug)].limit.context;
+      assert.equal(row.auto_compact_token_limit, threshold);
+      assert.ok(window <= row.context_window, `${slug} never exceeds the real window`);
+      assert.ok(Math.floor(window * 0.9) >= threshold - 1 && Math.floor(window * 0.9) <= threshold, `${slug} compacts at ${threshold}`);
+    }
+  }
+  const luna = nativeCatalog({});
+  assert.equal(describeNativeCatalogue(luna, profile)[id('gpt-5.6-luna')].limit.context, 1050000);
 });

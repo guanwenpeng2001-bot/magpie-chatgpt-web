@@ -3,6 +3,7 @@
 ## 0.5.1 — 2026-11-13
 
 - Stop and remove earlier tunnel aliases of the account's profile when the native daemon starts, and remove the current alias on shutdown, so restarts no longer accumulate local runtime metadata. The remote tunnel and aliases of other profiles or tunnels are kept.
+- Make Codex compact native conversations at the reference's measured limits (Plus: 32K Instant, 80K Medium/High; Pro: 95K). Magpie offers no per-model threshold for plugins and Codex compacts at 90% of the published window, so each Native entry publishes the window whose 90% is that limit, never above the real window. Previously Pro compacted near 100K and Plus Medium/High near 81K only on Sol-only entries, while aliases used the Instant window.
 
 ## 0.5.0 — 2026-11-13
 
