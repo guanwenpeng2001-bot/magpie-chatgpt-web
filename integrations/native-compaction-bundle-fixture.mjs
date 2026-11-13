@@ -40,7 +40,7 @@ if (phase === 'compaction-retirement') {
   };
   // This is an observation interval, not a replacement for the broker's 90s timeout.
   const observe = () => new Promise(resolve => setTimeout(resolve, 60));
-  for (const scenario of ['matching', 'omitted-reasoning', 'changed-reasoning', 'different-turn-unattributed', 'missing-item-id', 'different-namespace']) {
+  for (const scenario of ['reordered-content', 'changed-content', 'matching', 'omitted-reasoning', 'changed-reasoning', 'different-turn-unattributed', 'missing-item-id', 'different-namespace']) {
     const sourcePrepared = deferred(), sourceAborted = deferred(), physicalRelease = deferred();
     const compactEntered = deferred(), compactStarted = deferred();
     let sourceOptions, compactOptions, sourceParsed, compactParsed, sourceProvider, compactProvider;
@@ -111,6 +111,32 @@ if (phase === 'compaction-retirement') {
       const sourceResponse = native.responseRequest(request(body), fixtureConfig, factory('source'));
       await bounded(sourcePrepared.promise, 'source browser prepared');
       const sourceKey = `${native.namespace(sourceProvider)}:${native.executionKey(sourceParsed)}`;
+      if (scenario === 'reordered-content') {
+        const reorder = value => Array.isArray(value) ? value.map(reorder)
+          : value && typeof value === 'object'
+            ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorder(item)])) : value;
+        const reordered = parse(reorder(body));
+        assert.equal(native.executionKey(sourceParsed), native.executionKey(reordered));
+        assert.equal(native.roundKey(sourceParsed), native.roundKey(reordered));
+        assert.deepEqual(native.instructionLineage(sourceParsed), native.instructionLineage(reordered));
+        for (const change of [
+          p => { p.modelId += '-different'; },
+          p => { p.options.reasoning = 'medium'; },
+          p => { p._rawBody.input[1].id += '-different'; },
+          p => { p._rawBody.input[1].content[0].text += ' '; },
+          p => { p._rawBody.input[1].content[0].extra = true; },
+        ]) {
+          const changed = parse(structuredClone(body)); change(changed);
+          assert.notEqual(native.executionKey(sourceParsed), native.executionKey(changed));
+        }
+        const orderedBody = structuredClone(body);
+        orderedBody.input[1].content.push({ type: 'input_text', text: 'Second ordered instruction.' });
+        const ordered = parse(orderedBody);
+        const swappedBody = structuredClone(orderedBody); swappedBody.input[1].content.reverse();
+        const swapped = parse(swappedBody);
+        assert.notEqual(native.executionKey(ordered), native.executionKey(swapped));
+        assert.notEqual(native.instructionLineage(ordered).current, native.instructionLineage(swapped).current);
+      }
       sourceSession = native.sessions.find(sourceKey);
       assert.ok(sourceSession, 'real adapter registered the source runtime');
       assert.equal(sourceSession.runtime.mode, 'tools');
@@ -133,6 +159,11 @@ if (phase === 'compaction-retirement') {
         compaction: { trigger: 'auto', phase: 'mid_turn', implementation: 'responses', strategy: 'memento' },
       });
       if (scenario === 'missing-item-id') delete compactBody.input[1].id;
+      if (scenario === 'reordered-content') {
+        compactBody.input[1].content = compactBody.input[1].content.map(({ type, text }) => ({ text, type }));
+        assert.notEqual(JSON.stringify(compactBody.input[1].content), JSON.stringify(body.input[1].content));
+      }
+      if (scenario === 'changed-content') compactBody.input[1].content[0].text += ' Changed instruction.';
       if (scenario === 'omitted-reasoning') delete compactBody.reasoning;
       if (scenario === 'changed-reasoning') compactBody.reasoning.effort = 'medium';
       if (scenario === 'different-turn-unattributed') {
@@ -155,11 +186,11 @@ if (phase === 'compaction-retirement') {
       const sameInstruction = sourceLineage.current === compactLineage.current;
       const sourceIsPredecessor = compactLineage.predecessors.has(sourceLineage.current);
       const reasoning = { source: sourceParsed.options.reasoning, compact: compactParsed.options.reasoning };
-      const matched = scenario === 'matching' || (scenario === 'omitted-reasoning' && reasoning.source === reasoning.compact);
+      const matched = ['matching', 'reordered-content'].includes(scenario) || (scenario === 'omitted-reasoning' && reasoning.source === reasoning.compact);
       assert.equal(lookupKey === sourceKey, matched);
       assert.equal(sameOwner, scenario !== 'different-namespace');
-      assert.equal(sameInstruction, scenario !== 'missing-item-id');
-      if (scenario === 'missing-item-id') {
+      assert.equal(sameInstruction, !['missing-item-id', 'changed-content'].includes(scenario));
+      if (['missing-item-id', 'changed-content'].includes(scenario)) {
         const failed = await bounded(pendingCompact, 'conflicting instruction rejection');
         assert.match(failed.body.error?.message ?? '', /newer Codex instruction superseded/);
         assert.equal(failed.status, 502);

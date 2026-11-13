@@ -30,6 +30,11 @@ const compactionRetirement = 'if(se&&De.findConversationHead(se))await kt(De.ret
 const usageSubmissionStart = 'let ke=async()=>{if(!o)return;let E=ho(),z;';
 const usageSubmissionEnd = 'm.push(ne)}},Be=c.text,ze=[];';
 const ownershipEntry = 'let Qe=ed(e,f),N=await De.getOrCreateAfterOwnerRetirement(re,O,()=>C(f,D,Qe,R),Qe,v.abortSignal,qe,ve.threadId,$f(f)),K=Df(f)';
+// Magpie's compact route can re-encode objects in a different key order. These
+// two hashes are process-local; checkpoint hashes and their saved format stay
+// unchanged so existing authenticated continuation records remain readable.
+const executionIdentity = 'function Nu(e,t){return xs("sha256").update(JSON.stringify({modelId:e.modelId,reasoning:e.options.reasoning,payload:t})).digest("hex")}';
+const instructionIdentity = 'let t=_i(e).map((r)=>xs("sha256").update(JSON.stringify([r.itemId??null,r.content])).digest("hex")),n=t.pop();';
 const cliSha256 = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
 const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})';
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
@@ -198,6 +203,9 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(retirement).length !== 2) throw new Error('Native compaction retirement compatibility mismatch');
     const ownership = ${JSON.stringify(ownershipEntry)};
     if (source.split(ownership).length !== 2) throw new Error('Native ownership diagnostic compatibility mismatch');
+    const executionIdentity = ${JSON.stringify(executionIdentity)}, instructionIdentity = ${JSON.stringify(instructionIdentity)};
+    if (source.split(executionIdentity).length !== 2 || source.split(instructionIdentity).length !== 2)
+      throw new Error('Native semantic identity compatibility mismatch');
     const usageStart = ${JSON.stringify(usageSubmissionStart)}, usageEnd = ${JSON.stringify(usageSubmissionEnd)};
     if (source.split(usageStart).length !== 2 || source.split(usageEnd).length !== 2)
       throw new Error('Native send receipt compatibility mismatch');
@@ -231,6 +239,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
       throw new Error('Native checkpoint persistence compatibility mismatch');
     let contents = source.replace(before, ${JSON.stringify('console.info("[chatgpt-web] compaction_phase entered");' + sharedCompactionGate)})
+      .replace(executionIdentity, executionIdentity.replace('JSON.stringify(', 'identityJson('))
+      .replace(instructionIdentity, instructionIdentity.replace('JSON.stringify(', 'identityJson('))
       .replace(retirement, 'console.info("[chatgpt-web] compaction_phase retiring");' + retirement + ';console.info("[chatgpt-web] compaction_phase retired")')
       .replace(ownership, 'let Qe=ed(e,f),magpieLineage=$f(f),magpieOwnership=ownershipSnapshot({executionKey:re,ownerKey:O,sourceKey:f._compactionRequest?p+":"+$u(f):undefined,instruction:magpieLineage,model:f.modelId,reasoning:f.options.reasoning,identity:ve,revision:_i(f).at(-1),compaction:f._compactionRequest===true});if(magpieOwnership)console.info("[chatgpt-web] ownership "+JSON.stringify(magpieOwnership));let N=await De.getOrCreateAfterOwnerRetirement(re,O,()=>C(f,D,Qe,R),Qe,v.abortSignal,qe,ve.threadId,magpieLineage),K=Df(f)')
       .replace(usageStart, 'let magpieUsageIndex=0,magpieLegacyUsage=async()=>{if(!o)return;let E=ho(),z;')
@@ -257,6 +267,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { ownershipSnapshot } from ' + JSON.stringify(new URL('./ownership-diagnostics.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { identityJson } from ' + JSON.stringify(new URL('./identity-json.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
     contents = patchReferenceFixes(contents);
     return { contents, loader: 'js' };

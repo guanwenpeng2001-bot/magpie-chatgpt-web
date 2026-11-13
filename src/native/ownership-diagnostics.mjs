@@ -8,12 +8,13 @@ const efforts = new Set(['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'max'
 // prompt, capability, model name or metadata leaves this projection.
 export function ownershipSnapshot(value) {
   try {
+    const effort = typeof value.reasoning === 'string' ? value.reasoning : value.reasoning?.effort;
     return { compaction: value.compaction === true,
       executionHash: fingerprint(value.executionKey), ownerHash: fingerprint(value.ownerKey),
       sourceHash: fingerprint(value.sourceKey), instructionHash: fingerprint(value.instruction?.current),
       predecessorHashes: [...(value.instruction?.predecessors ?? [])].slice(-8).map(fingerprint),
       modelHash: fingerprint(value.model),
-      effort: efforts.has(value.reasoning?.effort) ? value.reasoning.effort : 'unknown',
+      effort: efforts.has(effort) ? effort : 'unknown',
       turnHash: fingerprint(value.identity?.turnId), threadHash: fingerprint(value.identity?.threadId),
       itemHash: fingerprint(value.revision?.itemId), contentHash: fingerprint(value.revision?.content) };
   } catch { return null; }

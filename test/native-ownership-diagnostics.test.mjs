@@ -21,6 +21,8 @@ test('ownership evidence distinguishes changed settings from changed canonical i
 });
 
 test('ownership parser retains only bounded allowlisted hashes and safely ignores unsupported data', () => {
+  assert.equal(ownershipSnapshot({ ...sample(), reasoning: 'high' }).effort, 'high');
+  assert.equal(ownershipSnapshot({ ...sample(), reasoning: 'private-value' }).effort, 'unknown');
   const snapshot = ownershipSnapshot(sample());
   assert.doesNotMatch(JSON.stringify(parseOwnershipSnapshot({ ...snapshot, token: 'private-token' })), /private|token/);
   for (const value of [null, { ...snapshot, effort: 'private-value' }, { ...snapshot, itemHash: 'private-id' },

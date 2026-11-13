@@ -165,10 +165,11 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
       events.push('createSession');
       assert.equal(typeof args[2], 'function');
       assert.equal(args[4], signal);
+      assert.equal(args[7], 'fixture-lineage');
       return 'fixture-session';
     } },
     re: 'fixture-execution', O: 'fixture-owner', Qe: 'fixture-trace', v: { abortSignal: signal },
-    qe: 'fixture-turn', ve: { threadId: 'fixture-thread' }, $f: input => { assert.equal(input, parsed); return 'fixture-lineage'; },
+    qe: 'fixture-turn', ve: { threadId: 'fixture-thread' }, magpieLineage: 'fixture-lineage',
     C() { assert.fail('session factory must not start a runtime in this fixture'); },
   };
   return { result: runInNewContext(script, scope), events, emitted, adapterErrors };

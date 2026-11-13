@@ -27,7 +27,7 @@ test('pinned automatic compaction retires real pending tools by source ownership
   const home = await mkdtemp(join(scratch, 'compaction-retirement-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const preload = join(home, 'exports-preload.mjs');
-  const exports = '\nexport { dn as TurnBroker, Cs as Worker, De as sessions, Bi as createAdapter, Le as callBroker, kg as namespace, _s as executionKey, $u as sourceKey, $f as instructionLineage, Lu as ownerKey, Di as conversationKey, cd as compactRequest, Ls as responseRequest, Fn as parseRequest, sd as route, vs as close };';
+  const exports = '\nexport { dn as TurnBroker, Cs as Worker, De as sessions, Bi as createAdapter, Le as callBroker, kg as namespace, _s as executionKey, Df as roundKey, $u as sourceKey, $f as instructionLineage, Lu as ownerKey, Di as conversationKey, cd as compactRequest, Ls as responseRequest, Fn as parseRequest, sd as route, vs as close };';
   const base = compactionPreloadSource(entry);
   const source = base.replace("return { contents, loader: 'js' };",
     `return { contents: contents + ${JSON.stringify(exports)}, loader: 'js' };`);
