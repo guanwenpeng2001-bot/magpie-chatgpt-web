@@ -239,3 +239,44 @@ test('acknowledged shutdown that never exits falls back after the exit deadline'
   assert.equal(children[0].killed, true);
   assert.equal(calls.some(call => call.args[1] === 'stop'), true);
 });
+
+test('startup stops and removes stale aliases of this profile only, keeping the current one', async t => {
+  const { daemon, calls, home } = await fixture(t);
+  const profileDir = join(home, 'tunnel');
+  const staleA = 'magpie-11111111-1111-4111-8111-111111111111';
+  const staleB = 'magpie-22222222-2222-4222-8222-222222222222';
+  const foreign = 'magpie-33333333-3333-4333-8333-333333333333';
+  const otherTunnel = 'magpie-44444444-4444-4444-8444-444444444444';
+  const original = daemon.command.bind(daemon);
+  const commands = [];
+  daemon.command = (args, signal) => {
+    commands.push(args.slice(0, 3));
+    if (args[1] === 'list') return Promise.resolve({ aliases: [
+      { alias: staleA, profile_dir: profileDir, tunnel_id: credentials.tunnelId },
+      { alias: staleB, profile_dir: profileDir.toUpperCase(), tunnel_id: credentials.tunnelId },
+      { alias: foreign, profile_dir: join(home, 'other'), tunnel_id: credentials.tunnelId },
+      { alias: otherTunnel, profile_dir: profileDir, tunnel_id: 'another-tunnel' },
+      { alias: 'user-alias', profile_dir: profileDir, tunnel_id: credentials.tunnelId },
+    ] });
+    if (args[1] === 'stop' && args[2] === staleA) return Promise.reject(new Error('already stopped'));
+    return original(args, signal);
+  };
+  await daemon.start(credentials);
+  const current = daemon.config.tunnel.alias;
+  const removed = commands.filter(args => args[1] === 'rm').map(args => args[2]);
+  assert.deepEqual(removed, [staleA, staleB]);
+  assert.deepEqual(commands.filter(args => args[1] === 'stop').map(args => args[2]), [staleA, staleB]);
+  const connectAt = commands.findIndex(args => args[1] === 'connect');
+  assert.ok(commands.findLastIndex(args => args[1] === 'rm') < connectAt, 'stale aliases are removed before connecting');
+  assert.ok(!removed.includes(current));
+  assert.ok(calls.some(call => call.args.includes(current)));
+  await daemon.stop();
+  assert.deepEqual(commands.slice(-2).map(args => [args[1], args[2]]), [['stop', current], ['rm', current]]);
+});
+
+test('an unreadable alias list does not block startup', async t => {
+  const { daemon } = await fixture(t);
+  const original = daemon.command.bind(daemon);
+  daemon.command = (args, signal) => args[1] === 'list' ? Promise.reject(new Error('list failed')) : original(args, signal);
+  assert.equal(await daemon.start(credentials), daemon);
+});

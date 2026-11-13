@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 — 2026-11-13
+
+- Stop and remove earlier tunnel aliases of the account's profile when the native daemon starts, and remove the current alias on shutdown, so restarts no longer accumulate local runtime metadata. The remote tunnel and aliases of other profiles or tunnels are kept.
+
 ## 0.5.0 — 2026-11-13
 
 - Add opt-in/out `native-tools` setup (enabled by default), account-scoped Responses models, and the pinned v6.1.18 Full-mode daemon with tunnel-client v0.0.16 and cloudflared.

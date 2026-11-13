@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.5.0`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.5.1`. Host verified against: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Native tools mode
 
@@ -12,7 +12,7 @@ Setup adds a matching `native/<profile>/<model>` entry for each text model: an 1
 
 Use Magpie's native Codex Desktop route, with the built-in OpenAI provider pointing at Magpie. A generic Codex custom provider can remove native message identities before the plugin sees them. Native turns reuse the plugin-owned ordinary Chrome login context; the reference runtime disconnects from it on shutdown without closing the account browser.
 
-The first setup downloads SHA-256-verified Windows releases (daemon v6.1.18, tunnel-client v0.0.16 including cloudflared) into `~/.config/magpie/chatgpt-web-native/`. Account storage states, runtime keys and configuration stay under that directory; protect it like your signed-in browser profile. POSIX files use mode 0600; Windows access follows the parent directory ACL. Existing mismatching installations are refused. The daemon uses its own isolated Codex state and does not configure the user's launcher. The installer and account API accept an explicit root for isolated tests.
+The first setup downloads SHA-256-verified Windows releases (daemon v6.1.18, tunnel-client v0.0.16 including cloudflared) into `~/.config/magpie/chatgpt-web-native/`. Account storage states, runtime keys and configuration stay under that directory; protect it like your signed-in browser profile. POSIX files use mode 0600; Windows access follows the parent directory ACL. Existing mismatching installations are refused. The daemon uses its own isolated Codex state and does not configure the user's launcher. Each start stops and removes the account's earlier local tunnel aliases (the remote tunnel is kept), so only the current alias remains. The installer and account API accept an explicit root for isolated tests.
 
 Native compaction runs in the same Full daemon as subsequent turns, using the reference's read-only summary path and its v1 replacement history, memento and v2 envelopes. A checksum-pinned Bun preload adapts the exact v6.1.18 bundle's compaction gate and browser acquisition; the downloaded bundle remains unchanged. Continuation checkpoints retain the reference's process-local, 256-entry limit and do not survive a daemon restart. Bigger Context is disabled. The reference `/v1/models` passthrough needs a separate Codex credential, so browser model rows are derived locally.
 

@@ -139,6 +139,7 @@ export class NativeDaemon {
     await this.waitFor(() => this.proxy.health(signal), signal);
     childState.httpReady = true;
     const tunnel = this.config.tunnel;
+    await this.removeStaleAliases(tunnel, signal);
     await this.command(['runtimes', 'connect', '--alias', tunnel.alias, '--profile', tunnel.profileName,
       '--profile-dir', tunnel.profileDir, '--tunnel-client-bin', tunnel.binaryPath, '--tunnel-id', tunnelId,
       '--runtime-api-key', `file:${runtimeKeyFile}`, '--mcp-command', quoteMcpCommand([...this.runtimeCommand,
@@ -162,6 +163,25 @@ export class NativeDaemon {
       await this.sleep(this.pollMs, undefined, { signal });
     }
     throw new Error('Native daemon readiness timed out');
+  }
+  // Each launch connects a fresh alias. Earlier aliases of this account's
+  // profile are stopped and their local metadata removed; the remote tunnel
+  // itself is kept (`runtimes rm` deletes only local metadata).
+  async removeStaleAliases(tunnel, signal) {
+    let listed;
+    try { listed = await this.command(['runtimes', 'list', '--json'], signal); } catch { return; }
+    const owned = resolve(tunnel.profileDir).toLowerCase();
+    const stale = (Array.isArray(listed?.aliases) ? listed.aliases : [])
+      .filter(entry => entry && typeof entry.alias === 'string' && entry.alias !== tunnel.alias
+        && /^magpie-[0-9a-f-]{36}$/.test(entry.alias)
+        && typeof entry.profile_dir === 'string' && resolve(entry.profile_dir).toLowerCase() === owned
+        && (entry.tunnel_id === undefined || entry.tunnel_id === tunnel.tunnelId))
+      .map(entry => entry.alias);
+    for (const alias of stale) {
+      signal.throwIfAborted();
+      await this.command(['runtimes', 'stop', alias, '--json'], signal).catch(() => {});
+      await this.command(['runtimes', 'rm', alias, '--json'], signal).catch(() => {});
+    }
   }
   command(args, signal) {
     return new Promise((resolve, reject) => {
@@ -244,7 +264,10 @@ export class NativeDaemon {
           }
         } finally {
           // Cancellation may still need the MCP connection until the daemon exits.
-          if (config?.tunnel) await this.command(['runtimes', 'stop', config.tunnel.alias, '--json']).catch(() => {});
+          if (config?.tunnel) {
+            await this.command(['runtimes', 'stop', config.tunnel.alias, '--json']).catch(() => {});
+            await this.command(['runtimes', 'rm', config.tunnel.alias, '--json']).catch(() => {});
+          }
         }
       }
     })().finally(() => { this.cleaning = null; });
