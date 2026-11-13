@@ -19,7 +19,9 @@ export function nativeCatalog(capabilities = {}) {
   const proAvailable = capabilities?.proAvailable === true;
   const extraHighAvailable = capabilities?.extraHighAvailable === true;
   const row = (slug, context, autoCompact, efforts) => {
-    if (capabilities.experimentalBiggerContext === true && slug !== 'gpt-6-sol-instant') {
+    // Live 275K retention failed with both original and Pro-only staging.
+    // Keep Pro at its baseline transport/compaction budget until revalidated.
+    if (capabilities.experimentalBiggerContext === true && slug !== 'gpt-6-sol-instant' && !slug.endsWith('-pro')) {
       if (slug === 'gpt-5.6-luna') { context = 84000; autoCompact = 59424; }
       else if (slug === 'gpt-6-sol') { context = proAvailable ? 240000 : 120000; autoCompact = proAvailable ? 220000 : 110000; }
       else { context *= 3; autoCompact *= 3; }
@@ -103,7 +105,7 @@ export function describeNativeCatalogue(source, profile, capabilities = {}) {
         const slug = row.slug.slice('chatgpt-web/'.length);
         const id = `native/${profile}/${slug}`;
         if (!Object.hasOwn(descriptors, id)) {
-          descriptors[id] = nativeDescriptor(id, `${row.display_name}${bigger ? ' — Bigger Context' : ''}`, [row]);
+          descriptors[id] = nativeDescriptor(id, `${row.display_name}${bigger && !slug.endsWith('-pro') ? ' — Bigger Context' : ''}`, [row]);
         }
       }
     }

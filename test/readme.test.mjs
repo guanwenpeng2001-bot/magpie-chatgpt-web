@@ -33,13 +33,27 @@ test('README separates supported plan fields from unknown account allowance and 
   assert.match(section, /`account\.planType`.*when the response contains a recognized code/);
   assert.match(section, /`account\.isDelinquent === true`/);
   assert.match(section, /Remaining allowance and reset times.*\*\*Unknown\*\*.*with a reason/);
-  assert.match(section, /omits `used` rather than reporting a fabricated 0% used or 100% remaining/);
-  assert.match(section, /live session response has not been inspected for this quota fix/);
+  assert.match(section, /omits `used` at the JavaScript hook boundary rather than reporting a fabricated 0% used or 100% remaining/);
+  assert.match(section, /Installed \*\*0\.5\.4\*\* was live-verified/);
+  assert.match(section, /`kind: "subscription"`, plan `ChatGPT Pro \(prolite\)` and an Unknown text window/);
+  assert.match(section, /diagnosis-054-quota-live\.json/);
+  assert.match(section, /does not verify every plan tier or the payment-attention outcome/);
   assert.match(section, /valid session can lack `account` or a recognized plan code/);
   assert.match(section, /Session expiry is not a quota reset or subscription renewal date/);
   assert.match(section, /Plan names, advertised caps, local token totals and Codex `\/wham\/usage` counters are never used to infer ChatGPT remaining allowance/);
-  assert.match(section, /do not constitute live verification of the updated quota card/);
+  assert.match(section, /Neither the live quota result nor these tests establishes a measured remaining allowance/);
   assert.doesNotMatch(prose, /no dedicated[^.]*quota-display workflow/i);
+});
+
+test('README explains Go numeric placeholders and the authoritative text-only flag', () => {
+  const section = readme.split('## Account quota and token accounting\n')[1]?.split('\n## ')[0];
+  assert.ok(section, 'account quota section exists');
+  assert.match(section, /`used: 0`, `remaining: 100` and `text: true`/);
+  assert.match(section, /Go-normalized placeholders, not measured usage or remaining allowance/);
+  assert.match(section, /JSON consumers must honor `text: true`/);
+  assert.match(section, /Unknown without a percentage meter in both Used and Left modes/);
+  assert.match(section, /Go routing excludes text-only windows from measured allowance/);
+  assert.match(section, /not a new live UI session/);
 });
 
 test('README keeps quota reads non-interactive and separate from request token accounting', () => {
@@ -61,7 +75,10 @@ test('CHANGELOG 0.5.4 records quota support without claiming measured remaining 
   assert.match(section, /auth\.usage/);
   assert.match(section, /recognized plan labels and payment-attention status/);
   assert.match(section, /remaining allowance and reset times are not fabricated or inferred/);
-  assert.match(section, /Live availability of these account fields has not been verified/);
+  assert.match(section, /Installed 0\.5\.4 live quota returned a subscription with plan `ChatGPT Pro \(prolite\)`/);
+  assert.match(section, /other plan tiers and the payment-attention outcome were not live-verified/);
+  assert.match(section, /`used: 0` and `remaining: 100` are numeric placeholders when `text: true`/);
+  assert.match(section, /not a new live UI session/);
   assert.match(section, /Quota refresh emits no additional `input\.magpie\.usage` event/);
 });
 

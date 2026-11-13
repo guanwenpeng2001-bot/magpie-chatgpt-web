@@ -5,16 +5,18 @@
 ### Native routing and responses
 
 - Publish explicit GPT-5.6 Pro and GPT-6 Pro Native selectors for Pro accounts even when Bigger Context is off. Default Plus/Pro catalogues contain 36/38 entries; Bigger Context contains 38/40. Core aliases retain their conservative limits.
+- Stop advertising the experimental triple Pro window after live ~276K trials recovered only 4/12 distributed markers. Keep the ordinary Pro catalogue budget and reject compiled Pro input at or above 112,193 tokens before browser work, including clients with stale model catalogues. No input is silently dropped.
 - Preserve Pro's fixed maximum effort during text fallback and honor `parallel_tool_calls: false`. Auxiliary requests without any provenance markers use strict text conversion; partial, invalid and cross-account proofs still fail closed, including when Native mode is disabled.
 - Repair multiline Markdown table cells in the checksum-pinned reference converter without changing code blocks. Recognize visible terminal service alerts in the bound response, including observed Chinese errors, without treating user text or generated Markdown as site failures.
 
-Live checks: GPT-5.6 Pro and GPT-6 Pro each read the invoice fixture, reproduced two failing tests, changed the implementation with a real tool call and passed all three tests in a second turn. The test files remained unchanged. A fresh GPT-6 Pro read-only control also passed. These are small-context checks, not proof of full-window capacity. The large-input attempts encountered upstream service alerts; the multipart attempt reached its first staging message but did not complete. An earlier additional-context trial was truncated by Codex and is explicitly excluded from capacity evidence.
+Live checks: both Pro models read files, reproduced two test failures, edited the implementation and passed all three tests. After installing 0.5.4, a short session compacted, survived a daemon restart and read files/passed tests again; only one tunnel alias remained. Large-context trials transmitted all six parts and used real tools, but failed 12-marker retention (4/12 recovered); no-tools and all-Pro-staging controls also failed. The latter experiment was reverted. An earlier Codex-truncated trial is excluded from capacity evidence.
 
 ### Account quota
 
 - Add Magpie's `auth.usage` hook so signed-in ChatGPT Web accounts can supply an allowance card instead of being omitted and falling back to the CLI's generic Balance URL placeholder.
-- Read recognized plan labels and payment-attention status from `/api/auth/session` without model requests or browser fallback. Missing account fields, unsupported plans and read failures produce explicit unknown reasons; remaining allowance and reset times are not fabricated or inferred from plans, local token totals or Codex quotas. Live availability of these account fields has not been verified for this fix.
+- Read recognized plan labels and payment-attention status from `/api/auth/session` without model requests or browser fallback. Missing account fields, unsupported plans and read failures produce explicit unknown reasons; remaining allowance and reset times are not fabricated or inferred from plans, local token totals or Codex quotas. Installed 0.5.4 live quota returned a subscription with plan `ChatGPT Pro (prolite)` and an Unknown text window (`diagnosis-054-quota-live.json`); other plan tiers and the payment-attention outcome were not live-verified.
 - Keep existing per-request input/output token accounting unchanged. Quota refresh emits no additional `input.magpie.usage` event. Add offline coverage for the installed host contract, unknown values, cancellation, account isolation and duplicate-event prevention.
+- Clarify that Go-normalized JSON fields `used: 0` and `remaining: 100` are numeric placeholders when `text: true`, not a measured 100% remaining. Verify the installed UI renders the Unknown message without a percentage meter in Used/Left modes, and focused upstream Go tests exclude text-only windows from measured routing allowance. This rendering check uses an isolated fixture, not a new live UI session.
 
 ## 0.5.3 — 2026-11-13
 

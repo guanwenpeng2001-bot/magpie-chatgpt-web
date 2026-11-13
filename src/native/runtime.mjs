@@ -34,6 +34,20 @@ const checkpointRememberTail = 'while(Kt.size>dx)Kt.delete(Kt.keys().next().valu
 const checkpointTouch = 'return Kt.delete(e),Kt.set(e,t),!0}';
 const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url")}`}';
 const markdownGfmSetup = 'Vt.use(fC);';
+const proContextGuard = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
+const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
+
+// The 275K live multipart test delivered all stages but recovered only 4/12
+// independent markers, even when all stages used Pro. Do not advertise or
+// submit the experimental triple Pro budget until retention is verified.
+// Keep the pinned reference's ordinary Pro boundary (including its reserve).
+export function assertNativeProContext(inputTokens, effort, AdapterError) {
+  if (effort === 'max' && inputTokens >= 112193) {
+    throw new AdapterError('Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+      status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
+    });
+  }
+}
 const terminalErrorDetector = 'async function wf(e){if(await e.getByTestId("regenerate-thread-error-button").last().isVisible().catch(()=>!1))throw new q("ChatGPT displayed an error for this response. Check the ChatGPT tab for the exact error, then retry the turn.",{status:502,errorType:"server_error",code:"upstream_server_error",retryable:!0});if(!await g_(e).isVisible().catch(()=>!1))return;throw new q("ChatGPT ended the turn with \'Something went wrong\'. Retry the turn.",{status:502,errorType:"server_error",code:"upstream_server_error",retryable:!0})}';
 
 // Inspect only the bound response's visible service alert. User text and
@@ -169,6 +183,10 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(markdown).length !== 2) throw new Error('Native markdown table compatibility mismatch');
     const terminal = ${JSON.stringify(terminalErrorDetector)};
     if (source.split(terminal).length !== 2) throw new Error('Native terminal alert compatibility mismatch');
+    const contextGuard = ${JSON.stringify(proContextGuard)};
+    if (source.split(contextGuard).length !== 2) throw new Error('Native Pro context guard compatibility mismatch');
+    const roundGuard = ${JSON.stringify(proRoundGuard)};
+    if (source.split(roundGuard).length !== 2) throw new Error('Native Pro round guard compatibility mismatch');
     const registry = ${JSON.stringify(checkpointRegistry)};
     const remember = ${JSON.stringify(checkpointRememberTail)};
     const touch = ${JSON.stringify(checkpointTouch)};
@@ -178,6 +196,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       throw new Error('Native checkpoint persistence compatibility mismatch');
     const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
+      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')
+      .replace(roundGuard, 'if(y.effort==="max")assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q);let D;if(y.localTools)try{D=m.resolve(f)}')
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
@@ -188,6 +208,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())}
       + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
       + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
+      + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')};
     return { contents, loader: 'js' };
   });
