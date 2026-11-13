@@ -8,9 +8,10 @@ import { chatHeadersHook } from './hooks/chat-headers.mjs';
 import { describeCatalogue } from './models.mjs';
 import { makeLoader } from './loader.mjs';
 import { nativeClient } from './native/index.mjs';
+import { usageHook } from './hooks/usage.mjs';
 
 function createHooks(env) {
-  return { config: configHook(), auth: authHook(env), provider: providerHook(env), 'chat.headers': chatHeadersHook() };
+  return { config: configHook(), auth: { ...authHook(env), usage: usageHook(env) }, provider: providerHook(env), 'chat.headers': chatHeadersHook() };
 }
 
 export default {

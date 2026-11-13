@@ -14,6 +14,10 @@ Magpie exposes the base family once and sends the chosen effort in `x-magpie-eff
 
 The six ordinary Chat alias catalogue rows (`-instant`, `-thinking`, `-pro` for each family) are represented by these variants rather than duplicate model cards. Without an effort header, a base ID uses the verified Medium/default browser state. `auto` remains the explicitly requested page-default mode.
 
+## Native Pro context guard (0.5.4)
+
+Explicit Native GPT-5.6 Pro and GPT-6 Pro selectors remain available with Bigger Context off. Their published window stays approximately 105.6K with a reference 95K compaction target. Bigger Context does not enlarge Pro: ~276K live requests delivered all parts but recovered only 4/12 distributed markers in tool/no-tool controls. The runtime rejects compiled Pro input at or above 112,193 tokens before browser work, including clients holding an older 316.7K catalogue. This is the ordinary reference boundary, not a claim that every input below it has been exhaustively validated. The source history is never truncated to make it fit.
+
 ## Local context and usage estimates
 
 ChatGPT does not expose an official token count for this browser transport. Magpie usage is therefore a local estimate, not an OpenAI token count, quota reading or billing record. The plugin computes all values below before or while the turn runs:

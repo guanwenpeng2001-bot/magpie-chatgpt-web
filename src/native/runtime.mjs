@@ -33,6 +33,66 @@ const checkpointRegistry = 'var Kt=new Map,dx=256;';
 const checkpointRememberTail = 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value)}function Nh';
 const checkpointTouch = 'return Kt.delete(e),Kt.set(e,t),!0}';
 const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url")}`}';
+const markdownGfmSetup = 'Vt.use(fC);';
+const proContextGuard = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
+const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
+
+// The 275K live multipart test delivered all stages but recovered only 4/12
+// independent markers, even when all stages used Pro. Do not advertise or
+// submit the experimental triple Pro budget until retention is verified.
+// Keep the pinned reference's ordinary Pro boundary (including its reserve).
+export function assertNativeProContext(inputTokens, effort, AdapterError) {
+  if (effort === 'max' && inputTokens >= 112193) {
+    throw new AdapterError('Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+      status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
+    });
+  }
+}
+const terminalErrorDetector = 'async function wf(e){if(await e.getByTestId("regenerate-thread-error-button").last().isVisible().catch(()=>!1))throw new q("ChatGPT displayed an error for this response. Check the ChatGPT tab for the exact error, then retry the turn.",{status:502,errorType:"server_error",code:"upstream_server_error",retryable:!0});if(!await g_(e).isVisible().catch(()=>!1))return;throw new q("ChatGPT ended the turn with \'Something went wrong\'. Retry the turn.",{status:502,errorType:"server_error",code:"upstream_server_error",retryable:!0})}';
+
+// Inspect only the bound response's visible service alert. User text and
+// generated Markdown containing error words or retry buttons are not failures.
+export async function nativeTerminalErrorAlert(scope, AdapterError) {
+  const failed = await scope.evaluateAll(containers => {
+    if (containers.length !== 1) return false;
+    const container = containers[0];
+    const users = container.querySelectorAll('[data-user-message-bubble]');
+    if (container.hasAttribute('data-turn-key') && users.length !== 1) return false;
+    return [...container.querySelectorAll('[role="alert"]')].some(alert => {
+      if (alert.closest('[data-turn-key], [data-turn-id]') !== container) return false;
+      if (users.length === 1 && !(users[0].compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
+      const excluded = '.markdown, [data-markdown-text-style], [data-user-message-bubble], [data-message-author-role="user"], [data-conversation-role="user"], [data-turn="user"], [contenteditable]:not([contenteditable="false"])';
+      if (alert.closest(excluded)) return false;
+      for (let node = alert; node; node = node.parentElement) {
+        if (node.matches('[hidden], [inert], [aria-hidden="true"]')) return false;
+      }
+      if (!alert.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+      const rect = alert.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const text = alert.innerText.replace(/\s+/g, '');
+      if (/^(?:消息流中的错误|出了点问题。请重试)(?:重试)?$/.test(text)) return true;
+      if (/^(?:Errorinmessagestream|Somethingwentwrong\.?Please(?:tryagain|retry)\.?)(?:Retry|Tryagain)?$/i.test(text)) return true;
+      if (/^Somethingwentwrong\.Ifthisissuepersistspleasecontactusthroughourhelpcenterathelp\.openai\.com\.?(?:Retry|Tryagain)?$/i.test(text)) return true;
+      // Preserve the site's dedicated terminal retry control only inside this
+      // trusted service-alert boundary, never from generated response content.
+      return [...alert.querySelectorAll('[data-testid="regenerate-thread-error-button"]')]
+        .some(button => !button.closest(excluded) && button.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    });
+  });
+  if (failed) throw new AdapterError('ChatGPT displayed a terminal error for this response. Retry the turn.', {
+    status: 502, errorType: 'server_error', code: 'upstream_server_error', retryable: true,
+  });
+}
+
+// v6.1.18 markdown.ts uses turndown-plugin-gfm 1.0.2, whose tableCell rule
+// wraps paragraph/block content verbatim, including its surrounding newlines.
+// Normalize only converted TH/TD content; keep GFM's cell delimiters and let
+// its existing row rule handle alignment. Never rewrite the whole Markdown.
+function nativeMarkdownTableCell(content, node) {
+  const index = Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+  const normalized = content.trim().replace(/\r\n?/g, '\n').replace(/[ \t]*\n[ \t\n]*/g, '<br>');
+  return `${index === 0 ? '| ' : ' '}${normalized} |`;
+}
 
 // Preserve 160 random bits in the existing 32-character token payload without
 // mixed case or visually ambiguous i/l/o/u. Authentication remains exact-match;
@@ -119,6 +179,14 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
     const announcement = ${JSON.stringify(modelAnnouncementTail)};
     if (source.split(announcement).length !== 2) throw new Error('Native model announcement compatibility mismatch');
+    const markdown = ${JSON.stringify(markdownGfmSetup)};
+    if (source.split(markdown).length !== 2) throw new Error('Native markdown table compatibility mismatch');
+    const terminal = ${JSON.stringify(terminalErrorDetector)};
+    if (source.split(terminal).length !== 2) throw new Error('Native terminal alert compatibility mismatch');
+    const contextGuard = ${JSON.stringify(proContextGuard)};
+    if (source.split(contextGuard).length !== 2) throw new Error('Native Pro context guard compatibility mismatch');
+    const roundGuard = ${JSON.stringify(proRoundGuard)};
+    if (source.split(roundGuard).length !== 2) throw new Error('Native Pro round guard compatibility mismatch');
     const registry = ${JSON.stringify(checkpointRegistry)};
     const remember = ${JSON.stringify(checkpointRememberTail)};
     const touch = ${JSON.stringify(checkpointTouch)};
@@ -127,6 +195,10 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
       throw new Error('Native checkpoint persistence compatibility mismatch');
     const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+      .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
+      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')
+      .replace(roundGuard, 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
       .replace(touch, 'return Kt.delete(e),Kt.set(e,t),magpieCheckpointPersistence?.commit(),!0}')
@@ -135,6 +207,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       .replace(announcement, ${JSON.stringify('r.push(c.join(" "));r=(' + appendNativeModelAnnouncement.toString() + ')(t,r,c.join(" "))}return r})}function fc(e)')})
       + '\\n' + ${JSON.stringify(launchNativeBrowser.toString())}
       + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
+      + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
+      + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')};
     return { contents, loader: 'js' };
   });

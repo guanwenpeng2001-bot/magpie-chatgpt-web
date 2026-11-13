@@ -32,7 +32,7 @@ test('provider boolean defaults and ordinary-chat retention are explicit', () =>
   assert.match(temporary.description, /Turn off to save ordinary chats in ChatGPT history/);
 });
 
-test('Bigger Context uses reference measured windows AND compaction budgets for every capability tier', () => {
+test('Bigger Context preserves existing Sol/Luna budgets and guards Pro at baseline for every capability tier', () => {
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
     const rows = nativeCatalog({ solAvailable: true, proAvailable, extraHighAvailable, experimentalBiggerContext: true });
     const expected = {
@@ -40,7 +40,7 @@ test('Bigger Context uses reference measured windows AND compaction budgets for 
       'gpt-6-sol': proAvailable ? [240000, 220000] : [120000, 110000],
       'gpt-5.6-sol-instant': proAvailable ? [333579, 285000] : [123000, 96000],
       'gpt-5.6-sol': proAvailable ? [333579, 285000] : [270000, 240000],
-      ...(proAvailable ? { 'gpt-6-pro': [336579, 285000], 'gpt-5.6-pro': [336579, 285000] } : {}),
+      ...(proAvailable ? { 'gpt-6-pro': [112193, 95000], 'gpt-5.6-pro': [112193, 95000] } : {}),
     };
     assert.equal(rows.length, Object.keys(expected).length);
     for (const row of rows) {
@@ -182,23 +182,22 @@ test('daemon applies deferred config only on next launch, owns checkpoint home a
 
 
 
-test('18 text plus 18 native rows stay 36 when disabled; Bigger adds only exact reasoning and Pro routes', () => {
+test('Pro selectors keep guarded budgets and names across Bigger Context toggles while preserving 38/40 counts', () => {
   const source = Object.fromEntries(['gpt-6', 'gpt-5-6', ...Array.from({ length: 16 }, (_, i) => `fixture-${i}`)]
     .map(slug => [slug, { name: slug, limit: { context: 90000 }, variants: {} }]));
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
     const caps = { solAvailable: true, proAvailable, extraHighAvailable };
     const off = describeNativeCatalogue(source, 'counts', caps);
     const on = describeNativeCatalogue(source, 'counts', { ...caps, experimentalBiggerContext: true });
-    assert.equal(Object.keys({ ...source, ...off }).length, 36);
+    assert.equal(Object.keys({ ...source, ...off }).length, proAvailable ? 38 : 36);
     assert.equal(Object.keys({ ...source, ...on }).length, proAvailable ? 40 : 38);
     assert.deepEqual(on['native/counts/gpt-6'], off['native/counts/gpt-6']);
     for (const key of Object.keys(off)) assert.ok(Object.hasOwn(on, key));
     const added = Object.keys(on).filter(key => !Object.hasOwn(off, key));
     for (const key of added) {
       assert.match(on[key].name, /Bigger Context/);
-      assert.match(key, /-(sol|pro)$/);
-      const isPro = key.endsWith('-pro');
-      assert.deepEqual(Object.keys(on[key].variants), isPro ? ['max'] : ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]);
+      assert.match(key, /-sol$/);
+      assert.deepEqual(Object.keys(on[key].variants), ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]);
       for (const effort of Object.keys(on[key].variants)) {
         const route = nativeRoute(key, effort);
         assert.equal(route.daemonSupported, true);
@@ -207,7 +206,22 @@ test('18 text plus 18 native rows stay 36 when disabled; Bigger adds only exact 
       }
     }
     assert.equal(on['native/counts/gpt-6-sol'].limit.context, proAvailable ? 240000 : 120000);
-    if (proAvailable) assert.equal(on['native/counts/gpt-6-pro'].limit.context, 316667);
+    for (const family of ['gpt-6', 'gpt-5.6']) {
+      const key = `native/counts/${family}-pro`;
+      if (proAvailable) {
+        assert.equal(off[key].limit.context, 105556);
+        assert.equal(on[key].limit.context, 105556);
+        assert.doesNotMatch(off[key].name, /Bigger Context/);
+        assert.doesNotMatch(on[key].name, /Bigger Context/);
+        assert.deepEqual(on[key], off[key]);
+        assert.deepEqual(Object.keys(off[key].variants), ['max']);
+        assert.deepEqual(Object.keys(on[key].variants), ['max']);
+        assert.equal(nativeRoute(key, 'high').effort, 'max');
+      } else {
+        assert.equal(off[key], undefined);
+        assert.equal(on[key], undefined);
+      }
+    }
     assert.equal(on['native/counts/gpt-5.6-sol'].limit.context, proAvailable ? 316667 : 266667);
     const duplicate = { ...source, 'gpt-6-sol': { name: 'Existing Sol' } };
     const merged = describeNativeCatalogue(duplicate, 'counts', { ...caps, experimentalBiggerContext: true });
@@ -216,4 +230,35 @@ test('18 text plus 18 native rows stay 36 when disabled; Bigger adds only exact 
   }
   const free = describeNativeCatalogue(source, 'counts', { experimentalBiggerContext: true });
   assert.equal(Object.keys(free).length, 18);
+});
+
+for (const family of ['gpt-6', 'gpt-5.6']) {
+  test(`${family} Pro raw and published limits remain baseline with Bigger Context on or off`, () => {
+    for (const experimentalBiggerContext of [undefined, false, true]) {
+      const rows = nativeCatalog({ solAvailable: true, proAvailable: true, experimentalBiggerContext });
+      const pro = rows.find(row => row.slug === `chatgpt-web/${family}-pro`);
+      assert.equal(pro.context_window, 112193);
+      assert.equal(pro.auto_compact_token_limit, 95000);
+      assert.equal(publishedWindow(pro), 105556, 'published context retains the 95K auto-compaction budget');
+      assert.deepEqual(pro.supported_reasoning_levels, [{ effort: 'max' }]);
+      const descriptor = describeNativeCatalogue(rows, 'guarded')[`native/guarded/${family}-pro`];
+      assert.equal(descriptor.limit.context, 105556, 'array catalogue also advertises the guarded budget');
+      assert.doesNotMatch(descriptor.name, /Bigger Context/);
+    }
+  });
+}
+
+test('Pro-capable Core aliases retain conservative context across Bigger Context toggles', () => {
+  const source = { 'gpt-6': { name: 'GPT-6' }, 'gpt-5-6': { name: 'GPT-5.6' } };
+  for (const extraHighAvailable of [false, true]) {
+    const caps = { solAvailable: true, proAvailable: true, extraHighAvailable };
+    const off = describeNativeCatalogue(source, 'guarded', caps);
+    const on = describeNativeCatalogue(source, 'guarded', { ...caps, experimentalBiggerContext: true });
+    for (const slug of Object.keys(source)) {
+      const key = `native/guarded/${slug}`;
+      assert.equal(on[key].limit.context, 105556);
+      assert.deepEqual(on[key], off[key]);
+      assert.equal(nativeRoute(key, 'max').model, `chatgpt-web/${slug === 'gpt-6' ? 'gpt-6' : 'gpt-5.6'}-pro`);
+    }
+  }
 });
