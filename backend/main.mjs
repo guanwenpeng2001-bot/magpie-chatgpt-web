@@ -4,6 +4,8 @@ import { BackendError, AccountGuard, publicError } from './guard.mjs';
 import { ReadClient, productionReadClient } from './http.mjs';
 import { LoginStates, createLoginFlow, sessionCredential, browserRead, DEFAULT_SIGNIN_TIMEOUT_MS, signinWindow } from './browser.mjs';
 import { TurnDriver } from './turn.mjs';
+import { ensureNative, hasNative, stopNative } from '../src/native/index.mjs';
+import { accountCapabilities } from '../src/native/models.mjs';
 
 export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
   const turnDrivers = new Map();
@@ -151,6 +153,19 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const account = command.account ?? 'default';
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('protocol');
     switch (command.method) {
+      case 'nativeProvision':
+      case 'nativeRuntime': {
+        if (typeof command.auth?.profile !== 'string') return null;
+        if (command.method === 'nativeRuntime' && !await hasNative(command.auth)) return null;
+        const { client, release } = clientFor(command);
+        try {
+          const capabilities = accountCapabilities(await client.models(signal));
+          return await driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
+            const daemon = await ensureNative({ ...command.auth, context, capabilities }, { resumeOnly: command.method === 'nativeRuntime', signal });
+            return daemon && await daemon.health(signal) ? daemon.descriptor() : null;
+          }, signal, { visibleTurns: command.method === 'nativeProvision', auth: { ...command.auth, refresh: client.credential } });
+        } finally { release(); }
+      }
       case 'models': {
         const { client, release } = clientFor(command);
         try { return await client.models(signal); } finally { release(); }
@@ -201,7 +216,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     if (pending.size >= 64) { send({ id: command.id, event: 'error', error: new BackendError('cooldown', { retryAfter: 1 }).toJSON() }).catch(() => {}); return; }
     const controller = new AbortController();
     let budgetExpired = false;
-    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, command.method === 'session' ? Math.min(timeout, 10_000) : timeout);
+    const timer = setTimeout(() => { budgetExpired = true; controller.abort(); }, command.method === 'session' ? Math.min(timeout, 10_000) : command.method === 'nativeProvision' ? Math.max(timeout, 20 * 60_000) : timeout);
     const entry = { controller };
     pending.set(command.id, entry);
     entry.work = (async () => {
@@ -267,6 +282,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     for (const entry of logins) entry.cancel();
     await Promise.allSettled(logins.map(entry => entry.work));
     loginPromises.clear();
+    await stopNative();
     const ownedDrivers = new Set(turnDrivers.values());
     if (turnDriver) ownedDrivers.add(turnDriver);
     await Promise.allSettled([...ownedDrivers].map(driver => driver.close()));

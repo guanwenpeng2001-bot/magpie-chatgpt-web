@@ -6,6 +6,17 @@ import { AccountGuard } from '../backend/guard.mjs';
 const frame = (event, data) => ({ kind: 'frame', frame: { event, data: JSON.stringify(data) } });
 const message = text => frame('delta', { p: '', o: 'add', v: { message: { author: { role: 'assistant' }, recipient: 'all', content: { content_type: 'text', parts: [text] }, status: 'in_progress' } } });
 
+test('a challenge painted between the DOM probe and queued 403 does not expire the account', async () => {
+  let probes = 0;
+  const guard = new AccountGuard();
+  await assert.rejects(observeTurn({ isClosed: () => false }, {
+    run: { queue: [{ kind: 'status', status: 403 }] }, guard, budget: 1000,
+    adapter: { probePageError: async () => ++probes === 1 ? null : { kind: 'challenge' } }, emit: async () => {},
+  }), { code: 'verification' });
+  assert.equal(probes, 2);
+  (await guard.begin())();
+});
+
 test('DOM completion cannot end an active SSE stream; final SSE beats rendered text', async () => {
   const run = { queue: [message('**first**')] };
   let reads = 0;

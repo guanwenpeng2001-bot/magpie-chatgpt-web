@@ -9,7 +9,7 @@ import { serve } from '../backend/main.mjs';
 
 async function inspectedPool(t) {
   const source = (await readFile(new URL('../backend/main.mjs', import.meta.url), 'utf8'))
-    .replaceAll(/from '(\.\/[^']+)'/g, (_, path) => `from '${new URL(path, new URL('../backend/main.mjs', import.meta.url)).href}'`)
+    .replaceAll(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${new URL(path, new URL('../backend/main.mjs', import.meta.url)).href}'`)
     .replace('  const loginPromises = new Map();', '  handlers.inspect({ clients, guards, clientFor });\n  const loginPromises = new Map();');
   const instrumented = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const input = new PassThrough();

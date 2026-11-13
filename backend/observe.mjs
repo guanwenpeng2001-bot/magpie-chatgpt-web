@@ -34,7 +34,14 @@ export async function observeTurn(page, { run, adapter, guard, budget = 180000, 
     let eof = false;
     for (const item of run.queue.splice(0)) {
       if (item.kind === 'status' || item.kind === 'frame') streamStarted = true;
-      if (item.kind === 'status' && (item.status < 200 || item.status >= 300)) throw responseFailure(item.status, item, guard, item.retryAfter);
+      if (item.kind === 'status' && (item.status < 200 || item.status >= 300)) {
+        // An XHR completion can paint the challenge card after the loop's
+        // initial DOM probe but before its status arrives in this queue.
+        // Recheck before a plain 403 permanently marks the session expired.
+        if (item.status === 403 && !item.mitigated && !item.interstitial &&
+            (await adapter.probePageError(page))?.kind === 'challenge') throw new BackendError('verification');
+        throw responseFailure(item.status, item, guard, item.retryAfter);
+      }
       if (item.kind === 'eof') {
         partial ||= item.partial;
         eof = true;

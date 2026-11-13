@@ -25,6 +25,9 @@ export function signinTimeoutWindow() {
 }
 
 const claimLocks = new Map();
+const browserEndpoints = new WeakMap();
+// Only plugin-owned ordinary Chrome contexts have a reusable native CDP endpoint.
+export const browserEndpoint = context => browserEndpoints.get(context);
 
 // Linux abstract sockets are not a portable lock. macOS returns EINVAL for a
 // leading NUL, which the claim catch turned into browserConfiguration.
@@ -386,11 +389,7 @@ export function sessionCredential(session, refresh, profile) {
   return { type: 'oauth', refresh, access: session.accessToken, expires, accountId: typeof session.user?.email === 'string' ? session.user.email : 'chatgpt-web', profile, persona: 'chatgpt-paid' };
 }
 
-export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates, background = false } = {}) {
-  if (!chromium) {
-    try { ({ chromium } = await import('playwright-core')); }
-    catch { throw new BackendError('browserDependency'); }
-  }
+export async function findChromeExecutable(candidates) {
   candidates ??= process.platform === 'win32'
     ? ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', resolve(process.env.LOCALAPPDATA ?? '.', 'Google/Chrome/Application/chrome.exe')]
     : process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'];
@@ -399,6 +398,19 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
     try { await access(candidate); executable = candidate; break; } catch {}
   }
   if (!executable) throw new BrowserComponentError();
+  return executable;
+}
+
+export async function exportStorageState(context) {
+  return context.storageState();
+}
+
+export async function launchSignInBrowser(profile, signal, { proxy, env = process.env, chromium, spawn: spawnBrowser = spawn, candidates, background = false } = {}) {
+  if (!chromium) {
+    try { ({ chromium } = await import('playwright-core')); }
+    catch { throw new BackendError('browserDependency'); }
+  }
+  const executable = await findChromeExecutable(candidates);
   await mkdir(profile, { recursive: true });
   const listener = createServer();
   const port = await new Promise((resolvePort, reject) => {
@@ -436,6 +448,7 @@ export async function launchSignInBrowser(profile, signal, { proxy, env = proces
     if (!browser) throw new BackendError('backendDown');
     const context = browser.contexts()[0];
     if (!context) throw new BackendError('backendDown');
+    browserEndpoints.set(context, `http://127.0.0.1:${port}`);
     return { context, close };
   } catch (error) {
     await close();

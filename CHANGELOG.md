@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 — 2026-11-13
+
+- Add opt-in/out `native-tools` setup (enabled by default), account-scoped Responses models, and the pinned v6.1.18 Full-mode daemon with tunnel-client v0.0.16 and cloudflared.
+- Verify release and installed-file checksums; isolate browser state, runtime keys, named pipes, ports, and Codex/tunnel state per account. Supervise startup, shutdown and crash retries with bounded backoff.
+- Restore the canonical local Codex request through Magpie protocol conversion, Lite lifting and masking, using bounded in-memory snapshots bound to account/route proof. Disclose original-history and local-path forwarding in the Native option.
+- Keep 18 matching Native-namespace entries alongside 18 text entries. Label unsupported native routes as exact-model text fallback/unavailable instead of silently substituting Sol or Pro for Work/mini models; derive native limits and variants from account capabilities.
+- Run compaction and subsequent tool turns in the same Full daemon, retaining native continuation checkpoints and v1/memento/v2 envelopes. A checksum-pinned compatibility preload selects the existing read-only compaction path without modifying downloaded runtime bytes.
+- Serialize inferred reasoning efforts and gracefully drain/cancel/shut down the Windows daemon before tunnel teardown.
+- Add installer, daemon, provisioning, catalog, provenance and routing tests, including installed-Magpie and pinned-runtime checks.
+- Return native custom, namespaced and tool-search calls as the flat functions Magpie offered when it translated the request, so Codex executes them. Verified live: native read, apply_patch, test run, two compactions and post-compaction tool turns.
+- Recheck a challenge card painted between the DOM probe and a queued HTTP 403 before expiring the account; cover this timing race in the fallback observer tests.
+
 ## 0.4.8 — 2026-11-13
 
 - Repair an unfinished text-form tool call wherever it appears: prose before the action marker is kept, only the unfinished envelope is replaced by the bounded JSON-only correction, and the corrected call is validated against its schema. Previously only a reply consisting of the bare marker was repaired, so live `gpt-6` `max` turns failed with `toolIncomplete`.
