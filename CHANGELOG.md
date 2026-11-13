@@ -2,6 +2,7 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Recognize positively identified browser-verification pages before Native prompt submission and return `chatgpt_security_check` with `retryable: false`. Keep ordinary composer readiness, authentication and post-Send handling separate; this does not solve verification or claim to preserve the failed turn tab.
 - Withdraw GPT-6/GPT-5.6 Sol Bigger windows on Pro-capable accounts after complete-fragment stress tests lost marker values during compaction. Retain route identities and baseline catalogue limits, remove misleading Bigger labels, and reject oversized full inputs before sending or trimming compaction history. Other capability tiers are unchanged and remain separately unverified.
 - Read Magpie's transparent `magpie1:` compaction envelope after canonical request restoration, so completed-work summaries reach Native models and survive daemon restart. Require canonical base64 and valid UTF-8; keep exact checkpoint scope/summary authentication and existing `ocx1:` support.
 - Ignore JSON object key order in process-local Native execution, round and instruction identities. Automatic compaction can now match a pending source tool when Magpie re-encodes identical content in a different field order. Preserve string/array ordering, exact capabilities, ownership checks and the existing encrypted checkpoint format.

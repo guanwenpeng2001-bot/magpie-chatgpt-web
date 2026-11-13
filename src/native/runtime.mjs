@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { patchNativeBrowserReadiness } from './browser-readiness.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
 export const RELEASES = Object.freeze([
@@ -305,6 +306,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + ${JSON.stringify('\nimport { decodeMagpieSummary } from ' + JSON.stringify(new URL('./summary-envelope.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
     contents = patchReferenceFixes(contents);
+    contents = (${patchNativeBrowserReadiness.toString()})(contents);
     return { contents, loader: 'js' };
   });
 } });
