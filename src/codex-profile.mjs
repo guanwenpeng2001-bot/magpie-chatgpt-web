@@ -230,7 +230,7 @@ function buildProfile(source, baseUrl, catalogPath) {
   return `${lines.join('\n')}\n`;
 }
 
-function buildNativeProfile(baseUrl, catalogPath) {
+function buildNativeProfile(baseUrl, catalogPath, skillsContextTokens) {
   return [
     MANAGED_MARKER,
     '# CLI only. Magpie owns the Desktop config.toml and model catalogue.',
@@ -240,6 +240,12 @@ function buildNativeProfile(baseUrl, catalogPath) {
     `openai_base_url = ${JSON.stringify(baseUrl)}`,
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     '',
+    ...(skillsContextTokens === undefined ? [] : [
+      '# Skill discovery uses this part of the existing model window; it does not add capacity.',
+      '[skills]',
+      `max_context_tokens = ${skillsContextTokens}`,
+      '',
+    ]),
   ].join('\n');
 }
 
@@ -270,9 +276,14 @@ export async function inspectCodexProfile({
   codexHome = resolveCodexHome(),
   baseUrl,
   native = false,
+  skillsContextTokens,
   env = process.env,
   home = dirname(codexHome),
 } = {}) {
+  if (skillsContextTokens !== undefined && (!native || !Number.isInteger(skillsContextTokens)
+    || skillsContextTokens < 1 || skillsContextTokens > 10000)) {
+    throw new Error('skills context tokens require --native and an integer from 1 to 10000');
+  }
   if (env.HOME) home = resolve(env.HOME);
   const configPath = join(codexHome, 'config.toml');
   const profilePath = join(codexHome, native ? NATIVE_PROFILE_FILE : PROFILE_FILE);
@@ -305,7 +316,7 @@ export async function inspectCodexProfile({
   };
   let profile;
   try {
-    profile = native ? buildNativeProfile(configuredBaseUrl, catalogPath) : buildProfile(source, configuredBaseUrl, catalogPath);
+    profile = native ? buildNativeProfile(configuredBaseUrl, catalogPath, skillsContextTokens) : buildProfile(source, configuredBaseUrl, catalogPath);
   } catch (error) {
     return { status: 'missing-provider', detail: error.message, configPath, profilePath, backupPath, routing };
   }
@@ -382,6 +393,8 @@ function usage() {
     '  --rollback           remove only the managed CLI profile',
     '  --codex-home <path>  override CODEX_HOME',
     '  --base-url <url>     override the profile provider base URL',
+    '  --skills-context-tokens <1..10000>  Native-only skill discovery budget; consumes existing context',
+    '                       omit to inherit the base/default budget, including when reapplying',
     '  --json               print a machine-readable result',
   ].join('\n');
 }
@@ -396,6 +409,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       native: { type: 'boolean' },
       'codex-home': { type: 'string' },
       'base-url': { type: 'string' },
+      'skills-context-tokens': { type: 'string' },
       json: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -404,14 +418,20 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   if (values.help) return { exitCode: 0, output: usage() };
   const modes = [values.check, values.apply, values.rollback].filter(Boolean).length;
   if (modes > 1) throw new Error('choose one of --check, --apply or --rollback');
+  const skillBudget = values['skills-context-tokens'];
+  if (skillBudget !== undefined && (!values.native || values.rollback || !/^[1-9]\d*$/.test(skillBudget)
+    || Number(skillBudget) > 10000)) {
+    throw new Error('--skills-context-tokens requires --native, a whole number from 1 to 10000, and check/apply mode');
+  }
+  const skillsContextTokens = skillBudget === undefined ? undefined : Number(skillBudget);
   const codexHome = values['codex-home']
     ? resolve(values['codex-home'])
     : resolveCodexHome({ env });
   const result = values.rollback
     ? await rollbackCodexProfile({ codexHome, native: values.native })
     : values.apply
-      ? await applyCodexProfile({ codexHome, baseUrl: values['base-url'], native: values.native, env })
-      : await inspectCodexProfile({ codexHome, baseUrl: values['base-url'], native: values.native, env });
+      ? await applyCodexProfile({ codexHome, baseUrl: values['base-url'], native: values.native, skillsContextTokens, env })
+      : await inspectCodexProfile({ codexHome, baseUrl: values['base-url'], native: values.native, skillsContextTokens, env });
   const refused = ['conflict', 'unmanaged-profile'].includes(result.status)
     || (values.native && !['would-create', 'would-update', 'ready', 'created', 'updated', 'rolled-back', 'already-absent'].includes(result.status));
   const exitCode = refused ? 2 : values.check && result.changed ? 1 : 0;
@@ -422,7 +442,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   }
   const lines = [`codex CLI profile: ${result.status}`, `main config (read-only): ${result.configPath ?? join(codexHome, 'config.toml')}`];
   if (result.profilePath) lines.push(`CLI profile: ${result.profilePath}`);
-  if (result.status === 'would-create' || result.status === 'would-update') lines.push(`next: npm run codex-profile -- ${values.native ? '--native ' : ''}--apply`);
+  if (result.status === 'would-create' || result.status === 'would-update') lines.push(`next: npm run codex-profile -- ${values.native ? '--native ' : ''}${skillsContextTokens === undefined ? '' : `--skills-context-tokens ${skillsContextTokens} `}--apply`);
   if (values.native && ['ready', 'created', 'updated'].includes(result.status)) lines.push(`run: codex -p ${NATIVE_PROFILE_NAME}`);
   if (refused) lines.push(`refused: ${result.detail ?? 'the target is not owned by this helper'}`);
   return {

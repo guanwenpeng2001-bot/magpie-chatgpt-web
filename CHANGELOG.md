@@ -2,6 +2,8 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Add automatic-compaction guidance to preserve original names, labels and key/value associations, prefer source evidence over assistant relabeling, and retain uncertainty instead of reconstructing missing history. Applies to inline and multipart final prompts with existing budgeting; does not promise lossless recall.
+- Add opt-in Native CLI `--skills-context-tokens 1..10000` for skill discovery within the existing context budget. Omission restores base/default inheritance; other profiles and model/compaction limits are unchanged.
 - Add an isolated `--native` Codex CLI profile using built-in OpenAI and Magpie's validated `/backend-api/codex` endpoint. Preserve Native provenance and catalogue limits without changing the user's main config, credentials or generic HTTP profile.
 - Fit complete baseline compaction through the pinned reference's two-part, then six-part transport when the inline byte limit is exceeded. Validate staging and final-part limits before sending; retain the distinct Pro/Sol token guards and reject unfit complete input without trimming or increasing advertised capacity.
 - Guard both Pro families before compaction's token/inline-byte fit recovery can remove older history, including with Bigger Context off. Preserve the distinct 112,193-token Pro and 111,193-token Sol limits; return an explicit error when a complete summary request cannot fit.

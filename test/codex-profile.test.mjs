@@ -344,3 +344,59 @@ test('CLI help explains the separate Native profile and retains action exclusivi
   assert.ok(result.output.includes(`codex -p ${NATIVE_PROFILE_NAME}`));
   await assert.rejects(main(['--native', '--apply', '--rollback'], {}), /choose one/);
 });
+
+test('opt-in Native skill budget changes only discovery allocation and can restore inheritance', async t => {
+  const paths = await nativeFixture(t, `${wiredConfig}\n[skills]\nmax_context_tokens = 1200\n`);
+  const basePath = join(paths.codexHome, 'config.toml');
+  const base = await readFile(basePath, 'utf8');
+  const auth = await readFile(paths.authPath, 'utf8');
+  const generic = await applyCodexProfile({ ...paths, native: false });
+  const genericBefore = await readFile(generic.profilePath, 'utf8');
+  const baseline = await inspectCodexProfile(paths);
+  assert.doesNotMatch(baseline.profile, /max_context_tokens/);
+  const options = { ...paths, skillsContextTokens: 5000 };
+  const inspected = await inspectCodexProfile(options);
+  const skillSection = '# Skill discovery uses this part of the existing model window; it does not add capacity.\n[skills]\nmax_context_tokens = 5000\n';
+  assert.equal(inspected.profile, baseline.profile + '\n' + skillSection);
+  assert.doesNotMatch(inspected.profile, /model_context_window|model_auto_compact_token_limit/);
+  await assert.rejects(stat(inspected.profilePath), { code: 'ENOENT' });
+  assert.equal((await applyCodexProfile(options)).status, 'created');
+  assert.equal((await applyCodexProfile(options)).status, 'ready');
+  assert.equal((await inspectCodexProfile(paths)).status, 'would-update');
+  await applyCodexProfile(paths);
+  assert.equal(await readFile(inspected.profilePath, 'utf8'), baseline.profile);
+  assert.equal(await readFile(basePath, 'utf8'), base);
+  assert.equal(await readFile(paths.authPath, 'utf8'), auth);
+  assert.equal(await readFile(generic.profilePath, 'utf8'), genericBefore);
+});
+
+test('skill budget CLI preserves selected amount in check instructions and rejects invalid modes/values', async t => {
+  const paths = await nativeFixture(t);
+  const common = ['--native', '--codex-home', paths.codexHome];
+  const check = await main([...common, '--check', '--skills-context-tokens', '5000'], paths.env);
+  assert.equal(check.exitCode, 1);
+  assert.match(check.output, /--native --skills-context-tokens 5000 --apply/);
+  for (const amount of ['1', '5000', '10000']) {
+    assert.equal((await main([...common, '--apply', '--skills-context-tokens', amount], paths.env)).exitCode, 0);
+    assert.equal((await main([...common, '--check', '--skills-context-tokens', amount], paths.env)).exitCode, 0);
+  }
+  const before = await readFile(join(paths.codexHome, NATIVE_PROFILE_FILE), 'utf8');
+  for (const value of ['0', '-1', '10001', '1.5', '1e3', 'NaN', ' 5000', '5000\n[other]', '999999999999999999']) {
+    await assert.rejects(main([...common, '--apply', `--skills-context-tokens=${value}`], paths.env), /whole number/);
+  }
+  await assert.rejects(main(['--skills-context-tokens', '5000'], paths.env), /requires --native/);
+  await assert.rejects(main([...common, '--rollback', '--skills-context-tokens', '5000'], paths.env), /check\/apply/);
+  assert.equal(await readFile(join(paths.codexHome, NATIVE_PROFILE_FILE), 'utf8'), before);
+});
+
+test('programmatic skill budget rejects out-of-range input and cannot take over an unmanaged profile', async t => {
+  const paths = await nativeFixture(t);
+  for (const value of [0, -1, 10001, 2.5, NaN, Infinity, '5000']) {
+    await assert.rejects(applyCodexProfile({ ...paths, skillsContextTokens: value }), /integer from 1 to 10000/);
+  }
+  await assert.rejects(applyCodexProfile({ ...paths, native: false, skillsContextTokens: 5000 }), /require --native/);
+  const profilePath = join(paths.codexHome, NATIVE_PROFILE_FILE);
+  await writeFile(profilePath, '# User owned\n[skills]\nmax_context_tokens = 4000\n');
+  assert.equal((await applyCodexProfile({ ...paths, skillsContextTokens: 5000 })).status, 'unmanaged-profile');
+  assert.equal(await readFile(profilePath, 'utf8'), '# User owned\n[skills]\nmax_context_tokens = 4000\n');
+});

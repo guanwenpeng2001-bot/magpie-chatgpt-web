@@ -87,6 +87,16 @@ codex -p chatgpt-web-native
 
 This writes only `chatgpt-web-native.config.toml` in the Codex configuration directory. It requires the existing `openai_base_url` to point to Magpie's `/backend-api/codex` endpoint and a readable model catalogue. An explicit `--base-url` may supply that endpoint. Model windows and compaction settings come from the catalogue/base config; this profile does not impose the generic 41K/32,768 limits. `--native --check` inspects without writing; `--native --rollback` removes only the managed Native profile and its backup. Login credentials and the main configuration are unchanged.
 
+If Codex reports that its skills context budget omitted skills, you can explicitly allocate more of the existing window to skill discovery:
+
+```powershell
+npm run codex-profile -- --native --skills-context-tokens 5000 --apply
+npm run codex-profile -- --native --skills-context-tokens 5000 --check
+codex -p chatgpt-web-native
+```
+
+The supported range is 1–10,000 tokens. This changes the separate Native CLI profile only; it does not enlarge the model window or remove installed skills. Larger skill listings leave less space for other context, and a larger future inventory may still be shortened. On the audited machine, prompt rendering at 5,000 retained 243 entries with nonempty descriptions, compared with 119 entries and no descriptions at the default budget. This is not a guarantee that full descriptions fit for every inventory. Reapplying without `--skills-context-tokens` removes this profile override and restores inheritance from the base/default setting.
+
 The generic HTTP profile remains available for text routes. It does not preserve the Native environment provenance required by long conversations and should not be used for Native tools:
 
 ```powershell

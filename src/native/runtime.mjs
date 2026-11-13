@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { patchNativeBrowserReadiness } from './browser-readiness.mjs';
 import { patchNativeTokenCopyGuidance } from './token-copy-guidance.mjs';
+import { patchNativeCompactionGuidance } from './compaction-guidance.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
 export const RELEASES = Object.freeze([
@@ -320,6 +321,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     contents = patchReferenceFixes(contents);
     contents = (${patchNativeBrowserReadiness.toString()})(contents);
     contents = (${patchNativeTokenCopyGuidance.toString()})(contents);
+    contents = (${patchNativeCompactionGuidance.toString()})(contents);
     return { contents, loader: 'js' };
   });
 } });

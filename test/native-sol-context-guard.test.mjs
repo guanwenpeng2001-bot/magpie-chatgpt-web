@@ -1,3 +1,4 @@
+import { patchNativeCompactionGuidance } from '../src/native/compaction-guidance.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -337,9 +338,10 @@ async function runCompilerFixture(t, fixtureFunction, args = []) {
   const exports = '\nexport { Fn as parse, sd as route, Xt as compile, rawXt as rawCompile, Nt as tokens, wo as usage, Ai as messages, Pe as textTokens, gs as messageTokens, v_ as stagingMode, y_ as preflight, Cs as Worker, Bi as createAdapter, cd as compactRequest, Ls as responseRequest, zt as summaryPrefix, vs as close };';
   const base = compactionPreloadSource(entry);
   const source = base.replace("return { contents, loader: 'js' };", `
-    const start = source.indexOf('function Xt('), end = source.indexOf('var su=', start);
+    const comparison = (${patchNativeCompactionGuidance.toString()})(source);
+    const start = comparison.indexOf('function Xt('), end = comparison.indexOf('var su=', start);
     if (start < 0 || end < start) throw new Error('Compiler fixture anchor mismatch');
-    return { contents: contents + '\\n' + source.slice(start, end).replace('function Xt(', 'function rawXt(') + ${JSON.stringify(exports)}, loader: 'js' };`);
+    return { contents: contents + '\\n' + comparison.slice(start, end).replace('function Xt(', 'function rawXt(') + ${JSON.stringify(exports)}, loader: 'js' };`);
   assert.notEqual(source, base);
   await writeFile(preload, source);
   await writeFile(fixture, `await (${fixtureFunction.toString()})();`);
