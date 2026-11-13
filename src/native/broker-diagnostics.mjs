@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { writeFile, rename, rm, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { parseOwnershipSnapshot } from './ownership-diagnostics.mjs';
 
 // These are content-free lines emitted by the checksum-pinned broker itself.
 // Never retain other stdout/stderr, prompt text, arguments or credential values.
@@ -13,6 +14,9 @@ const validTrace = new RegExp(`^${trace}$`);
 const traceHash = value => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
 export function parseBrokerDiagnostic(line) {
+  if (line.startsWith('[chatgpt-web] ownership ')) {
+    try { return parseOwnershipSnapshot(JSON.parse(line.slice('[chatgpt-web] ownership '.length))); } catch { return; }
+  }
   const phase = /^\[chatgpt-web\] compaction_phase (entered|retiring|retired)$/.exec(line);
   if (phase) return { type: 'compaction', phase: phase[1] };
   let match = registered.exec(line);
