@@ -10,6 +10,14 @@ The card contains only recorded Sends, model/effort breakdowns, recording start,
 
 All card rows are text-only (`aside: true`). The hook supplies no numeric `used`, `amount`, `limit`, `remaining`, `balance`, reset, or depletion fields, so Magpie cannot treat recorded Send counts as a percentage or use them to route accounts. Native/text version aliases normalize to the same model count; different effort levels remain separate. Unknown model identity is shown explicitly rather than assigned a model or budget.
 
+## Checking a missing card
+
+Use `magpie quota refresh chatgpt-web --json` to request this provider's card explicitly. In Magpie 0.1.3930, ordinary `magpie quota chatgpt-web --json` collects all providers before filtering the output. Its 15-second caller deadline can expire before the aggregate subscription refresh completes; the CLI then inserts a generic empty balance card saying no balance endpoint is configured. That message alone does not prove the ChatGPT Web hook is absent or failing. Do not invent a Balance URL or replace unavailable allowance with a percentage.
+
+The targeted refresh is a supported host command, scoped to the requested card, with its own existing deadline and a persisted 30-second refresh floor. It does not send a model message. The running gateway's `/v1/magpie/quotas` also exposes the cards available to its process; its cache may differ from a newly started CLI process. When diagnosing, compare provider, window contents, errors and read timestamps, not only HTTP success.
+
+Actual installed checks returned 15 text rows through the direct plugin hook (902 ms), running gateway (81 ms), and targeted refresh (8,136 ms). The first earlier global CLI read returned the misleading placeholder; a later read returned the full card without code/configuration changes. Pinned host-source analysis identifies a matching omission path, but the historical blocking provider and exact timing were not recorded. [Verification details](verification-0.5.6.md) distinguish deterministic host behavior from that historical inference.
+
 ## Producer and reader contract
 
 Import from `src/usage/store.mjs`. Node and Bun use the same async filesystem implementation, with no extra dependencies.

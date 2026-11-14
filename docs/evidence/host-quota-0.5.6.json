@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "host": {
+    "version": "0.1.3930",
+    "gitRevision": "65f1fdd1d17d2ea9ae54ff862b774eb6e680743d",
+    "buildUnmodified": true
+  },
+  "mechanism": {
+    "ordinaryCliCallerDeadlineSeconds": 15,
+    "aggregateSubscriptionDeadlineSeconds": 20,
+    "targetedCommand": "magpie quota refresh chatgpt-web --json",
+    "targetedDeadlineSeconds": 45,
+    "targetedRefreshFloorSeconds": 30
+  },
+  "offline": {
+    "functions": [
+      {
+        "name": "SubscriptionUsage",
+        "source": "internal/provider/subscription_usage.go",
+        "line": 334,
+        "sourceSHA256": "7b9f46f1340b121dab6c93773ea49dd78a51d3855d0eeb57c4160b41a91979a3",
+        "functionSHA256": "bfe24f3631142fc1ecca05df96224b175eb23965c0c3260cab227e5ff2e8e702",
+        "bytes": 1399
+      },
+      {
+        "name": "quotaMatches",
+        "source": "internal/cli/quota_cli.go",
+        "line": 666,
+        "sourceSHA256": "bcb2ae5b427ca991719b2e24f2e56a18b2a2839188e7004e250ad5a3338e314c",
+        "functionSHA256": "453795ff721d46d4787a51ffc5a1cf72391295c452fadff5548eb7ba40fab1a5",
+        "bytes": 595
+      },
+      {
+        "name": "withUntold",
+        "source": "internal/cli/quota_cli.go",
+        "line": 684,
+        "sourceSHA256": "bcb2ae5b427ca991719b2e24f2e56a18b2a2839188e7004e250ad5a3338e314c",
+        "functionSHA256": "96aeae21fdec6b18ca5fec2ac0fd0d59b117746c19b70a63c27e0e3a53596698",
+        "bytes": 596
+      }
+    ],
+    "arms": [
+      {
+        "name": "timeout_pending_nil_exact_balance_fallback",
+        "passed": true,
+        "scheduledFetches": 0,
+        "executedFetches": 0
+      },
+      {
+        "name": "completed_pending_subscription_card",
+        "passed": true,
+        "scheduledFetches": 0,
+        "executedFetches": 0
+      },
+      {
+        "name": "cached_not_asked_remains_card",
+        "passed": true,
+        "scheduledFetches": 0,
+        "executedFetches": 0
+      }
+    ],
+    "testLogSHA256": "a25c716e528b4afb7a9fd8ebc1d3b70372cca154387848c2c7eeec81d28c0719",
+    "networkPackages": false,
+    "downloadsDisabled": true,
+    "scope": "Verbatim three pinned functions with synthetic process-local cache, provider lookup and shape adapters; not the complete host binary or all aggregation code."
+  },
+  "live": {
+    "directHook": {
+      "milliseconds": 902,
+      "textRows": 15,
+      "accountAllowanceUnprovided": true
+    },
+    "runningGateway": {
+      "httpStatus": 200,
+      "milliseconds": 81,
+      "textRows": 15,
+      "error": null
+    },
+    "targetedRefresh": {
+      "exitCode": 0,
+      "milliseconds": 8136,
+      "textRows": 15,
+      "accountAllowanceUnprovided": true,
+      "hasRecordedSends": true,
+      "hasEstimateOrForecast": false,
+      "hasPercent": false,
+      "passed": true
+    },
+    "accountStateUnchanged": true
+  },
+  "historicalObservation": {
+    "firstGlobalRead": "Empty balance placeholder after approximately 16 seconds",
+    "laterGlobalRead": "15 text rows without code/configuration changes",
+    "cause": "Matching timeout path reproduced; historical blocking provider and precise timing not established"
+  },
+  "limitations": [
+    "No change to Magpie executable or production plugin logic",
+    "Targeted refresh avoids global aggregation; it does not guarantee upstream availability",
+    "No allowance estimates or forecasts",
+    "Expanded/1M context remains outside this diagnostic and is not validated"
+  ]
+}
