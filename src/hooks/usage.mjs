@@ -2,6 +2,7 @@ import { CHATGPT_PLANS } from '../../backend/quota.mjs';
 import { BackendError } from '../bridge.mjs';
 import { requireAuth } from './auth.mjs';
 import { localUsageWindows } from '../usage/display.mjs';
+import { cleanSetupResult } from '../native/setup.mjs';
 
 const reasons = Object.freeze({
   'not-reported': '接口未返回额度',
@@ -32,21 +33,31 @@ function unknown(reason, planType, local) {
 
 // Magpie 0.1.3930 auth.usage(getAuth, provider, { signal }), distinct from
 // input.magpie.usage(), which records tokens for individual model requests.
-export function usageHook({ bridge, profileRoot }) {
+export function usageHook({ bridge, profileRoot, native, input }) {
   return async (getAuth, _provider, { signal } = {}) => {
     signal?.throwIfAborted();
+    let setup;
+    const withSetup = result => {
+      if (setup) result.windows.push({ name: 'Native tools setup', display: setup.message, aside: true });
+      return result;
+    };
     try {
       const auth = requireAuth(await getAuth());
+      signal?.throwIfAborted();
+      if (native?.status && input?.magpie?.option?.('chatgpt-web', 'native-tools') !== false) {
+        try { setup = cleanSetupResult(await native.status(auth)); }
+        catch { setup = cleanSetupResult({ state: 'failed', stage: 'verify' }); }
+      }
       signal?.throwIfAborted();
       const quota = await bridge.call({ method: 'quota', auth, profileRoot }, signal);
       signal?.throwIfAborted();
       if (quota?.state !== 'unknown' || !['not-reported', 'plan-not-reported', 'payment-attention'].includes(quota.reason)) {
-        return unknown('protocol');
+        return withSetup(unknown('protocol'));
       }
-      return unknown(quota.reason, quota.planType, quota.local);
+      return withSetup(unknown(quota.reason, quota.planType, quota.local));
     } catch (error) {
       signal?.throwIfAborted();
-      return unknown(error instanceof BackendError ? error.code : 'upstream');
+      return withSetup(unknown(error instanceof BackendError ? error.code : 'upstream'));
     }
   };
 }

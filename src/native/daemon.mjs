@@ -29,7 +29,7 @@ export async function freePort() {
 
 // The OS owns this lease: no PID files, and no probing/unlinking a live owner's
 // endpoint. Windows pipes and Linux abstract sockets disappear on process exit.
-async function lockAccount(home) {
+export async function lockAccount(home) {
   const normalized = resolve(home);
   const identity = createHash('sha256').update(process.platform === 'win32' ? normalized.toLowerCase() : normalized).digest('hex');
   const address = process.platform === 'win32' ? '\\\\.\\pipe\\magpie-native-owner-' + identity

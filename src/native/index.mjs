@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ensureRuntime, nativeRoot } from './runtime.mjs';
 import { NativeDaemon, writePrivate, daemonProxy } from './daemon.mjs';
 import { exportStorageState, findChromeExecutable, browserEndpoint } from '../../backend/browser.mjs';
 import { nativeCatalog, describeNativeCatalogue, nativeOptions, providerNativeOptions, accountCapabilities } from './models.mjs';
+import { readSetupStatus, readNativeState } from './setup.mjs';
 
 const accounts = new Map();
 const pending = new Map();
@@ -23,10 +23,7 @@ export function ensureNative(account, options = {}) {
   const work = (async () => {
     await prior?.work.catch(() => {});
     options.signal?.throwIfAborted();
-    let saved;
-    try { saved = JSON.parse(await readFile(join(home, 'native.json'), 'utf8')); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (saved && (saved.profile !== profile || !saved.tunnelId || !saved.runtimeKey || !saved.connectorId || !saved.linkId)) throw new Error('Invalid native account state');
+    const saved = await readNativeState({ profile }, { root });
     if (!saved && (options.resumeOnly || options.catalogOnly)) return null;
     const existing = accounts.get(home);
     const settings = nativeOptions(options.nativeOptions ?? saved?.nativeOptions);
@@ -39,7 +36,10 @@ export function ensureNative(account, options = {}) {
     const endpoint = browserEndpoint(account.context);
     if (existing && !options.provision && existing.browserEndpoint === endpoint && await existing.health()) return existing;
     if (existing) { await existing.stop(); accounts.delete(home); }
+    options.onStage?.('install');
     const installed = await (options.install ?? ensureRuntime)({ root });
+    options.signal?.throwIfAborted();
+    options.onStage?.('startup');
     // Snapshot while the backend holds its BrowserContext lease; crash restarts
     // must not attempt to use a context that the idle browser pool has closed.
     const storage = await exportStorageState(account.context);
@@ -56,15 +56,17 @@ export function ensureNative(account, options = {}) {
       options.signal?.throwIfAborted();
       let result = saved;
       if (!saved || options.provision) {
+        options.onStage?.('verify');
         const provision = options.provision ?? (async (context, settings) => {
           const module = await import('./provision.mjs');
           return module.provision({ context, ...settings });
         });
-        result = await provision(account.context, { profileId: profile, stateFile: join(home, 'provision.json'),
+        result = await provision(account.context, { profileId: profile, stateFile: join(home, 'provision.json'), signal: options.signal,
           saveSecret: bytes => writePrivate(join(home, 'runtime.key'), bytes),
           ensureTunnelRunning: credentials => { options.signal?.throwIfAborted(); return daemon.start(credentials); } });
       }
       options.signal?.throwIfAborted();
+      options.onStage?.('startup');
       await daemon.start(result);
       options.signal?.throwIfAborted();
       await writePrivate(join(home, 'native.json'), JSON.stringify({ ...result, profile, capabilities, nativeOptions: settings }));
@@ -84,9 +86,8 @@ export function ensureNative(account, options = {}) {
 }
 
 export async function hasNative(account, root = nativeRoot()) {
-  const { home } = identity(account, root);
-  try { const data = JSON.parse(await readFile(join(home, 'native.json'), 'utf8')); return !!(data.connectorId && data.linkId); }
-  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  const { profile } = identity(account, root);
+  return !!await readNativeState({ profile }, { root });
 }
 
 export async function stopNative() {
@@ -100,7 +101,8 @@ export async function stopNative() {
 /** Plugin-side facade: no browser ownership or credentials copied into requests. */
 export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch = globalThis.fetch, input }) {
   return {
-    provision: auth => bridge.call({ method: 'nativeProvision', auth, profileRoot, nativeOptions: providerNativeOptions(input) }),
+    provision: (auth, signal) => bridge.call({ method: 'nativeProvision', auth, profileRoot, nativeOptions: providerNativeOptions(input) }, signal),
+    status: auth => readSetupStatus(auth, { root }),
     async runtime(auth, signal) {
       signal?.throwIfAborted();
       const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input) }, signal);
@@ -109,11 +111,9 @@ export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch =
     },
     async models(auth, baseModels, catalogue) {
       if (baseModels && typeof baseModels === 'object' && !Array.isArray(baseModels) && Object.keys(baseModels).length) {
-        const { profile, home } = identity(auth, root);
-        let saved;
-        try { saved = JSON.parse(await readFile(join(home, 'native.json'), 'utf8')); }
-        catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
-        if (saved?.profile !== profile || !saved.connectorId || !saved.linkId) return {};
+        const { profile } = identity(auth, root);
+        const saved = await readNativeState({ profile }, { root });
+        if (!saved) return {};
         // Site capability discovery must carry the same options as runtime RPCs.
         catalogue ??= await bridge.call({ method: 'models', auth, profileRoot, nativeOptions: providerNativeOptions(input) });
         const capabilities = Object.hasOwn(catalogue ?? {}, 'nativeCapabilities') ? catalogue.nativeCapabilities

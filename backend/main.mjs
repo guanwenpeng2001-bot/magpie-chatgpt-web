@@ -8,8 +8,9 @@ import { ensureNative, hasNative, stopNative } from '../src/native/index.mjs';
 import { accountCapabilities } from '../src/native/models.mjs';
 import { readQuota } from './quota.mjs';
 import { usageProfile } from '../src/usage/store.mjs';
+import { runNativeSetup } from '../src/native/setup.mjs';
 
-export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver } = {}) {
+export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver, nativeSetupRoot } = {}) {
   const turnDrivers = new Map();
   let latestDriver = turnDriver;
   const driverFor = profileRoot => {
@@ -155,7 +156,21 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const account = command.account ?? 'default';
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('protocol');
     switch (command.method) {
-      case 'nativeProvision':
+      case 'nativeProvision': {
+        return runNativeSetup(command.auth, async onStage => {
+          // A completed setup needs no new browser, login, download or remote
+          // provisioning. Normal Native turns own runtime startup/health.
+          if (await hasNative(command.auth, nativeSetupRoot)) return true;
+          const { client, release } = clientFor(command);
+          try {
+            const capabilities = accountCapabilities(await client.models(signal));
+            return await driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
+              const daemon = await ensureNative({ ...command.auth, context, capabilities }, { root: nativeSetupRoot, nativeOptions: command.nativeOptions, signal, onStage });
+              return daemon && await daemon.health(signal);
+            }, signal, { visibleTurns: true, settleOnAbort: true, auth: { ...command.auth, refresh: client.credential } });
+          } finally { release(); }
+        }, { root: nativeSetupRoot, signal });
+      }
       case 'nativeRuntime': {
         if (typeof command.auth?.profile !== 'string') return null;
         if (command.method === 'nativeRuntime' && !await hasNative(command.auth)) return null;

@@ -3,6 +3,7 @@ import { BackendError } from '../bridge.mjs';
 import { signinProfileClaim, releaseSigninProfileClaim, unlockSigninProfile, signinTimeoutWindow, browserProxy } from '../../backend/browser.mjs';
 import { makeLoader } from '../loader.mjs';
 import { PROVIDER } from './config.mjs';
+import { nativeSetupMethod, reportSetupStatus } from './native-setup.mjs';
 
 export function requireAuth(auth) {
   if (auth?.type !== 'oauth' || typeof auth.refresh !== 'string' || !auth.refresh) throw new BackendError('expired');
@@ -23,27 +24,31 @@ export function authHook(env) {
     loader: makeLoader(env),
     methods: [{
       type: 'oauth', label: 'Sign in with ChatGPT (browser)',
-      async authorize() {
+      async authorize(_inputs, { signal } = {}) {
+        signal?.throwIfAborted();
         const owner = Symbol('sign-in');
         const account = await signinProfileClaim(profileRoot, owner);
         const proxy = browserProxy();
-        try { await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) }); }
+        try { await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) }, signal); }
         catch (error) { await unlockSigninProfile(profileRoot, owner); throw error; }
         return {
           url: '', method: 'auto',
-          instructions: 'A Chrome window owned by magpie is opening on chatgpt.com. Sign in there — including any verification the site asks for. This finishes by itself when the session is confirmed.',
-          async callback() {
+          instructions: 'A Chrome window owned by magpie is opening on chatgpt.com. Sign in there — including any verification the site asks for. This finishes by itself when the session is confirmed. Check Native tools setup on the Usage page afterward; if incomplete, choose Resume Native setup (existing account) to retry without losing this sign-in.',
+          async callback(_code, { signal: callbackSignal } = {}) {
+            const activeSignal = callbackSignal && signal ? AbortSignal.any([signal, callbackSignal]) : callbackSignal ?? signal;
             try {
               for (;;) {
-                const result = await bridge.call({ method: 'loginStatus', account });
+                activeSignal?.throwIfAborted();
+                const result = await bridge.call({ method: 'loginStatus', account }, activeSignal);
                 if (result.state === 'signed-in') {
                   if (env.native && (env.input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
-                    try { await env.native.provision(result.credential); }
+                    try { await reportSetupStatus(env, await env.native.provision(result.credential, activeSignal)); }
                     catch {
-                      // Provisioning diagnostics can contain one-time secrets. Log only a fixed event.
-                      try { await env.input?.client?.app?.log?.({ body: { service: PROVIDER, level: 'warn', message: 'nativeSetupFailed: text mode remains available' } }); } catch {}
+                      activeSignal?.throwIfAborted();
+                      await reportSetupStatus(env, { state: 'failed', stage: 'verify' });
                     }
                   }
+                  activeSignal?.throwIfAborted();
                   await releaseSigninProfileClaim(profileRoot, owner);
                   return { ...result.credential, type: 'success' };
                 }
@@ -51,7 +56,7 @@ export function authHook(env) {
                 if (result.state === 'failed') return { type: 'failed', error: result.reason };
                 if (result.state === 'timeout') return { type: 'failed', error: new BackendError('signinTimeout', { values: { windowMinutes: signinTimeoutWindow() } }) };
                 if (result.state !== 'pending') throw new BackendError('protocol');
-                await delay(pollMilliseconds);
+                await delay(pollMilliseconds, undefined, { signal: activeSignal });
               }
             } finally {
               await bridge.call({ method: 'logout', account }).catch(() => {});
@@ -60,6 +65,6 @@ export function authHook(env) {
           },
         };
       },
-    }],
+    }, nativeSetupMethod(env)],
   };
 }
