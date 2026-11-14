@@ -28,6 +28,8 @@ The runtime rejects affected full inputs at or above 111,193 before browser work
 
 Further reference diagnostics isolate a size-dependent failure before compaction: two ~206K arms recovered every final-part marker but none from the preceding part, despite complete delivery and linked conversation ancestry. Reducing inert filler to ~93K with the same records/associations and two-part flow recovered 12/12. Keeping the original ~206K input while using High for both parts still recovered only 5/12. Neither successful sends nor eliminating the effort switch establishes a larger inference window. See the [partition evidence](docs/evidence/context-partition-0.5.6.json); these transport sizing estimates are separate from the counts-only usage card.
 
+A matched Pro→Pro control also recovered only 5/12 at 206,283 local input tokens: all seven stage markers were missing and all five final markers survived. Both outgoing requests explicitly used `gpt-6-pro`; the original native selector verified max/Pro for each Send. The control froze the earlier high-compiled wire strings to isolate selection, and passed the reference's unchanged 224,386-token two-part max ceiling. Complete delivery/ancestry and confirmed cleanup were observed. Selecting Pro does not repair this sample, and this is not expanded-capacity acceptance.
+
 ## Local context and usage estimates
 
 ChatGPT does not expose an official token count for this browser transport. Magpie usage is therefore a local estimate, not an OpenAI token count, quota reading or billing record. The plugin computes all values below before or while the turn runs:

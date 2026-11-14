@@ -471,19 +471,151 @@
           "lineageSha256": "0fcbab61955cdef3e730e5ce57dec456799802eb3bc4cf600f65a01a226b29f3"
         }
       ]
+    },
+    {
+      "name": "large_same_pro_mode",
+      "source": "partition-pro-959a8b1f-81e8-414c-8ab0-94d799c6e24f-result.json",
+      "sourceSha256": "307d50d7e22b8570b57a8c828d7d90caac5cad592102f2ac0e139a5e11f54ac0",
+      "confirmedPhysicalSends": 2,
+      "installedUsageCoverage": false,
+      "cleanupConfirmed": true,
+      "accountConfigUnchanged": true,
+      "originalPagesStillPresent": true,
+      "compilerEffort": "high (frozen wire strings)",
+      "actualWorkerEffort": "max",
+      "originalAggregateCeiling": 224386,
+      "preflightSource": "partition-pro-preflight.json",
+      "preflightSha256": "ebe4e3141e0d890bf7f5f42d5edf8d3f0bf0e5df4a997e4627d45a58a6a0acd0",
+      "arms": [
+        {
+          "cutAfterFragment": 109,
+          "compiledInputTokenEstimate": 206283,
+          "requestModels": [
+            "gpt-6-pro",
+            "gpt-6-pro"
+          ],
+          "observedRequestEfforts": [
+            null,
+            null
+          ],
+          "confirmedPhysicalSends": 2,
+          "phaseRecall": {
+            "stage": {
+              "correct": 0,
+              "total": 7
+            },
+            "commit": {
+              "correct": 5,
+              "total": 5
+            }
+          },
+          "correctMarkers": 5,
+          "totalMarkers": 12,
+          "markers": [
+            {
+              "id": "RECALL_1_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_1_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_MIDDLE",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_2_END",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_START",
+              "phase": "stage",
+              "correct": false,
+              "notFound": true
+            },
+            {
+              "id": "RECALL_3_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            }
+          ],
+          "payloadHashesMatch": true,
+          "observerGaps": 0,
+          "completeFragmentCoverage": true,
+          "lineage": {
+            "membershipMatches": true,
+            "ambiguous": false,
+            "stageEchoExact": true,
+            "stageToCommitLinked": true,
+            "finalParentLinked": true,
+            "finalUserFullEchoObserved": false,
+            "physicalRequests": 2
+          },
+          "lineageSha256": "dd9e3d1f43f967aeeed0fbd2dfd8db8e5373da7b0b8ba9c363679e80fd8ce8f9"
+        }
+      ],
+      "retentionPassed": false
     }
   ],
   "conclusions": {
     "expandedRetentionPassed": false,
     "smallerDiagnosticPassed": true,
     "sameEffortSufficientToRepairLargeSample": false,
-    "serverInferenceContentsKnown": false
+    "serverInferenceContentsKnown": false,
+    "sameProModeSufficientToRepairLargeSample": false
   },
   "limits": [
     "One sample per experimental arm; no universal capacity threshold established.",
     "Reduced filler keeps 214 records and the same 12 associations but is a separate diagnostic, not expanded-context acceptance.",
     "Token figures are local transport sizing estimates, never account allowance or usage-card figures.",
     "Diagnostic browser Sends bypass installed usage instrumentation and are not backfilled.",
-    "Request coverage, acknowledgements and server echo do not establish inclusion in the inference window."
+    "Request coverage, acknowledgements and server echo do not establish inclusion in the inference window.",
+    "Matched Pro control freezes the original high-compiled strings; actual native selections and both outgoing request models prove Pro. It is a selector contrast, not a fresh Pro compiler acceptance run."
   ]
 }
