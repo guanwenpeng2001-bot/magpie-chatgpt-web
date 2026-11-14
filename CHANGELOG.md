@@ -2,6 +2,7 @@
 
 ## 0.5.6 — 2026-11-13
 
+- Recognize Codex 0.169 host-injected additional context between the environment and instruction. Preserve source labels and all original records, require current native rollout authority even with one trusted home, and reject missing metadata/proof or stale cached authority. Ordinary tool results cannot use this adjacency rule or override their actual call's name.
 - Add bounded managed-browser source retention for the pinned reference's one-shot compaction handoff. Reuse only exact owned pages, preserve broker summary authorization and physical cleanup barriers, cancel reuse on navigation, and disconnect the browser even if page cleanup fails. Retained pages are process-local; authenticated completed checkpoints remain durable. This does not enlarge model windows or establish expanded-context retention.
 - Preserve discovered tool contracts in Native tool-search results delivered through the live broker and prompt replay. Use the existing browser inventory projection for names, schemas, tool kinds and polling limits; oversized results direct the model to paginated inventory instead of dropping or truncating schema fields. Host arguments and authentication are unchanged.
 - Add automatic-compaction guidance to preserve original names, labels and key/value associations, prefer source evidence over assistant relabeling, and retain uncertainty instead of reconstructing missing history. Applies to inline and multipart final prompts with existing budgeting; does not promise lossless recall.
