@@ -69,7 +69,13 @@ for (const status of [401, 429]) for (const order of ['blocked-first', 'healthy-
     const rotations = await Promise.all(healthy.map(identity => request(identity, 1)));
     assert.ok(rotations.every(frame => frame.event === 'done'));
     let admitted = 0;
-    for (let index = 0; index < 50; index++) if ((await request(randomUUID())).event === 'done') admitted++;
+    const freshFailures = [];
+    for (let index = 0; index < 50; index++) {
+      const frame = await request(randomUUID());
+      if (frame.event === 'done') admitted++;
+      else freshFailures.push({ index, error: frame.error });
+    }
+    assert.deepEqual(freshFailures, [], 'fresh requests must succeed without retries');
     const before = hits;
     for (const identity of blocked) assert.equal((await request(identity)).error?.status, status);
     assert.equal(hits, before);

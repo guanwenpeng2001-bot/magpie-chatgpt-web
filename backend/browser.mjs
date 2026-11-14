@@ -277,7 +277,7 @@ export class BrowserSupervisor {
     if (!entry) return false;
     return this.#setBackground(entry, background, signal);
   }
-  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com', credentialState } = {}) {
+  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com', credentialState, settleOnAbort = false } = {}) {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
       const background = visibleTurns !== true;
@@ -286,6 +286,7 @@ export class BrowserSupervisor {
       entry.users++;
       let rejectCrash;
       let onAbort;
+      let operationWork;
       try {
         const context = await entry.starting;
         if (entry.background !== background) {
@@ -294,7 +295,7 @@ export class BrowserSupervisor {
           if (!moved) {
             const credentials = entry.credentials;
             await this.closeAccount(account);
-            return await this.run(account, operation, signal, { visibleTurns, auth, origin, credentialState: credentials });
+            return await this.run(account, operation, signal, { visibleTurns, auth, origin, credentialState: credentials, settleOnAbort });
           }
         }
         signal?.throwIfAborted();
@@ -306,7 +307,7 @@ export class BrowserSupervisor {
             onAbort = () => reject(signal.reason ?? new BackendError('upstream'));
             signal?.addEventListener('abort', onAbort, { once: true });
           }),
-          Promise.resolve().then(async () => {
+          operationWork = Promise.resolve().then(async () => {
             if (auth !== undefined) {
               const key = new URL(origin).origin;
               if (!entry.credentials.has(key) || entry.credentials.get(key) !== auth.refresh) {
@@ -321,9 +322,14 @@ export class BrowserSupervisor {
       } catch (error) {
         if (attempt || !entry.closed || entry.stopping || this.#closed || signal?.aborted) throw error;
       } finally {
-        entry.users--;
         entry.crashed.delete(rejectCrash);
         signal?.removeEventListener('abort', onAbort);
+        // Setup owns an external account lease. Cancellation/crash may reject
+        // the race before the operation has finished physical cleanup; retain
+        // both ownership layers until it settles. Ordinary turns keep their
+        // existing prompt cancellation behavior.
+        if (settleOnAbort && operationWork) await Promise.allSettled([operationWork]);
+        entry.users--;
         if (this.idleMilliseconds !== null && !entry.users && this.#accounts.get(account) === entry && !this.#closed) {
           entry.timer = setTimeout(() => { this.closeAccount(account).catch(() => {}); }, this.idleMilliseconds);
         }

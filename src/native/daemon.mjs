@@ -8,6 +8,7 @@ import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { nativeOptions as normalizeNativeOptions } from './models.mjs';
 import { CompactionService, compactionProxy } from './compaction.mjs';
+import { createFileBrokerDiagnostics } from './broker-diagnostics.mjs';
 
 export async function writePrivate(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -28,7 +29,7 @@ export async function freePort() {
 
 // The OS owns this lease: no PID files, and no probing/unlinking a live owner's
 // endpoint. Windows pipes and Linux abstract sockets disappear on process exit.
-async function lockAccount(home) {
+export async function lockAccount(home) {
   const normalized = resolve(home);
   const identity = createHash('sha256').update(process.platform === 'win32' ? normalized.toLowerCase() : normalized).digest('hex');
   const address = process.platform === 'win32' ? '\\\\.\\pipe\\magpie-native-owner-' + identity
@@ -73,10 +74,11 @@ export class NativeDaemon {
   constructor({ home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities = {}, nativeOptions, appName = 'Codex Magpie',
     spawn = spawnProcess, fetch = globalThis.fetch, allocatePort = freePort, sleep = delay,
     startupTimeoutMs = 30_000, pollMs = 200, restartBaseMs = 1000, restartMaxMs = 30_000, env = process.env,
-    compactionIdleMs = 60_000, shutdownRequestTimeoutMs = 2000, shutdownExitTimeoutMs = 5000 }) {
+    compactionIdleMs = 60_000, shutdownRequestTimeoutMs = 2000, shutdownExitTimeoutMs = 5000,
+    diagnosticsFactory = createFileBrokerDiagnostics }) {
     Object.assign(this, { home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities, appName,
       spawn, fetch, allocatePort, sleep, startupTimeoutMs, pollMs, restartBaseMs, restartMaxMs, env,
-      shutdownRequestTimeoutMs, shutdownExitTimeoutMs });
+      shutdownRequestTimeoutMs, shutdownExitTimeoutMs, diagnosticsFactory });
     this.nextOptions = normalizeNativeOptions(nativeOptions);
     this.nextCapabilities = capabilities;
     this.home = resolve(home);
@@ -151,7 +153,7 @@ export class NativeDaemon {
       this.env.CODEX_HOME ? resolve(this.env.CODEX_HOME) : null,
       resolve(homedir(), '.codex'),
     ].filter(dir => dir && isAbsolute(dir) && existsSync(dir)))];
-    this.childEnv = { ...inherited, MAGPIE_NATIVE_CHECKPOINT_HOME: this.home, CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
+    this.childEnv = { ...inherited, MAGPIE_NATIVE_CHECKPOINT_HOME: this.home, MAGPIE_NATIVE_RETAINED_COMPACTION: '1', CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
       ...(this.browserEndpoint ? { MAGPIE_NATIVE_BROWSER_CDP: this.browserEndpoint } : {}),
       ...(trustedHomes.length ? { CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES: JSON.stringify(trustedHomes) } : {}),
       TUNNEL_CLIENT_STATE_DIR: join(this.home, 'tunnel-state'), TUNNEL_CLIENT_PROFILE_DIR: join(this.home, 'tunnel'),
@@ -160,9 +162,12 @@ export class NativeDaemon {
     signal = AbortSignal.any([signal, AbortSignal.timeout(this.startupTimeoutMs)]);
     signal.throwIfAborted();
     const child = this.spawn(this.runtimeCommand[0], [...this.runtimeCommand.slice(1), 'serve'], {
-      cwd: this.home, env: this.childEnv, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
+      cwd: this.home, env: this.childEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.child = child;
+    this.brokerDiagnostics = this.diagnosticsFactory(this.home);
+    this.brokerDiagnostics.attach(child.stdout);
+    this.brokerDiagnostics.attach(child.stderr);
     const childState = this.childState = { exited: false, httpReady: false };
     const failed = () => {
       if (this.child !== child) return;
@@ -303,6 +308,7 @@ export class NativeDaemon {
     const child = this.child;
     const done = this.childDone;
     const childState = this.childState;
+    const brokerDiagnostics = this.brokerDiagnostics;
     const config = this.config;
     this.ready = false;
     this.cleaning = (async () => {
@@ -336,6 +342,8 @@ export class NativeDaemon {
             if (!childState.exited) throw new Error('Native daemon shutdown failed');
           }
           this.child = null;
+          await brokerDiagnostics?.close();
+          if (this.brokerDiagnostics === brokerDiagnostics) this.brokerDiagnostics = null;
         } finally {
           // Cancellation may still need the MCP connection until the daemon exits.
           if ((!child || childState.exited) && this.tunnelPending && config?.tunnel) {

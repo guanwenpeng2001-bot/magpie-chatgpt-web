@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import { patchReferenceFixes } from '../src/native/reference-fixes.mjs';
 import { compactionPreloadSource, nativeRoot } from '../src/native/runtime.mjs';
 
 const pinnedHash = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
@@ -11,9 +12,9 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const entry = resolve(process.env.NATIVE_PRO_CONTEXT_CLI
   ?? join(nativeRoot(), 'runtime-6.1.18/payload/app/cli.js'));
 const oldAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
-const patchedAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs';
+const patchedAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs';
 const roundAnchor = 'let D;if(y.localTools)try{D=m.resolve(f)}';
-const roundPrefix = 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(';
+const roundPrefix = 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{';
 
 // Execute actual preload only. Never import the full CLI or touch a browser,
 // account, daemon, live app-server, installation or configuration.
@@ -22,9 +23,10 @@ async function preload(bytes, checksum = pinnedHash) {
   const script = compactionPreloadSource(entry)
     .replace("import { createHash } from 'node:crypto';", '')
     .replace("import { resolve } from 'node:path';", '')
+    .replace(`import { patchReferenceFixes } from ${JSON.stringify(new URL('../src/native/reference-fixes.mjs', import.meta.url).href)};`, '')
     .replace(pinnedHash, checksum);
   runInNewContext(script, {
-    createHash, resolve, Buffer, TextDecoder,
+    createHash, resolve, Buffer, TextDecoder, patchReferenceFixes,
     Bun: {
       plugin({ setup }) { setup({ onLoad(_options, callback) { onLoad = callback; } }); },
       file(path) {
@@ -68,7 +70,7 @@ function executionSource(source, anchor, includeHelper) {
     + ',async()=>{});return O;}).call(worker)';
 }
 
-function execute(script, { inputTokens, effort, multipart, family = '6', preflightError }) {
+function execute(script, { inputTokens, effort, multipart, family = '6', modelId = 'fixture-native-model', proAvailable = true, preflightError }) {
   const events = [];
   const preflight = kind => (...args) => {
     events.push({ kind, args });
@@ -84,8 +86,8 @@ function execute(script, { inputTokens, effort, multipart, family = '6', preflig
   };
   const result = runInNewContext(script, {
     q: FakeAdapterError, worker,
-    b: inputTokens, _: 500, e: { modelId: 'fixture-native-model', modelFamily: family, traceId: 'fixture' },
-    a: { effort }, i: { proAvailable: true }, y: 0,
+    b: inputTokens, _: 500, e: { modelId, modelFamily: family, traceId: 'fixture' },
+    a: { effort }, i: { proAvailable }, y: 0,
     c: { multipart: multipart ? { parts: [{}, {}] } : undefined },
     I: multipart ? [{}, {}] : undefined, M: 'commit', L: 1000, W: 4000,
     X: { effort: 'low' }, R: 500, Pi: () => 0,
@@ -117,7 +119,7 @@ function adapterExecutionSource(source) {
     + 'return ' + source.slice(sessionStart, sessionEnd) + ';})()';
 }
 
-function executeAdapter(script, { inputTokens, effort = 'max', localTools = true, appName = 'Fixture app', failureAt, failure }) {
+function executeAdapter(script, { inputTokens, effort = 'max', localTools = true, appName = 'Fixture app', modelId = 'fixture-native-model', family, proAvailable = true, compaction = false, failureAt, failure }) {
   const events = [];
   const emitted = [];
   const adapterErrors = [];
@@ -126,9 +128,9 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
   }
   const toolResult = Object.freeze({ role: 'tool', tool_call_id: 'fixture-call', content: 'small result', fixtureTokens: 13 });
   const history = Object.freeze({ role: 'user', content: 'full canonical history fixture', fixtureTokens: inputTokens - 13 });
-  const parsed = Object.freeze({ context: { messages: [history, toolResult] }, browserDelta: [toolResult] });
+  const parsed = Object.freeze({ modelId, _chatgptModelFamily: family, _compactionRequest: compaction, context: { messages: [history, toolResult] }, browserDelta: [toolResult] });
   const canonical = Object.freeze({ ...parsed, fixtureUsageInput: true });
-  const capabilities = Object.freeze({ proAvailable: true });
+  const capabilities = Object.freeze({ proAvailable });
   const environment = Object.freeze({ fixtureEnvironment: true });
   const signal = Object.freeze({ fixtureSignal: true });
   const scope = {
@@ -136,7 +138,7 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
     c: true, s: false, e: appName === undefined ? {} : { chatgptWeb: { appName } },
     T(event) { events.push('emitError'); emitted.push(event); },
     w(input) {
-      assert.equal(effort, 'max', 'non-Pro must not compute currentUsageInput');
+      assert.ok(effort === 'max' || modelId === 'gpt-5.6-sol' && ['6', '5.6'].includes(family) && proAvailable && ['medium', 'high', 'xhigh'].includes(effort));
       assert.equal(input, parsed, 'currentUsageInput receives canonical request, not browser delta');
       events.push('currentUsageInput');
       if (failureAt === 'currentUsageInput') throw failure;
@@ -163,10 +165,11 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
       events.push('createSession');
       assert.equal(typeof args[2], 'function');
       assert.equal(args[4], signal);
+      assert.equal(args[7], 'fixture-lineage');
       return 'fixture-session';
     } },
     re: 'fixture-execution', O: 'fixture-owner', Qe: 'fixture-trace', v: { abortSignal: signal },
-    qe: 'fixture-turn', ve: { threadId: 'fixture-thread' }, $f: input => { assert.equal(input, parsed); return 'fixture-lineage'; },
+    qe: 'fixture-turn', ve: { threadId: 'fixture-thread' }, magpieLineage: 'fixture-lineage',
     C() { assert.fail('session factory must not start a runtime in this fixture'); },
   };
   return { result: runInNewContext(script, scope), events, emitted, adapterErrors };
@@ -187,6 +190,68 @@ test('pinned Native Pro context guard through actual patched preload', async t =
   assert.equal(patched.contents.includes(oldAnchor), false);
   const script = executionSource(patched.contents, patchedAnchor, true);
   const adapterScript = adapterExecutionSource(patched.contents);
+
+  for (const family of ['6', '5.6']) for (const effort of ['medium', 'high', 'xhigh']) {
+    for (const multipart of [false, true]) for (const inputTokens of [111192, 111193, 224736, 294383]) {
+      await t.test(`${family} Sol ${effort} full transaction ${inputTokens}, multipart=${multipart}`, async () => {
+        const { result, events } = execute(script, { inputTokens, effort, multipart, family, modelId: 'gpt-5.6-sol' });
+        if (inputTokens < 111193) {
+          await result;
+          assert.equal(events.at(-1).kind, 'browser_page');
+        } else {
+          await assert.rejects(result, error => error instanceof FakeAdapterError
+            && error.status === 400 && error.code === 'context_length_exceeded' && error.retryable === false);
+          assert.equal(events.length, 1, 'no browser acquisition or physical stage Send');
+        }
+        assert.equal(events[0].args[0], inputTokens, 'sum of transaction, not maximum part');
+      });
+    }
+    for (const localTools of [false, true]) for (const compaction of [false, true]) {
+      for (const inputTokens of [111192, 111193, 294383]) {
+        await t.test(`${family} Sol ${effort} canonical ${inputTokens}, tools=${localTools}, compact=${compaction}`, async () => {
+          const { result, events, emitted } = executeAdapter(adapterScript, {
+            inputTokens, effort, localTools, compaction, family, modelId: 'gpt-5.6-sol',
+          });
+          await result;
+          if (inputTokens < 111193) {
+            assert.equal(emitted.length, 0);
+            assert.equal(events.at(-1), 'createSession');
+          } else {
+            assert.deepEqual(events, ['currentUsageInput', 'estimateFullHistory', 'emitError']);
+            assert.equal(emitted.length, 1);
+            assert.equal(emitted[0].code, 'context_length_exceeded');
+            assert.equal(emitted[0].retryable, false);
+          }
+        });
+      }
+    }
+  }
+  for (const family of ['6', '5.6']) for (const proAvailable of [false, true]) {
+    for (const effort of ['low', 'medium', 'high', 'xhigh']) {
+      if (proAvailable && effort !== 'low') continue;
+      await t.test(`${family} ${effort} Pro=${proAvailable}: unaffected tier`, async () => {
+        const { result, events, emitted } = executeAdapter(adapterScript, {
+          inputTokens: 294383, effort, family, proAvailable, modelId: 'gpt-5.6-sol',
+        });
+        await result;
+        assert.deepEqual(events, ['resolveEnvironment', 'createSession']);
+        assert.equal(emitted.length, 0);
+        const worker = execute(script, { inputTokens: 294383, effort, multipart: true, family, proAvailable, modelId: 'gpt-5.6-sol' });
+        await worker.result;
+        assert.equal(worker.events.at(-1).kind, 'browser_page');
+      });
+    }
+  }
+
+  for (const anchor of ['A=T.length,I=v(T);if(!e._compactionRequest)return I;', 'while(b()&&T.length>1){let y=_===0?1:0;']) {
+    for (const [label, replacement] of [['missing', 'missing-sol-guard-anchor'], ['duplicate', anchor + anchor]]) {
+      await t.test(`${label} Sol compiler anchor fails closed independently of SHA: ${anchor.slice(0, 10)}`, async () => {
+        assert.equal(raw.split(anchor).length, 2);
+        const drift = Buffer.from(raw.replace(anchor, replacement));
+        await assert.rejects(preload(drift, digest(drift)), /Native Sol pre-trim context guard compatibility mismatch/);
+      });
+    }
+  }
 
   for (const localTools of [true, false]) {
     for (const inputTokens of [112192, 112193, 275414, 340069]) {

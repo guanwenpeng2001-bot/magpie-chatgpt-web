@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn as spawnProcess } from 'node:child_process';
 import { NativeDaemon, daemonProxy, quoteMcpCommand } from '../src/native/daemon.mjs';
+import { createFileBrokerDiagnostics } from '../src/native/broker-diagnostics.mjs';
 
 async function fixture(t, overrides = {}) {
   const home = await mkdtemp(join(tmpdir(), 'native-daemon-'));
@@ -15,6 +16,10 @@ async function fixture(t, overrides = {}) {
     calls.push({ file, args, options });
     const child = new EventEmitter();
     child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    if (overrides.closePipesOnExit !== false) child.once('exit', () => queueMicrotask(() => {
+      child.stdout.end(); child.stderr.end(); child.emit('close', 0);
+    }));
     child.kill = () => { child.killed = true; child.emit('exit', null); };
     children.push(child);
     if (!args.includes('serve')) queueMicrotask(() => {
@@ -42,6 +47,79 @@ async function fixture(t, overrides = {}) {
   return { daemon, calls, requests, children, home };
 }
 const credentials = { tunnelId: 'fixture-tunnel', runtimeKey: 'fixture-key' };
+
+test('daemon stores only bounded broker fingerprints and closes capture before replacement', async t => {
+  const { daemon, calls, children, home } = await fixture(t);
+  await daemon.start(credentials);
+  assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
+  const first = children[0];
+  first.stdout.write('[chatgpt-web] broker trace=fixture-run registered tokenHash=abcdef012345\n');
+  first.stderr.write('Authorization: Bearer do-not-store-this-credential\n');
+  first.stderr.write('[chatgpt-web] broker claim received (tokenChars=37, tokenHash=abcdef012345, valid=true)\n');
+  await daemon.brokerDiagnostics.flush();
+  const firstPath = daemon.brokerDiagnostics.path;
+  const read = async (path = firstPath) => JSON.parse(await readFile(path, 'utf8'));
+  const initial = await read();
+  assert.deepEqual(initial.events.map(event => event.type), ['registered', 'claim']);
+  assert.doesNotMatch(JSON.stringify(initial), /Authorization|credential|fixture-run/);
+  await daemon.stop();
+  assert.equal((await read()).closed, true);
+  await daemon.start(credentials);
+  const next = children[calls.findLastIndex(call => call.args.includes('serve'))];
+  first.stdout.write('[chatgpt-web] broker trace=old-run registered tokenHash=111111111111\n');
+  next.stderr.write('[chatgpt-web] broker trace=new-run registered tokenHash=222222222222\n');
+  await daemon.brokerDiagnostics.flush();
+  const replacement = await read(daemon.brokerDiagnostics.path);
+  assert.notEqual(replacement.runId, initial.runId);
+  assert.equal(replacement.events.length, 1);
+  assert.equal(replacement.events[0].tokenHash, '222222222222');
+});
+
+test('daemon exit does not discard claim and retirement data before pipe EOF', { timeout: 2000 }, async t => {
+  const { daemon, children } = await fixture(t, { closePipesOnExit: false });
+  await daemon.start(credentials);
+  const child = children[0], log = daemon.brokerDiagnostics;
+  const stopping = daemon.stop();
+  await new Promise(resolve => child.once('exit', resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(log.snapshot().closed, false);
+  child.stdout.end('[chatgpt-web] broker_retired ' + JSON.stringify({ traceId: 'fixture', completionCommitted: true,
+    pendingTools: 0, queuedTools: 0, deliveredTools: 0, activeMcpRequests: 0 }) + '\n');
+  child.stderr.end('[chatgpt-web] broker claim received (tokenChars=37, tokenHash=111111111111, valid=false, retiredTurn=fixture)\n');
+  await stopping;
+  const saved = JSON.parse(await readFile(log.path, 'utf8'));
+  assert.deepEqual(saved.events.map(event => event.type), ['retired', 'claim']);
+  assert.equal(saved.drainTimedOut, false);
+  assert.equal(daemon.ownerLock, null);
+});
+
+test('optional flush timeout still removes the alias and releases ownership for a new daemon', { timeout: 3000 }, async t => {
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const enteredWrite = new Promise(resolve => { entered = resolve; });
+  t.after(() => release());
+  const first = await fixture(t, { diagnosticsFactory: home => createFileBrokerDiagnostics(home, {
+    flushTimeoutMs: 10,
+    writeFile: async () => { entered(); await gate; throw new Error('late optional I/O failure'); },
+  }) });
+  await first.daemon.start(credentials);
+  const old = first.daemon.brokerDiagnostics;
+  first.children[0].stdout.write('[chatgpt-web] broker trace=fixture registered tokenHash=111111111111\n');
+  await enteredWrite;
+  await first.daemon.stop();
+  assert.equal(old.snapshot().flushTimedOut, true);
+  assert.equal(first.daemon.ownerLock, null);
+  assert.equal(first.calls.some(call => call.args[1] === 'rm'), true);
+  const second = await fixture(t, { home: first.home });
+  await second.daemon.start(credentials);
+  const current = second.daemon.brokerDiagnostics;
+  second.children[0].stderr.write('[chatgpt-web] broker trace=current registered tokenHash=222222222222\n');
+  await current.flush();
+  release(); await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(JSON.parse(await readFile(current.path, 'utf8')).events[0].tokenHash, '222222222222');
+  assert.notEqual(current.path, old.path);
+  await second.daemon.stop();
+});
 
 test('native runtime receives only its owned ordinary browser endpoint', async t => {
   const browserEndpoint = 'http://127.0.0.1:43211';

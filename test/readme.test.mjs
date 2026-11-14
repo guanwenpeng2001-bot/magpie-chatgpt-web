@@ -23,7 +23,7 @@ test('README failure table covers every pinned public code with condition and re
 });
 
 test('README states the plugin release and host version verified against', () => {
-  assert.match(prose, /Plugin version: `0\.5\.5`\. Historical host verification used: magpie `0\.1\.3930`/);
+  assert.match(prose, /Plugin version: `0\.5\.6`\. Historical host verification used: magpie `0\.1\.3930`/);
 });
 
 test('README separates supported plan fields from unknown account allowance and live evidence', () => {
@@ -40,7 +40,10 @@ test('README separates supported plan fields from unknown account allowance and 
   assert.match(section, /does not verify every plan tier or the payment-attention outcome/);
   assert.match(section, /valid session can lack `account` or a recognized plan code/);
   assert.match(section, /Session expiry is not a quota reset or subscription renewal date/);
-  assert.match(section, /Plan names, advertised caps, local token totals and Codex `\/wham\/usage` counters are never used to infer ChatGPT remaining allowance/);
+  assert.match(section, /Historical budgets are not used in the usage card/);
+  assert.match(section, /local token totals and Codex `\/wham\/usage` counters do not measure ChatGPT Chat allowance/);
+  assert.match(section, /no estimated allowance, historical budget, remaining percentage or forecast/);
+  assert.match(section, /Earlier activity and outside sends are not included/);
   assert.match(section, /Neither the live quota result nor these tests establishes a measured remaining allowance/);
   assert.doesNotMatch(prose, /no dedicated[^.]*quota-display workflow/i);
 });

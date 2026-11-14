@@ -191,7 +191,7 @@ test('catalog loads capabilities from each saved native account without starting
   for (const [savedProfile, capabilities, efforts, context] of cases) {
     const home = join(root, 'accounts', savedProfile);
     await mkdir(home, { recursive: true });
-    await writeFile(join(home, 'native.json'), JSON.stringify({ profile: savedProfile, connectorId: 'c1', linkId: 'l1', capabilities }));
+    await writeFile(join(home, 'native.json'), JSON.stringify({ profile: savedProfile, tunnelId: 't1', runtimeKey: 'fixture-runtime-key', connectorId: 'c1', linkId: 'l1', capabilities }));
     const models = await client.models({ profile: savedProfile, capabilities: { solAvailable: true, proAvailable: true, extraHighAvailable: true } }, core);
     const descriptor = models[`native/${savedProfile}/gpt-6`];
     assert.equal(descriptor.limit.context, context);

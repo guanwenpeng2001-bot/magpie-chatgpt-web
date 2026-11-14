@@ -4,6 +4,12 @@ import { homedir } from 'node:os';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { patchNativeBrowserReadiness } from './browser-readiness.mjs';
+import { patchNativeTokenCopyGuidance } from './token-copy-guidance.mjs';
+import { patchNativeCompactionGuidance } from './compaction-guidance.mjs';
+import { patchToolDiscovery } from './tool-discovery.mjs';
+import { patchNativeManagedRetention } from './retained-host.mjs';
+import { patchNativeAdditionalContext } from './additional-context.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
 export const RELEASES = Object.freeze([
@@ -24,6 +30,18 @@ const installing = new Map();
 const compactionGate = 'let oe=(f.modelId!==Ie||c)&&l.localToolsEnabled;';
 const sharedCompactionGate = compactionGate.slice(0, -1)
   + '&&!(e.chatgptWeb?.browserHost==="managed-chrome"&&e.chatgptWeb?.browserInteractionMode==="automatic");';
+// Content-free phase boundaries distinguish an upstream delay from waiting for
+// the old browser's physical settlement. They never change retirement order.
+const compactionRetirement = 'if(se&&De.findConversationHead(se))await kt(De.retireConversationAndWait(se),v.abortSignal);else await De.retireAndWait(ae,v.abortSignal)';
+const usageSubmissionStart = 'let ke=async()=>{if(!o)return;let E=ho(),z;';
+const usageSubmissionEnd = 'm.push(ne)}},Be=c.text,ze=[];';
+const ownershipEntry = 'let Qe=ed(e,f),N=await De.getOrCreateAfterOwnerRetirement(re,O,()=>C(f,D,Qe,R),Qe,v.abortSignal,qe,ve.threadId,$f(f)),K=Df(f)';
+// Magpie's compact route can re-encode objects in a different key order. These
+// two hashes are process-local; checkpoint hashes and their saved format stay
+// unchanged so existing authenticated continuation records remain readable.
+const executionIdentity = 'function Nu(e,t){return xs("sha256").update(JSON.stringify({modelId:e.modelId,reasoning:e.options.reasoning,payload:t})).digest("hex")}';
+const instructionIdentity = 'let t=_i(e).map((r)=>xs("sha256").update(JSON.stringify([r.itemId??null,r.content])).digest("hex")),n=t.pop();';
+const summaryDecoder = 'function $n(e){if(!e.startsWith(ni))return null;';
 const cliSha256 = 'df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1';
 const browserLaunch = 'ff.launch({executablePath:this.config.chromeExecutablePath,headless:!this.config.headed})';
 // readChatGptModelAnnouncements, chatgpt-ui/model-picker.ts:125-127. Run in its
@@ -36,14 +54,56 @@ const opaqueIdFactory = 'function ci(e){return`${e}_${Ev(24).toString("base64url
 const markdownGfmSetup = 'Vt.use(fC);';
 const proContextGuard = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
 const proRoundGuard = 'let D;if(y.localTools)try{D=m.resolve(f)}';
+// Xt is the pinned compiler. I contains all restored records here, before
+// compaction fit recovery can splice older messages out of T. These anchors
+// protect both Pro and guarded Sol without changing their separate budgets.
+const solCompileGuard = 'A=T.length,I=v(T);if(!e._compactionRequest)return I;';
+const solTrimGuard = 'while(b()&&T.length>1){let y=_===0?1:0;';
+// Xt/Ai/Nt/gs/Pe/pn/Pi/v_/y_ are verified by the pinned bundle checksum.
+// In particular v_ and y_ are pure staging selection and multipart preflight;
+// they require no worker, browser or mutable account state.
+const compactionTransportFallback = 'if(!o&&!u&&!c&&!s.localTools&&e.modelId===Wn&&t.proAvailable===!0&&(e._chatgptModelFamily==="6"||e._chatgptModelFamily==="5.6")&&(s.effort==="max"||nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))&&rf(I.text)>Fx)return chooseNativeCompactionTransport(e,t,n,r,s.effort,{compile:Xt,messages:Ai,inputTokens:Nt,messageTokens:gs,textTokens:Pe,skillTokens:pn,imageTokens:Pi,stagingMode:v_,assertMultipart:y_,AdapterError:q});';
+// Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
+// and multipart reconciliation. This classifies failure only; it never rebinds.
+const submittedAlertAnchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
+// Only proof observation timeouts enter the original bounded recovery/progress
+// catch. All other proof failures escape afterward, before response selection or
+// tool acknowledgement, so liveness cannot suppress an authenticated error.
+const submittedInitialObservationAnchor = 'let m;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r)}catch(w)';
+const submittedInitialAlertAnchor = 'd=0,h=o?.snapshot();let g=Gi(u.initialTurnIdentities,m.responseIdentities);';
+// Provenance is recorded only at the actual local multipart formatter call sites,
+// never inferred from user-supplied text that happens to resemble a wrapper.
+const submittedStageBaseline = 'let V=await this.captureSubmissionBaseline(O,z.text,ze);';
+const submittedFinalBaseline = 'let oe=await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),ae=';
 
 // The 275K live multipart test delivered all stages but recovered only 4/12
 // independent markers, even when all stages used Pro. Do not advertise or
 // submit the experimental triple Pro budget until retention is verified.
 // Keep the pinned reference's ordinary Pro boundary (including its reserve).
-export function assertNativeProContext(inputTokens, effort, AdapterError) {
-  if (effort === 'max' && inputTokens >= 112193) {
-    throw new AdapterError('Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+export function assertNativeProContext(inputTokens, effort, AdapterError, requiresTrimming = false) {
+  if (effort === 'max' && (requiresTrimming || inputTokens >= 112193)) {
+    throw new AdapterError(requiresTrimming
+      ? 'Native Pro compaction cannot fit the complete history without dropping records. Reduce the supplied history explicitly or use another verified route; no history was silently removed.'
+      : 'Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+      status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
+    });
+  }
+}
+
+// Routing normalizes both Sol families to gpt-5.6-sol, preserving the actual
+// family in _chatgptModelFamily (worker modelFamily). Do not infer family from
+// a UI label, the staging effort, the Bigger toggle or caller window metadata.
+export function nativeSolContextGuarded(modelId, family, effort, capabilities) {
+  return modelId === 'gpt-5.6-sol' && (family === '6' || family === '5.6') && capabilities?.proAvailable === true
+    && ['medium', 'high', 'xhigh'].includes(effort);
+}
+
+export function assertNativeSolContext(inputTokens, modelId, family, effort, capabilities, AdapterError, requiresTrimming = false) {
+  if (!nativeSolContextGuarded(modelId, family, effort, capabilities)) return;
+  if (requiresTrimming || inputTokens >= 111193) {
+    throw new AdapterError(requiresTrimming
+      ? `GPT-${family} Sol compaction cannot fit the complete history without dropping records. Reduce the supplied history explicitly or use another verified route; no history was silently removed.`
+      : `GPT-${family} Sol input exceeds the guarded 111,193-token baseline limit for Pro-capable accounts. Larger-context retention has not passed verification. Reduce the supplied history explicitly or use another verified route; automatic compaction of this oversized history is not guaranteed.`, {
       status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
     });
   }
@@ -165,6 +225,7 @@ export function compactionPreloadSource(cliPath) {
   // is unchanged and the verified download is never modified. Fail closed on drift.
   return `import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
+import { patchReferenceFixes } from ${JSON.stringify(new URL('./reference-fixes.mjs', import.meta.url).href)};
 const entry = ${JSON.stringify(resolve(cliPath))};
 Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
   build.onLoad({ filter: /[\\\\/]cli\\.js$/ }, async ({ path }) => {
@@ -175,6 +236,18 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     const source = new TextDecoder().decode(bytes);
     const before = ${JSON.stringify(compactionGate)};
     if (source.split(before).length !== 2) throw new Error('Native shared compaction gate mismatch');
+    const retirement = ${JSON.stringify(compactionRetirement)};
+    if (source.split(retirement).length !== 2) throw new Error('Native compaction retirement compatibility mismatch');
+    const ownership = ${JSON.stringify(ownershipEntry)};
+    if (source.split(ownership).length !== 2) throw new Error('Native ownership diagnostic compatibility mismatch');
+    const executionIdentity = ${JSON.stringify(executionIdentity)}, instructionIdentity = ${JSON.stringify(instructionIdentity)};
+    if (source.split(executionIdentity).length !== 2 || source.split(instructionIdentity).length !== 2)
+      throw new Error('Native semantic identity compatibility mismatch');
+    const summaryDecoder = ${JSON.stringify(summaryDecoder)};
+    if (source.split(summaryDecoder).length !== 2) throw new Error('Native summary decoder compatibility mismatch');
+    const usageStart = ${JSON.stringify(usageSubmissionStart)}, usageEnd = ${JSON.stringify(usageSubmissionEnd)};
+    if (source.split(usageStart).length !== 2 || source.split(usageEnd).length !== 2)
+      throw new Error('Native send receipt compatibility mismatch');
     const launch = ${JSON.stringify(browserLaunch)};
     if (source.split(launch).length !== 3) throw new Error('Native browser launch compatibility mismatch');
     const announcement = ${JSON.stringify(modelAnnouncementTail)};
@@ -183,10 +256,26 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(markdown).length !== 2) throw new Error('Native markdown table compatibility mismatch');
     const terminal = ${JSON.stringify(terminalErrorDetector)};
     if (source.split(terminal).length !== 2) throw new Error('Native terminal alert compatibility mismatch');
+    const submittedAlert = ${JSON.stringify(submittedAlertAnchor)};
+    if (source.split(submittedAlert).length !== 2) throw new Error('Native submitted alert compatibility mismatch');
+    const submittedInitialAlert = ${JSON.stringify(submittedInitialAlertAnchor)};
+    const submittedInitialObservation = ${JSON.stringify(submittedInitialObservationAnchor)};
+    if (source.split(submittedInitialAlert).length !== 2 || source.split(submittedInitialObservation).length !== 2)
+      throw new Error('Native initial submitted alert compatibility mismatch');
+    const submittedStage = ${JSON.stringify(submittedStageBaseline)};
+    const submittedFinal = ${JSON.stringify(submittedFinalBaseline)};
+    if (source.split(submittedStage).length !== 2 || source.split(submittedFinal).length !== 2)
+      throw new Error('Native submitted multipart provenance compatibility mismatch');
     const contextGuard = ${JSON.stringify(proContextGuard)};
     if (source.split(contextGuard).length !== 2) throw new Error('Native Pro context guard compatibility mismatch');
     const roundGuard = ${JSON.stringify(proRoundGuard)};
     if (source.split(roundGuard).length !== 2) throw new Error('Native Pro round guard compatibility mismatch');
+    const solCompileGuard = ${JSON.stringify(solCompileGuard)}, solTrimGuard = ${JSON.stringify(solTrimGuard)};
+    if (source.split(solCompileGuard).length !== 2 || source.split(solTrimGuard).length !== 2)
+      throw new Error('Native Sol pre-trim context guard compatibility mismatch');
+    for (const pure of ['function Ai(e){', 'function gs(e,t){', 'function Nt(e,t){', 'function Pi(e){', 'function v_(e,t,n,r){', 'function y_(e,t,n,r,o,i,a,s,c){']) {
+      if (source.split(pure).length !== 2) throw new Error('Native compaction transport preflight compatibility mismatch');
+    }
     const registry = ${JSON.stringify(checkpointRegistry)};
     const remember = ${JSON.stringify(checkpointRememberTail)};
     const touch = ${JSON.stringify(checkpointTouch)};
@@ -194,10 +283,24 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     if (source.split(tokenFactory).length !== 2) throw new Error('Native turn token compatibility mismatch');
     if (source.split(registry).length !== 2 || source.split(remember).length !== 2 || source.split(touch).length !== 2)
       throw new Error('Native checkpoint persistence compatibility mismatch');
-    const contents = source.replace(before, ${JSON.stringify(sharedCompactionGate)})
+    let contents = source.replace(before, ${JSON.stringify('console.info("[chatgpt-web] compaction_phase entered");' + sharedCompactionGate)})
+      .replace(executionIdentity, executionIdentity.replace('JSON.stringify(', 'identityJson('))
+      .replace(instructionIdentity, instructionIdentity.replace('JSON.stringify(', 'identityJson('))
+      .replace(summaryDecoder, 'function $n(e){if(e.startsWith("magpie1:"))return decodeMagpieSummary(e);if(!e.startsWith(ni))return null;')
+      .replace(retirement, 'console.info("[chatgpt-web] compaction_phase retiring");' + retirement + ';console.info("[chatgpt-web] compaction_phase retired")')
+      .replace(ownership, 'let Qe=ed(e,f),magpieLineage=$f(f),magpieOwnership=ownershipSnapshot({executionKey:re,ownerKey:O,sourceKey:f._compactionRequest?p+":"+$u(f):undefined,instruction:magpieLineage,model:f.modelId,reasoning:f.options.reasoning,identity:ve,revision:_i(f).at(-1),compaction:f._compactionRequest===true});if(magpieOwnership)console.info("[chatgpt-web] ownership "+JSON.stringify(magpieOwnership));let N=await De.getOrCreateAfterOwnerRetirement(re,O,()=>C(f,D,Qe,R),Qe,v.abortSignal,qe,ve.threadId,magpieLineage),K=Df(f)')
+      .replace(usageStart, 'let magpieUsageIndex=0,magpieLegacyUsage=async()=>{if(!o)return;let E=ho(),z;')
+      .replace(usageEnd, 'm.push(ne)}},ke=async()=>{let receipt=await prepareSubmissionReceipt({readAccount:()=>os(O),profile:process.env.CODEX_CHATGPT_WEB_HOME,model:nativeUsageModel(Y),effort:Y.effort,source:"native",stage:c.multipart&&magpieUsageIndex++<c.multipart.parts.length?"multipart":e.compaction?"compaction":"message"}),legacy=await magpieLegacyUsage();return()=>{receipt.confirm();m.push(receipt.flush());legacy?.()}},Be=c.text,ze=[];')
       .replace(terminal, 'async function wf(e){return nativeTerminalErrorAlert(e,q)}')
-      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);let re=this.config.turnTimeoutMs')
-      .replace(roundGuard, 'if(y.effort==="max"){try{assertNativeProContext(wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens,y.effort,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(submittedAlert, 'await this.reconcileMultipartHistory(e,t,i,r);await nativeSubmittedTerminalAlert(this,e,t,n,i,r,q,nativeTerminalErrorAlert);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])')
+      .replace(submittedInitialObservation, 'let m,magpieSubmittedFailure;try{m=await this.submissionDomState(l,u.domCache,r),await this.reconcileMultipartHistory(l,u,m,r);try{await nativeSubmittedTerminalAlert(this,l,u,undefined,m,r,q,nativeTerminalErrorAlert)}catch(magpieProofError){if(magpieProofError instanceof Mi)throw magpieProofError;magpieSubmittedFailure={error:magpieProofError}}}catch(w)')
+      .replace(submittedInitialAlert, 'if(magpieSubmittedFailure)throw magpieSubmittedFailure.error;' + submittedInitialAlert)
+      .replace(submittedStage, 'let V=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,z.text,ze),A,"stage",E+1,c.multipart.parts.length,z.text);')
+      .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
+      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs')
+      .replace(roundGuard, 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{let magpieInput=wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens;assertNativeProContext(magpieInput,y.effort,q);assertNativeSolContext(magpieInput,f.modelId,f._chatgptModelFamily,y.effort,R,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(solCompileGuard, 'A=T.length,I=v(T);if(s.effort==="max")assertNativeProContext(Nt(I,e.modelId),s.effort,q);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;' + ${JSON.stringify(compactionTransportFallback)})
+      .replace(solTrimGuard, 'if(s.effort==="max"&&b())assertNativeProContext(0,s.effort,q,!0);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
@@ -209,7 +312,23 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
       + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
       + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
-      + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')};
+      + '\\n' + ${JSON.stringify(nativeSolContextGuarded.toString())}
+      + '\\n' + ${JSON.stringify(assertNativeSolContext.toString())}
+      + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { chooseNativeCompactionTransport } from ' + JSON.stringify(new URL('./compaction-transport.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { installNativeManagedRetention } from ' + JSON.stringify(new URL('./retained-host.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { ownershipSnapshot } from ' + JSON.stringify(new URL('./ownership-diagnostics.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { identityJson } from ' + JSON.stringify(new URL('./identity-json.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { decodeMagpieSummary } from ' + JSON.stringify(new URL('./summary-envelope.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
+    contents = patchReferenceFixes(contents);
+    contents = (${patchNativeBrowserReadiness.toString()})(contents);
+    contents = (${patchNativeTokenCopyGuidance.toString()})(contents);
+    contents = (${patchNativeCompactionGuidance.toString()})(contents, { retained: true });
+    contents = (${patchToolDiscovery.toString()})(contents);
+    contents = (${patchNativeManagedRetention.toString()})(contents);
+    contents = (${patchNativeAdditionalContext.toString()})(contents);
     return { contents, loader: 'js' };
   });
 } });
