@@ -30,6 +30,8 @@ Further reference diagnostics isolate a size-dependent failure before compaction
 
 A matched Pro→Pro control also recovered only 5/12 at 206,283 local input tokens: all seven stage markers were missing and all five final markers survived. Both outgoing requests explicitly used `gpt-6-pro`; the original native selector verified max/Pro for each Send. The control froze the earlier high-compiled wire strings to isolate selection, and passed the reference's unchanged 224,386-token two-part max ceiling. Complete delivery/ancestry and confirmed cleanup were observed. Selecting Pro does not repair this sample, and this is not expanded-capacity acceptance.
 
+Keeping that complete 99,732-token first stage unchanged while reducing only inert final-fragment lines recovered 12/12 at 116,459 aggregate local tokens. Thus the first stage is readable with a smaller later message; the failure depends on later payload size/content in these samples. This does not establish a precise capacity, prove server-side truncation or justify raising the guarded production window.
+
 ## Local context and usage estimates
 
 ChatGPT does not expose an official token count for this browser transport. Magpie usage is therefore a local estimate, not an OpenAI token count, quota reading or billing record. The plugin computes all values below before or while the turn runs:

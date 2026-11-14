@@ -601,6 +601,144 @@
         }
       ],
       "retentionPassed": false
+    },
+    {
+      "name": "large_stage_small_commit",
+      "source": "partition-tail-d26d3672-3d10-4d7d-95b8-4a2fe2d4665e-result.json",
+      "sourceSha256": "37b4e3c4df4505611ae3861eb39e608c94dbc7e3b5d18a6a587275b6d994687a",
+      "confirmedPhysicalSends": 2,
+      "installedUsageCoverage": false,
+      "cleanupConfirmed": true,
+      "accountConfigUnchanged": true,
+      "originalPagesStillPresent": true,
+      "compilerEffort": "high (frozen contract)",
+      "actualWorkerEffort": "max",
+      "firstStageUnchanged": true,
+      "firstStageNormalizedWireSha256": "98b72368acb8255950bf42cc83b4a13d4e3727fe978e77f28b0f16c4a92fd000",
+      "removedFinalFillerLines": 1673,
+      "originalAggregateCeiling": 224386,
+      "preflightSource": "partition-tail-preflight.json",
+      "preflightSha256": "6a42202c6e5e738ba8e384a5ffa9e92a99b8820dc84cfbacaa6458d7413bf216",
+      "arms": [
+        {
+          "cutAfterFragment": 109,
+          "compiledInputTokenEstimate": 116459,
+          "physicalMessageTokenEstimates": [
+            99732,
+            8476
+          ],
+          "requestModels": [
+            "gpt-6-pro",
+            "gpt-6-pro"
+          ],
+          "observedRequestEfforts": [
+            null,
+            null
+          ],
+          "confirmedPhysicalSends": 2,
+          "phaseRecall": {
+            "stage": {
+              "correct": 7,
+              "total": 7
+            },
+            "commit": {
+              "correct": 5,
+              "total": 5
+            }
+          },
+          "correctMarkers": 12,
+          "totalMarkers": 12,
+          "markers": [
+            {
+              "id": "RECALL_1_START",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_1_MIDDLE",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_1_END",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_2_START",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_2_MIDDLE",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_2_END",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_START",
+              "phase": "stage",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_3_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_START",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_MIDDLE",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            },
+            {
+              "id": "RECALL_4_END",
+              "phase": "commit",
+              "correct": true,
+              "notFound": false
+            }
+          ],
+          "payloadHashesMatch": true,
+          "observerGaps": 0,
+          "completeFragmentCoverage": true,
+          "coverageScope": "109 original stage fragments; 105 final fragments with only inert Record lines removed; all source labels and 12 markers retained",
+          "lineage": {
+            "membershipMatches": true,
+            "ambiguous": false,
+            "stageEchoExact": true,
+            "stageToCommitLinked": true,
+            "finalParentLinked": true,
+            "finalUserFullEchoObserved": false,
+            "physicalRequests": 2
+          },
+          "lineageSha256": "a39b5d87fa7f62aec0cc4f61f3775140dc1947bd5f47bd160372c3598539a802"
+        }
+      ],
+      "retentionPassed": true
     }
   ],
   "conclusions": {
@@ -608,7 +746,8 @@
     "smallerDiagnosticPassed": true,
     "sameEffortSufficientToRepairLargeSample": false,
     "serverInferenceContentsKnown": false,
-    "sameProModeSufficientToRepairLargeSample": false
+    "sameProModeSufficientToRepairLargeSample": false,
+    "originalLargeStageReadableWithSmallCommit": true
   },
   "limits": [
     "One sample per experimental arm; no universal capacity threshold established.",
@@ -616,6 +755,7 @@
     "Token figures are local transport sizing estimates, never account allowance or usage-card figures.",
     "Diagnostic browser Sends bypass installed usage instrumentation and are not backfilled.",
     "Request coverage, acknowledgements and server echo do not establish inclusion in the inference window.",
-    "Matched Pro control freezes the original high-compiled strings; actual native selections and both outgoing request models prove Pro. It is a selector contrast, not a fresh Pro compiler acceptance run."
+    "Matched Pro control freezes the original high-compiled strings; actual native selections and both outgoing request models prove Pro. It is a selector contrast, not a fresh Pro compiler acceptance run.",
+    "The unchanged approximately 100K stage recovered all seven associations with a smaller final message. This supports dependence on subsequent payload size/content, not a precise capacity threshold or proof of server-side truncation."
   ]
 }
