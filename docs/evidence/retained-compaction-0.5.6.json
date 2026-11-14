@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-11-14T03:48:50.742Z",
+  "sourceRevision": "f400974e0ae8b8fb04656481199bb8a7970df572",
+  "codexVersion": "0.169.0",
+  "method": "70 complete host-context fragments, 12 fresh random associations, two initial probes and ten held out. Actual retained-page broker compaction, checkpoint decoded from canonical rollout, then Native CLI resume after daemon process discontinuity. Oracle remains outside task directories.",
+  "limitations": [
+    "Baseline-sized input only; expanded and 1M retention remain unverified.",
+    "Summaries can lose details; two samples do not guarantee lossless compaction.",
+    "Account-wide allowance is not reported; recorded Sends are not account quota."
+  ],
+  "cases": [
+    {
+      "revision": "f400974e0ae8b8fb04656481199bb8a7970df572",
+      "firstCompleted": true,
+      "firstProbeCorrect": 2,
+      "heldOutLeakCount": 0,
+      "firstCommands": 0,
+      "firstEdits": 0,
+      "firstCompactions": 0,
+      "maxObservedInput": 76587,
+      "summaryCount": 1,
+      "summary": {
+        "decoded": true,
+        "chars": 2528,
+        "sha256": "7a9b018922ba1ff0881ac4405cceced7dc4bd9b4e11cc3911e1f89609b5732db",
+        "exactAssociations": 12,
+        "heldOutCorrect": 10,
+        "missingKeys": []
+      },
+      "retainedSourceAcquired": true,
+      "retainedSourceReleased": true,
+      "seedAndCompactionSends": 2,
+      "compactionSends": 1,
+      "coverageGaps": 0,
+      "observedSendModels": [
+        "gpt-6-pro"
+      ],
+      "daemonRestarted": true,
+      "restartMethod": "explicit idle drain/shutdown, then new daemon",
+      "checkpointBytes": 17754,
+      "sameThread": true,
+      "profile": "chatgpt-web-native",
+      "providerOverride": false,
+      "cliExit": 0,
+      "restartRecallPairs": 12,
+      "restartCommands": 1,
+      "restartReadBoth": true,
+      "restartTestsPassed": true,
+      "restartEdits": 0,
+      "restartErrors": 0,
+      "restartCompleted": true,
+      "filesUnchanged": true,
+      "scope": "Real retained-source compaction and same-thread CLI resume after idle daemon restart; baseline window, not expanded or 1M acceptance.",
+      "passed": true,
+      "model": "gpt-6-pro",
+      "artifacts": [
+        {
+          "name": "retained-live6-v169-verification.json",
+          "sha256": "0547ba7a7b4a8b491a82efdce43fe98765453b735441e099da95956c87d34097"
+        },
+        {
+          "name": "retained-live6-v169-summary-audit.json",
+          "sha256": "258774f0083d774f598b9aff631b172c86e95c6e7aa38b9b34b70a18366787b2"
+        },
+        {
+          "name": "retained-live6-v169-broker.json",
+          "sha256": "6171b2dd51ff65356e9626aadba9a5e42f667287cf41b2fa63c81ac445c031b6"
+        },
+        {
+          "name": "retained-live6-v169-restart-status.json",
+          "sha256": "c169365435167156543d14f50df0cde969f4e8f4308e60d41fbee53205e59d5a"
+        },
+        {
+          "name": "retained-live6-v169-restart.json.cli-events.json",
+          "sha256": "a10ba239093402ac4e5923a49f3e31ed62fd425640cda28fe3a7bd32782a55ee"
+        },
+        {
+          "name": "retained-live6-v169-restart.json.cli-exit.json",
+          "sha256": "12c9ae0d906c79670217618b912a2d37680ac2af1cbd09651b3985d5f1bca80a"
+        },
+        {
+          "name": "retained-live6-v169-seed.json.events.json",
+          "sha256": "e0b8b0fef971259f3e1ff40268e69269357759257c0e0fdaf7577490449d7c41"
+        },
+        {
+          "name": "retained-live6-v169-receipts-before.json",
+          "sha256": "742f4d113a2fad60d57ea89adeddc129acec496f44eaaf0b054a218b8e260f24"
+        },
+        {
+          "name": "retained-live6-v169-receipts-after.json",
+          "sha256": "36b58ff1f7895948462f3237c82d360ba56058ea3088bc32fdf4f7d4f830772f"
+        }
+      ]
+    },
+    {
+      "revision": "f400974e0ae8b8fb04656481199bb8a7970df572",
+      "firstCompleted": true,
+      "firstProbeCorrect": 2,
+      "heldOutLeakCount": 0,
+      "firstCommands": 0,
+      "firstEdits": 0,
+      "firstCompactions": 0,
+      "maxObservedInput": 76581,
+      "summaryCount": 1,
+      "summary": {
+        "decoded": true,
+        "chars": 2697,
+        "sha256": "283e808243d381b4b14534074a108d5496224acd4a943dcab7c880b553243cb7",
+        "exactAssociations": 12,
+        "heldOutCorrect": 10,
+        "missingKeys": []
+      },
+      "retainedSourceAcquired": true,
+      "retainedSourceReleased": true,
+      "seedAndCompactionSends": 2,
+      "compactionSends": 1,
+      "coverageGaps": 0,
+      "observedSendModels": [
+        "gpt-5.6-pro"
+      ],
+      "daemonRestarted": true,
+      "restartMethod": "prior daemon already stopped; actual CLI resume launched a new daemon",
+      "checkpointBytes": 18640,
+      "sameThread": true,
+      "profile": "chatgpt-web-native",
+      "providerOverride": false,
+      "cliExit": 0,
+      "restartRecallPairs": 12,
+      "restartCommands": 1,
+      "restartReadBoth": true,
+      "restartTestsPassed": true,
+      "restartEdits": 0,
+      "restartErrors": 0,
+      "restartCompleted": true,
+      "filesUnchanged": true,
+      "scope": "Real retained-source compaction and same-thread CLI resume after idle daemon restart; baseline window, not expanded or 1M acceptance.",
+      "passed": true,
+      "model": "gpt-5.6-pro",
+      "artifacts": [
+        {
+          "name": "retained-live56-v169-verification.json",
+          "sha256": "e253d43802212d68ff0b70c4c673a6dd8a05918d2d4ec1424855b4145dbc2982"
+        },
+        {
+          "name": "retained-live56-v169-summary-audit.json",
+          "sha256": "2aede5e74e3d6b046d3c10da5e99b4aa08665e2cdf980f18c9a52a89c689452f"
+        },
+        {
+          "name": "retained-live56-v169-broker.json",
+          "sha256": "ee61601cd5a8dead14c25077a0288d4a88d77007ed68c492210faf4567b90c0e"
+        },
+        {
+          "name": "retained-live56-v169-restart-status.json",
+          "sha256": "8db16f7f9e876ecccb66094869180d98191832f496d9c82e8422bbd9696cc73c"
+        },
+        {
+          "name": "retained-live56-v169-restart.json.cli-events.json",
+          "sha256": "1869011e1b2931af8c516c487f5d587dd1925a1726491b87537f729c856a6aba"
+        },
+        {
+          "name": "retained-live56-v169-restart.json.cli-exit.json",
+          "sha256": "12c9ae0d906c79670217618b912a2d37680ac2af1cbd09651b3985d5f1bca80a"
+        },
+        {
+          "name": "retained-live56-v169-seed.json.events.json",
+          "sha256": "c482785140fb1106b8c5fdfc670f0bcfd04a403ef221d3d990473563eb5b0895"
+        },
+        {
+          "name": "retained-live56-v169-receipts-before.json",
+          "sha256": "6f4fe3c09a3f03548d7a98ccb79475dafdbbef307f71b3acde8a1729c2603412"
+        },
+        {
+          "name": "retained-live56-v169-receipts-after.json",
+          "sha256": "66e3bae8539861784ec00afd9b11dd986b114c1b14129e2f55c4135fb784d72d"
+        }
+      ]
+    }
+  ]
+}
