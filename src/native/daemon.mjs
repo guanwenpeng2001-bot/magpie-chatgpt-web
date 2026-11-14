@@ -153,7 +153,7 @@ export class NativeDaemon {
       this.env.CODEX_HOME ? resolve(this.env.CODEX_HOME) : null,
       resolve(homedir(), '.codex'),
     ].filter(dir => dir && isAbsolute(dir) && existsSync(dir)))];
-    this.childEnv = { ...inherited, MAGPIE_NATIVE_CHECKPOINT_HOME: this.home, CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
+    this.childEnv = { ...inherited, MAGPIE_NATIVE_CHECKPOINT_HOME: this.home, MAGPIE_NATIVE_RETAINED_COMPACTION: '1', CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
       ...(this.browserEndpoint ? { MAGPIE_NATIVE_BROWSER_CDP: this.browserEndpoint } : {}),
       ...(trustedHomes.length ? { CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES: JSON.stringify(trustedHomes) } : {}),
       TUNNEL_CLIENT_STATE_DIR: join(this.home, 'tunnel-state'), TUNNEL_CLIENT_PROFILE_DIR: join(this.home, 'tunnel'),

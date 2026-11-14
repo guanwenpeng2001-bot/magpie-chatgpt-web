@@ -11,6 +11,18 @@ const register = hash => `[chatgpt-web] broker trace=fixture-turn registered tok
 const claim = (hash, valid = false) => `[chatgpt-web] broker claim received (tokenChars=37, tokenHash=${hash}, valid=${valid}${valid ? '' : ', retiredTurn=unknown'})\n`;
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
+test('retained page diagnostics prove reuse and settlement without storing page or token data', () => {
+  const parse = value => parseBrokerDiagnostic('[chatgpt-web] retained_page ' + JSON.stringify(value));
+  const event = { traceId: 'fixture', phase: 'acquired', reused: true, compaction: true };
+  assert.deepEqual(parse({ ...event, url: 'PRIVATE_URL', token: 'PRIVATE_TOKEN' }), {
+    type: 'retained_page', traceHash: hash('fixture'), phase: 'acquired', reused: true, compaction: true,
+  });
+  assert.equal(parse({ ...event, phase: 'released' }).phase, 'released');
+  for (const change of [{ traceId: '' }, { traceId: { toString: null } }, { traceId: 'line\nbreak' },
+    { phase: 'secret' }, { reused: 'true' }, { compaction: 1 }]) assert.equal(parse({ ...event, ...change }), undefined);
+  assert.equal(parseBrokerDiagnostic('[chatgpt-web] retained_page {'), undefined);
+});
+
 test('compaction timing and retirement failure retain only allowlisted content-free fields', () => {
   for (const phase of ['entered', 'retiring', 'retired']) {
     assert.deepEqual(parseBrokerDiagnostic(`[chatgpt-web] compaction_phase ${phase}`), { type: 'compaction', phase });

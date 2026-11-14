@@ -8,6 +8,7 @@ import { patchNativeBrowserReadiness } from './browser-readiness.mjs';
 import { patchNativeTokenCopyGuidance } from './token-copy-guidance.mjs';
 import { patchNativeCompactionGuidance } from './compaction-guidance.mjs';
 import { patchToolDiscovery } from './tool-discovery.mjs';
+import { patchNativeManagedRetention } from './retained-host.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
 export const RELEASES = Object.freeze([
@@ -314,6 +315,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(assertNativeSolContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { chooseNativeCompactionTransport } from ' + JSON.stringify(new URL('./compaction-transport.mjs', import.meta.url).href) + ';')}
+      + ${JSON.stringify('\nimport { installNativeManagedRetention } from ' + JSON.stringify(new URL('./retained-host.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { prepareSubmissionReceipt, nativeUsageModel } from ' + JSON.stringify(new URL('../usage/submission.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { ownershipSnapshot } from ' + JSON.stringify(new URL('./ownership-diagnostics.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { identityJson } from ' + JSON.stringify(new URL('./identity-json.mjs', import.meta.url).href) + ';')}
@@ -322,8 +324,9 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     contents = patchReferenceFixes(contents);
     contents = (${patchNativeBrowserReadiness.toString()})(contents);
     contents = (${patchNativeTokenCopyGuidance.toString()})(contents);
-    contents = (${patchNativeCompactionGuidance.toString()})(contents);
+    contents = (${patchNativeCompactionGuidance.toString()})(contents, { retained: true });
     contents = (${patchToolDiscovery.toString()})(contents);
+    contents = (${patchNativeManagedRetention.toString()})(contents);
     return { contents, loader: 'js' };
   });
 } });

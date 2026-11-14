@@ -14,6 +14,15 @@ const validTrace = new RegExp(`^${trace}$`);
 const traceHash = value => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
 export function parseBrokerDiagnostic(line) {
+  if (line.startsWith('[chatgpt-web] retained_page ')) {
+    let value;
+    try { value = JSON.parse(line.slice('[chatgpt-web] retained_page '.length)); } catch { return; }
+    if (!value || typeof value.traceId !== 'string' || !validTrace.test(value.traceId)
+      || !['acquired', 'released'].includes(value.phase) || typeof value.reused !== 'boolean'
+      || typeof value.compaction !== 'boolean') return;
+    return { type: 'retained_page', traceHash: traceHash(value.traceId), phase: value.phase,
+      reused: value.reused, compaction: value.compaction };
+  }
   if (line.startsWith('[chatgpt-web] ownership ')) {
     try { return parseOwnershipSnapshot(JSON.parse(line.slice('[chatgpt-web] ownership '.length))); } catch { return; }
   }

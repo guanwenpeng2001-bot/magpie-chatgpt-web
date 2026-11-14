@@ -360,4 +360,28 @@ The same-effort control changes only the diagnostic staging candidate from low t
 
 All four live arms completed with confirmed owned-page cleanup. The [reviewable evidence projection](evidence/context-partition-0.5.6.json) contains counts, observed model IDs, integrity/lineage checks and hashes of the local artifacts, without account credentials, message bodies or marker values. Local result prefixes are `partition-session-79509e8b-fd9d-47dc-9607-e537ad03d90e`, `partition-small-1932b39f-5668-45cd-933b-0d2eafa1f84e` and `partition-same-mode-92f83015-62e9-4b11-8ff8-88a889da03a8`.
 
-Production code remains `e7d448e`; all 57 installed source/backend files still match. The current quota projection passes all 14 text rows: recorded Sends, `账号额度 / 未提供`, no allowance estimate, percentage or forecast (`partition-current-quota-verification.json`). No production changes were made for these experiments, so the existing full regression remains applicable. Expanded/1M acceptance and retained-source compaction parity remain open; GOAL is not complete.
+At completion of those partition experiments, production code remained `e7d448e`; all 57 installed source/backend files matched. The quota projection passed all 14 text rows: recorded Sends, `账号额度 / 未提供`, no allowance estimate, percentage or forecast (`partition-current-quota-verification.json`). No production changes were made for those experiments. Expanded/1M acceptance remained open.
+
+### Managed source retention for reference compaction
+
+The reference's structured compaction depends on a retained source page, previously available only through its Launcher. The plugin's managed browser closed that page on settlement and selected fresh read-only compaction. The new managed host owns exact Page handles and supplies the original adapter/session/broker handoff without inventing a Launcher descriptor or changing capability tokens. Pages are bounded to eight, have five minutes of idle eligibility, and are never restored across process generations. Completed authenticated checkpoints remain separately durable.
+
+| Hypothesis / risk | Discriminating check | Result |
+| --- | --- | --- |
+| The old managed host cannot retain the source | Same checksum-pinned integration fixture with the feature disabled | Fails at the source-page-survives-settlement assertion |
+| A prose claim or wrong handoff can masquerade as an accepted summary | Actual reference broker, summary-only capability, wrong ID and duplicate receipt | Rejected; exactly one valid handoff accepted |
+| Observer reconnect can duplicate compaction or replace a still-closing owner | Real adapter/session state with delayed physical Page.close | One shared handoff; completion and replacement wait for physical cleanup |
+| A reused page can navigate after it was delivered | Top-frame navigation after acquisition and delivery | Effective worker aborts; source is retired |
+| Failed page cleanup can skip browser disconnection | Page.close rejection with actual original worker.close | Transport disconnects; failed owner stays unavailable until cleanup retry |
+
+The registry and pinned-host review set passed 74 tests. The pinned host fixture uses actual production preload, adapter, broker and session state, with simulated browser rendering; an additional boundary check runs the original worker through lazy page acquisition. These are offline integration results, not a real website pass. The focused full-compaction regression passed 19 tests with one platform skip. The initial broad run exposed a forbidden source substring and test substitutes missing the new optional capability method; both were corrected before the final full run.
+
+Final full regression completed with 1,790 tests: 1,789 passed, zero failures/cancellations and one Windows-inapplicable skip, exit code 0. All pinned compaction, reference-fix, browser-readiness, tool-discovery and retained-host gates were enabled with installed Chrome. Two earlier broad runs lost their terminal processes before producing summaries and are not counted as passes; the final run used an independent hidden process and saved its exit code.
+
+Local artifacts: `retained-host-red.log`, `retained-review-fixes.log`, `retained-compaction-regression.log`, `retained-full-detached.log` and `retained-full-detached.exit.txt` under `native-live/release-056`. Clean-package gates pass with 72 scanned files. Live retained-source checkpoint fidelity and restart verification are pending at this revision. This implementation does not establish a remedy for the original expanded-inference loss; conservative production windows remain unchanged.
+
+### Same-account upstream catalogue metadata
+
+A metadata-only read at 2026-11-14 03:13:59 UTC returned plan `prolite` and explicit upstream catalogue values: `$.models[12]` was `gpt-6-pro` with `max_tokens: 410000`; `$.models[18]` was `gpt-6-thinking` with `max_tokens: 262144`; `gpt-6` and `gpt-6-instant` each returned `137000`. No model message was sent and no browser was opened. The sanitized local projection is `capability-metadata-v2.json`; its catalogue JSON SHA-256 is `5d2876faacd08b6c8fbb5b58c7b36a5a1c223d93f0298a79c4c438ca67eafe3f`. The first capture lacked per-row slug/index association, so a second metadata read added that association; effort-object details were not retained and empty projected objects do not mean an effort is unavailable.
+
+The plugin and reference infer `proAvailable` from model/effort availability, not a verified plan-specific context entitlement. These returned numbers close the prior gap in captured catalogue fields, but the exact semantics of `max_tokens` and effective multi-message inference inclusion remain unverified. They neither prove a smaller `prolite` window nor supersede the failed expanded recall controls. No production window or usage-card estimate was changed from this metadata.

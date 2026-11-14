@@ -5,7 +5,7 @@
 // The compiler places this contract in inline prompts and multipart commits,
 // so its existing budgeting and usage accounting include the added guidance.
 // No history rewriting, extraction, recovery, routing or capability changes.
-export function patchNativeCompactionGuidance(source) {
+export function patchNativeCompactionGuidance(source, { retained = false } = {}) {
   if (typeof source !== 'string') throw new TypeError('Native compaction guidance source must be a string');
   const before = ':["This is a Codex history-compaction checkpoint, not a normal task turn.","Do not call local or ChatGPT-native tools. Summarize only the supplied task context according to the final compaction instruction.","Return only the checkpoint summary that the next model needs to resume the task."]:s.localTools?';
   const guidance = [
@@ -15,5 +15,11 @@ export function patchNativeCompactionGuidance(source) {
   ];
   const after = before.replace(']:s.localTools?', ',' + guidance.map(text => JSON.stringify(text)).join(',') + ']:s.localTools?');
   if (source.split(before).length !== 2) throw new Error('Native automatic compaction guidance anchor mismatch');
-  return source.replace(before, () => after);
+  source = source.replace(before, () => after);
+  if (retained) {
+    const control = '"Automatic Codex context compaction has started. Stop ordinary task work and do not call any more work tools.",ri,...xv(e,t),';
+    if (source.split(control).length !== 2) throw new Error('Native retained compaction guidance anchor mismatch');
+    source = source.replace(control, () => control.replace('ri,...xv', 'ri,' + guidance.map(text => JSON.stringify(text)).join(',') + ',...xv'));
+  }
+  return source;
 }
