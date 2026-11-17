@@ -251,7 +251,7 @@
       "canonicalProofs": 18,
       "missingProofRejected": true,
       "archiveUnchangedByContinuation": false,
-      "archiveSha256": "ca95611520642cb4415ee1df17aa174cbca729bd64ab0f0807ab15c34df617e7",
+      "archiveSha256": "b931e7beac6d8c891882807ccdd8dc95ef9d09ac977fa49172aaf821be735a5d",
       "stats": {
         "records": 17,
         "bytes": 6003135,
@@ -405,7 +405,7 @@
       "canonicalProofs": 2,
       "missingProofRejected": false,
       "archiveUnchangedByContinuation": true,
-      "archiveSha256": "ca95611520642cb4415ee1df17aa174cbca729bd64ab0f0807ab15c34df617e7",
+      "archiveSha256": "b931e7beac6d8c891882807ccdd8dc95ef9d09ac977fa49172aaf821be735a5d",
       "stats": {
         "records": 17,
         "bytes": 6003135,
@@ -449,49 +449,43 @@
     "Synthetic canonical rollout fixtures only; no real chat, account, browser, model request or live native harness proof.",
     "Uses the actual pinned dn Broker claim/invoke and MCP conversion with the repository history preload. Broker socket startup is disabled; transport is direct in-process dispatch.",
     "The million tokens are cumulative original text in a local archive. This does not prove a million-token Web context, server acceptance, model recall or live compaction.",
-    "This checks orderly process exit and reopening, not crash recovery or multiple concurrent writer processes.",
-    "The capacity corpus uses explicit type:message user records. Omitted-type user and assistant message capture is separately covered by the pinned Fn/Vu/archiveBoundary regression in the supporting validation; not every accepted Responses input shape is certified."
+    "This checks orderly process exit and reopening, not crash recovery or multiple concurrent writer processes."
   ],
-  "targetRelease": "0.5.8",
-  "startedAt": "2026-11-17T19:37:18.873Z",
-  "completedAt": "2026-11-17T19:37:33.076Z",
-  "durationMs": 14202,
-  "reproduction": {
-    "command": "node scripts/native-history-capacity-probe.mjs",
-    "nodeVersion": "v24.18.1",
-    "platform": "win32",
-    "architecture": "x64",
-    "sourceSha256": {
-      "scripts/native-history-capacity-probe.mjs": "09b3815e62a73737ebf62bd62b5e300452c2ac5d931bece4df836d0cc41814e9",
-      "test/native-history-capacity-probe.test.mjs": "7238bc7be69c2ab95721f4f2272cfe8a34fb9bb55277ca933e603c703073ea5c",
-      "test/fixtures/native-history-capacity-probe-fixture.mjs": "0786c03b7728645ccd2c0078e71362b1b8e98a9e61f734d4a9469d1daa930ae0",
-      "src/native/history.mjs": "157e237cda7d06c82f784b7fa561bbc1438fee601b7a57621cecf4e347e89a69",
-      "src/native/history-store.mjs": "517ef0bc7ecd9bd33d164ee3aa3e131b4757cddb2fbd5ae5192f5a912ac9db1a",
-      "src/native/runtime.mjs": "40452dbf0c80c4512caa90d92ab6ea9f5f7874b85884698622ee4af6078f62f2",
-      "test/native-history.test.mjs": "814e9220cccd97f82c9ad3373ceedcc6fdb2083bd74ae691c44bb0cdbce087da"
-    }
-  },
-  "supportingValidation": {
-    "command": "node --test test/native-history.test.mjs test/native-history-store.test.mjs",
-    "passed": 31,
-    "failed": 0,
-    "skipped": 1,
-    "skipReason": "POSIX private-permissions test is not applicable on Windows.",
-    "environment": {
-      "NATIVE_HISTORY_SMOKE": "1"
+  "generatedAt": "2026-11-17T20:54:39.795Z",
+  "sources": [
+    {
+      "path": "scripts/native-history-capacity-probe.mjs",
+      "sha256": "09b3815e62a73737ebf62bd62b5e300452c2ac5d931bece4df836d0cc41814e9"
     },
-    "omittedTypeRegression": {
-      "pinnedParser": "Fn",
-      "pinnedEnvironmentResolver": "Vu",
-      "boundary": "actual patched archiveBoundary",
-      "canonicalRollout": "isolated synthetic current turn",
-      "missingRolloutRejected": true,
-      "userAndAssistantOriginalBlocksPreserved": 3,
-      "typedCurrentMessagePreserved": true,
-      "readThroughPinnedBroker": true,
-      "rawInputUnchanged": true
+    {
+      "path": "test/fixtures/native-history-capacity-probe-fixture.mjs",
+      "sha256": "0786c03b7728645ccd2c0078e71362b1b8e98a9e61f734d4a9469d1daa930ae0"
+    },
+    {
+      "path": "src/native/history-store.mjs",
+      "sha256": "be2b280848d56c777cd15979226a5eb20756cf6f18d0983127635665efa084ec"
+    },
+    {
+      "path": "src/native/history.mjs",
+      "sha256": "6158c3b87f5264140a7b6a5923e33aabd2c093643826024250b79c4583094a8d"
+    },
+    {
+      "path": "src/native/runtime.mjs",
+      "sha256": "edb00376e1b8f7f65aec79571753129cf59a974e011bc059f8edc8eb5a33b78f"
+    },
+    {
+      "path": "src/native/pro-window.mjs",
+      "sha256": "e511555ef0f1828fc452b95470e7c2b4165662de28f8938b774cd49398817790"
+    },
+    {
+      "path": "src/native/account-continuity.mjs",
+      "sha256": "9c7237d6d9008ca1ec92a1d50c20bc54221e1385c799716fe1e4cfdaaf069bca"
+    },
+    {
+      "path": "src/native/model-controls.mjs",
+      "sha256": "ba858b78c22e42a856d0558c32db0099251fefbb12dfbb16922ff9b43a512cc0"
     }
-  },
+  ],
   "sanitization": {
     "removedFields": [
       "runs[].pid",
@@ -500,7 +494,6 @@
     "containsRealChatText": false,
     "containsAccountIdentifiers": false,
     "containsCredentials": false,
-    "containsAbsoluteLocalPaths": false,
-    "retainedDigests": "Only source files, immutable pinned CLI, synthetic corpus records and synthetic encrypted archive."
+    "containsAbsoluteLocalPaths": false
   }
 }

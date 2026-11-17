@@ -27,6 +27,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
         let upstream;
         let request;
         let preflight = true;
+        let nativeStage;
         let signal;
         try {
           const current = requireAuth(await getAuth());
@@ -63,6 +64,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
               const target = nativeRoute(nativeRequest.model, nativeRequest.reasoning?.effort ?? headerEffort);
               if (target?.daemonSupported) {
                 let runtime;
+                nativeStage = 'runtime';
                 try { runtime = await native.runtime(current, signal); } catch (error) {
                   // A known account refusal is not a daemon startup outage.
                   if (error instanceof BackendError && ['verification', 'expired', 'cooldown', 'binding'].includes(error.code)) throw error;
@@ -76,10 +78,12 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                 if (compact && runtime?.compaction) {
                   // Header/path-only compaction without proof remains read-only.
                   preflight = false;
+                  nativeStage = 'compaction';
                   return await runtime.compaction(payload, forwardedHeaders, signal, path);
                 }
                 if (!compact && hasProof && runtime && await runtime.health(signal)) {
                   preflight = false;
+                  nativeStage = 'response';
                   // Once submitted, never replay through text: tools may have run.
                   return adaptResponsesStream(await preserveNativeVerification(
                     await runtime.responses(payload, forwardedHeaders, signal), signal), request);
@@ -182,6 +186,14 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
           return new Response(body, { headers: { ...headers, 'content-type': 'text/event-stream' } });
         } catch (failure) {
           upstream?.close();
+          if (nativeStage && !(failure instanceof BackendError)) {
+            const safe = value => typeof value === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(value) ? value : undefined;
+            const frames = [...String(failure?.stack ?? '').matchAll(/([A-Za-z0-9_-]+\.m?js):(\d+):\d+/g)]
+              .slice(0, 4).map(match => `${match[1]}:${match[2]}`);
+            console.warn('[chatgpt-web] native_request_failure ' + JSON.stringify({ stage: nativeStage,
+              name: safe(failure?.name), code: safe(failure?.code), causeCode: safe(failure?.cause?.code),
+              aborted: signal?.aborted === true, frames }));
+          }
           const cancelled = signal?.aborted === true;
           const error = cancelled
             ? new BackendError('upstream')
