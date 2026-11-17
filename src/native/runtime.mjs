@@ -9,6 +9,7 @@ import { patchNativeTokenCopyGuidance } from './token-copy-guidance.mjs';
 import { patchNativeCompactionGuidance } from './compaction-guidance.mjs';
 import { patchToolDiscovery } from './tool-discovery.mjs';
 import { patchNativeManagedRetention } from './retained-host.mjs';
+import { patchNativeRetainedBudget } from './retained-budget.mjs';
 import { patchNativeAdditionalContext } from './additional-context.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
@@ -328,6 +329,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     contents = (${patchNativeCompactionGuidance.toString()})(contents, { retained: true });
     contents = (${patchToolDiscovery.toString()})(contents);
     contents = (${patchNativeManagedRetention.toString()})(contents);
+    contents = (${patchNativeRetainedBudget.toString()})(contents);
     contents = (${patchNativeAdditionalContext.toString()})(contents);
     return { contents, loader: 'js' };
   });

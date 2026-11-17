@@ -19,7 +19,7 @@ test('pinned managed host retains the actual source through one-shot compaction 
   const root = await mkdtemp(join(tmpdir(), 'native-retained-host-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); assert.deepEqual(await readFile(entry), bytes); });
   const startup = 'Rk().catch((e)=>{process.stderr.write(`codex-chatgpt-web: ${e instanceof Error?e.message:String(e)}\n`),process.exitCode=1});';
-  const exports = '\nexport { Cs as Worker, Bi as adapter, dn as Broker, Le as callBroker, De as sessions, kg as namespace, _s as executionKey, Di as conversationKey, ir as brokerEndpoint, Ku as retainedHandoff };';
+  const exports = '\nexport { Cs as Worker, Bi as adapter, dn as Broker, Le as callBroker, De as sessions, kg as namespace, _s as executionKey, Di as conversationKey, ir as brokerEndpoint, Ku as retainedHandoff, Xt as compile, Nt as tokens };';
   const base = compactionPreloadSource(entry);
   const source = base.replace("return { contents, loader: 'js' };", `
     const startup = ${JSON.stringify(startup)};

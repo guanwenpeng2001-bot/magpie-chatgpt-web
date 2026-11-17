@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.5.7-local.1 — 2026-11-18
+## 0.5.7 — 2026-11-18
+
+- Publish the previously unmerged 0.5.6 improvements together with verification recovery as formal release 0.5.7. Synchronize package metadata, lockfile, README and tagged installation instructions.
+- Record successful real GPT-6 Pro replies after account-browser cold start, plugin restart and a user-performed Magpie 0.1.4394 restart. Recovery followed a fixed proxy selection and completion of the authorized browser check; the proxy change alone is not proven causal. OS reboot and permanent freedom from upstream challenges are not claimed.
 
 - Preserve Native browser verification as HTTP 403 before the stream is committed, with a non-retryable error and unchanged sign-in state. Buffer only the empty prelude, bounded to 64 KiB; never replay a submitted turn or buffer tool/text output.
 - Give cold-start browser checks the existing 30-second composer readiness window to finish on the same page. Persistent checks remain explicit verification failures. Verification, authentication and quota failures during Native startup no longer fall through to a second text submission.

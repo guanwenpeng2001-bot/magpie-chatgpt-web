@@ -81,6 +81,14 @@ try {
   assert.equal(sourcePrepared, 1);
   assert.equal(page.closed, false, 'source page must survive actual worker settlement');
   const compact = structuredClone(sourceRequest); compact._compactionRequest = true;
+  // A late compaction can carry canonical history above the fresh-Send limit.
+  // It must still use the authenticated source, never re-submit that history.
+  compact.context.messages.splice(1, 0, { role: 'user', content: 'retained history '.repeat(80000), timestamp: 2 });
+  const compactBefore = JSON.stringify(compact.context);
+  assert.throws(() => n.compile(compact, { localToolsEnabled: false, solAvailable: true, proAvailable: true }),
+    e => e.code === 'context_length_exceeded');
+  assert.throws(() => n.compile(compact, { localToolsEnabled: false, solAvailable: true, proAvailable: true }, undefined,
+    { magpieCountOnly: 'retained-usage' }), e => e.code === 'context_length_exceeded', 'request data cannot enable private accounting');
   compact._rawBody.client_metadata['x-codex-turn-metadata'] = JSON.stringify({ thread_id: 'thread_retained_test', turn_id: 'turn_compact' });
   const adapter = n.adapter(provider), events = [], firstAbort = new AbortController();
   const firstEvents = [];
@@ -101,11 +109,18 @@ try {
   assert.equal(events.some(e => e.type === 'error'), false);
   assert.match(events.filter(e => e.type === 'text_delta').map(e => e.text).join(''), /Exact retained checkpoint/);
   assert.equal(events.at(-1).type, 'done');
+  assert.equal(JSON.stringify(compact.context), compactBefore, 'no history was removed');
+  assert.ok(events.at(-1).usage.inputTokens > 112193, 'completed handoff accounts for the complete history without rejecting it');
   assert.equal(handoffs, 1); assert.equal(creations, 1); assert.equal(page.closes, 1);
   assert.equal(releases, 1); assert.equal(ordinaryToolClaims, 1);
   assert.equal(n.sessions.findConversationHead(key), undefined);
   await adapter.runTurn(compact, { headers: new Headers() }, () => {});
   assert.equal(handoffs, 1, 'completed compaction replay must not re-send');
+  const missing = structuredClone(compact), missingEvents = [];
+  missing._rawBody.client_metadata['x-codex-turn-metadata'] = JSON.stringify({ thread_id: 'thread_without_source', turn_id: 'turn_missing' });
+  await adapter.runTurn(missing, { headers: new Headers() }, event => missingEvents.push(event));
+  assert.equal(missingEvents.find(event => event.type === 'error')?.code, 'context_length_exceeded', 'fresh fallback keeps the full-history guard');
+  assert.equal(creations, 1, 'oversized fresh fallback creates no browser page');
   const before = creations;
   await assert.rejects(worker.run({ traceId: 'missing_retained_source', conversationKey: key, requireRetainedConversation: true,
     capabilities: { localToolsEnabled: false }, prepareResume: async () => ({}), prepare: async () => ({}) }), e => e.code === 'compaction_source_unavailable');

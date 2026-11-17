@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.5.6`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.5.7`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Native tools mode
 
@@ -50,7 +50,7 @@ Get magpie from https://usemagpie.ai or the [magpie releases](https://github.com
 Install the plugin and start sign-in in PowerShell:
 
 ```powershell
-magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.7
 magpie plugin login chatgpt-web
 ```
 
@@ -69,7 +69,7 @@ Git installs consume committed source. The installer resolves `playwright-core ~
 Finish active turns, then rerun the published installation command:
 
 ```powershell
-magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.7
 ```
 
 Local `git+file://` installs have a verified upstream magpie **stale-pin** defect (D-167): reinstalling can report success while reusing an older cached checkout because `~/.config/magpie/plugins/bun.lock` still pins the old commit. This is an upstream installer defect, not a plugin runtime bug.
@@ -206,6 +206,8 @@ The live JSON window contains `used: 0`, `remaining: 100` and `text: true`. Thos
 Request token accounting remains separate. The reported live checks for both Pro models already produced per-turn input/output records in `magpie usage --csv`; a missing quota card did not mean those requests were uncounted. Text-route counts remain the local estimates described above. Reading or refreshing the quota card emits no additional `input.magpie.usage` event, so it does not double-count requests. Offline tests additionally cover the installed Magpie 0.1.3930 hook contract, normalized text-window rendering and the absence of duplicate usage events. Neither the live quota result nor these tests establishes a measured remaining allowance.
 
 ## Release verification status
+
+**0.5.7:** Browser verification failures retain their typed, non-retryable status before the Native response stream is committed. Cold-start checks can resolve within the existing readiness deadline. The installed release candidate answered real GPT-6 Pro requests after account-browser cold start, plugin disable/enable, and a user-performed Magpie restart from 0.1.4392 to 0.1.4394. The browser cold-start request used three gateway attempts; the other probes succeeded without an extra gateway attempt. Physical OS reboot was not tested. Interactive upstream checks may still require user completion, and Codex client-side reconnects are separate from gateway retry policy. See [verification evidence](docs/evidence/web-verification-recovery-local.json).
 
 **Latest 0.5.6 installed validation:** On Codex 0.169, both Pro models passed real retained-source compaction with 70 complete host-context fragments (about 76.6K observed input). Each checkpoint preserved all 12 random associations, including ten withheld from the initial answer. After daemon process discontinuity, each same-thread Native CLI resume recovered 12/12, read both fixture files and passed three tests with one command and unchanged files. GPT-6 used an explicit idle restart; GPT-5.6's daemon was already stopped and was started again by the CLI. [Reviewable evidence](docs/evidence/retained-compaction-0.5.6.json) records that distinction. The latest full regression, including the same-account setup recovery and cancellation fix, passed 1,806 tests with zero failures and one Windows skip. Earlier approximately 92K automatic-compaction/read/edit/test fixtures remain documented. These samples do not establish lossless summaries or expanded/1M capacity.
 

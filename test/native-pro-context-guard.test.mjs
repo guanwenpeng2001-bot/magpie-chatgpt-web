@@ -14,7 +14,7 @@ const entry = resolve(process.env.NATIVE_PRO_CONTEXT_CLI
 const oldAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
 const patchedAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs';
 const roundAnchor = 'let D;if(y.localTools)try{D=m.resolve(f)}';
-const roundPrefix = 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{';
+const roundPrefix = 'if((!f._compactionRequest||!magpieManagedRetention||!l.localToolsEnabled||!i)&&(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R))){try{';
 
 // Execute actual preload only. Never import the full CLI or touch a browser,
 // account, daemon, live app-server, installation or configuration.
@@ -102,7 +102,7 @@ function adapterExecutionSource(source) {
   const start = source.indexOf(roundPrefix);
   const environmentPrelude = source.indexOf(roundAnchor, start);
   const preludeEnd = source.indexOf('if(f._compactionRequest)', start);
-  assert.ok(preludeEnd > start && preludeEnd - start < 1000);
+  assert.ok(preludeEnd > start && preludeEnd - start < 1200);
   assert.ok(environmentPrelude > start && environmentPrelude < preludeEnd);
   const resolveIndex = source.indexOf('m.resolve(f)', start);
   const sessionStart = source.indexOf('await De.getOrCreateAfterOwnerRetirement(', preludeEnd);
@@ -135,6 +135,7 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
   const signal = Object.freeze({ fixtureSignal: true });
   const scope = {
     q: CapturedAdapterError, f: parsed, y: { effort, localTools }, R: capabilities,
+    magpieManagedRetention: false, l: { localToolsEnabled: true }, i: {},
     c: true, s: false, e: appName === undefined ? {} : { chatgptWeb: { appName } },
     T(event) { events.push('emitError'); emitted.push(event); },
     w(input) {
