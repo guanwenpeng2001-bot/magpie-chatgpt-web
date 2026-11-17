@@ -4,7 +4,7 @@
   "generatedAt": "2026-11-17T19:49:35.497Z",
   "status": "indeterminate",
   "installedAcceptance": false,
-  "scope": "Isolated pinned native compiler/Worker probes. Parts were explicitly selected (2 or 6); default production routing, tools, compaction and installed artifact acceptance were not tested.",
+  "scope": "The original runs array contains isolated experimental probes with explicit 2/6-part selection. productionDefaultFollowUp appends actual production-preload automatic-transport Worker runs. Installed-plugin, host tools and automatic-compaction acceptance remain separate.",
   "privacy": {
     "included": "Aggregate measurements, synthetic-run artifact locations, SHA-256, sanitized errors and tool structure only.",
     "excluded": [
@@ -747,6 +747,778 @@
         },
         "originalPagesPreserved": true,
         "pinnedUnchanged": true
+      }
+    ]
+  },
+  "productionDefaultFollowUp": {
+    "status": "indeterminate",
+    "scope": "Actual repository compactionPreloadSource plus production automatic transport, parser/compiler and Worker. CLI startup was removed and observation exports added. No experimental window-policy patch and no explicit multipart-parts option. This is not installed-plugin or host automatic-compaction acceptance.",
+    "frozenPolicyAtRun": {
+      "totalWindowCeiling": 400000,
+      "outputReserveTokens": 16384,
+      "inputCeilingExclusive": 383616,
+      "referenceReserveAlreadyIncluded": 8192,
+      "outputReserveSufficiencyVerified": false
+    },
+    "laterPolicyChangesCovered": false,
+    "findings": {
+      "production380KRecallAccepted": false,
+      "production256KObservedSampleRecallAccepted": true,
+      "completeTransportProof": false,
+      "native400KProven": false,
+      "native1MProven": false,
+      "canClaimCapacity": false,
+      "summary": "Production 380K completed all six sends and five intermediate ACK checks but recovered 8/12 (first two parts 0/2 each; last four parts 2/2 each). The subsequent production 256K control recovered 12/12 (2/2 in every part). All observed outgoing payload hashes matched compilation and all model checks were GPT-6 Pro/max. Graph reads returned 404 and asynchronous terminal-stream/parent-chain evidence remains incomplete; both overall sample statuses remain indeterminate.",
+      "interpretation": "The 380K result fails the recall criterion. The 256K result is one successful recall control, not a universal input entitlement or native total-window guarantee. These runs do not verify a later 256K-input/128K-output budget or automatic-compaction policy.",
+      "historicalNote": "Earlier runs, tool-role false-positive flags and stopped-380K failures above are preserved as historical evidence. This follow-up adds a completed production 380K run; it does not rewrite old reports or turn their results into passes."
+    },
+    "runs": [
+      {
+        "tier": 380000,
+        "status": "indeterminate",
+        "completed": true,
+        "category": "transport-unverified",
+        "localArtifactDirectory": "scratch/web-pro-057-continuity/window-380000-1f0be36c-3e5e-437d-9eda-3b25ceba1578",
+        "artifacts": [
+          {
+            "file": "report.json",
+            "sha256": "fc15ced9be5f0726d7db5ac8f448de66b5d30c2557eb6e38222f96179fee215a",
+            "bytes": 43551,
+            "contentsIncluded": false
+          },
+          {
+            "file": "source.json",
+            "sha256": "9d99a04ce6b86d23fd0f9ab223c2f2d6066e062e7a1e71644f1d3412b153933c",
+            "bytes": 1823893,
+            "contentsIncluded": false
+          },
+          {
+            "file": "prepared.json",
+            "sha256": "18bb6f5c4557135172489c9aca24408bea98ed75ad46b27b71ed811fa650e3e4",
+            "bytes": 1834882,
+            "contentsIncluded": false
+          },
+          {
+            "file": "physical.synthetic.json",
+            "sha256": "b7e33715e125e02ba7c4d1cffcff4681891b4af7744db5f39988771ca4f51d05",
+            "bytes": 1840248,
+            "contentsIncluded": false
+          },
+          {
+            "file": "private-oracle.json",
+            "sha256": "67b6716adb00d6a50f9cb32cfe68b9f15eb26192e65c1f869854721fb5772baf",
+            "bytes": 12283,
+            "contentsIncluded": false
+          },
+          {
+            "file": "answer.txt",
+            "sha256": "b378922cbf62a6c775f7220d8cf43f65262f8a5535e12f9d79d761038787593e",
+            "bytes": 632,
+            "contentsIncluded": false
+          },
+          {
+            "file": "production-preload.original.mjs",
+            "sha256": "c85b3891d3e88070812a0be20dc9c5530efa4b7db99658d5eeb210b8b5bf11c9",
+            "bytes": 52356,
+            "contentsIncluded": false
+          },
+          {
+            "file": "production-preload.harness.mjs",
+            "sha256": "e9fe516f5bf26f8b160e6a41bc76962219223a8614a03707c8a75a66c5cb7302",
+            "bytes": 53230,
+            "contentsIncluded": false
+          },
+          {
+            "file": "production-source-manifest.json",
+            "sha256": "447f58427a1206f7ac39635b8bbfe51f0df544630c4b463b954213db66a54bf9",
+            "bytes": 4244,
+            "contentsIncluded": false
+          }
+        ],
+        "provenance": {
+          "pinnedCliSha256": "df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1",
+          "productionPreloadSha256": "c85b3891d3e88070812a0be20dc9c5530efa4b7db99658d5eeb210b8b5bf11c9",
+          "productionContentsSha256": "24ceee437e64f35006c3fa2ad3848daf750f6542808190e73607a88ef7a85862",
+          "productionSourceManifestSha256": "4ce0d3bb30583bd7af54134332effb34ed3e87497fda0a4cdc8a7859021fd8f2",
+          "driverSha256AtRun": "70a5177f79f3a33c4acf073d1e8e0e76dd5efbc629ebf51f52d2f98f19ae6156",
+          "helperSha256AtRun": "2089d4ecf6d0f11dd7799dd3a503865a6496ada7f63ee72f7e0d978a544ee88a",
+          "probeCoreSha256": "10a4abe8707d28b08f9b376d7e52e3732965e8d707d56136d69ef416b090d515",
+          "productionDependenciesUnchanged": true,
+          "pinnedCliUnchanged": true
+        },
+        "production": true,
+        "transportSelection": "production-default-automatic",
+        "manualPartsRequested": null,
+        "experimentalWindowPatchApplied": false,
+        "modelFamily": "6",
+        "backendModel": "gpt-6-pro",
+        "parts": 6,
+        "elapsedMs": 178511,
+        "budget": {
+          "placeholderCompiledInputTokens": 379941,
+          "actualTransactionPreflightInputTokens": 380046,
+          "expectedAcknowledgementTokens": 320,
+          "visibleOutgoingMessageTokens": 371534,
+          "accounting": "Full transaction uses the pinned tokenizer, wrappers, expected ACKs and 8192 local reserve. Expected ACK token totals are not independently recovered server ACK receipts. Neither target nor Nt is net original-text tokens."
+        },
+        "canonicalIntegrity": {
+          "originalMessages": 97,
+          "originalSystemRecords": 1,
+          "canonicalSha256": "9d99a04ce6b86d23fd0f9ab223c2f2d6066e062e7a1e71644f1d3412b153933c",
+          "multipartRecordsSha256": "de979baa79c7c374a00b4f21173b0792debef9c3df22cf89004de9d624768927",
+          "recordCountsByPart": [
+            17,
+            16,
+            16,
+            16,
+            16,
+            17
+          ],
+          "allOriginalRecordsVerified": true
+        },
+        "observedTransport": {
+          "status": "indeterminate",
+          "requestCount": 6,
+          "workerAcknowledgedParts": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "physicalMessages": [
+            {
+              "part": 1,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 61811,
+              "utf16Chars": 305495,
+              "sentPayloadSha256": "87758fac459248880d6ddc106a164f1a38ce5ad14895da46d1697823716856e4",
+              "expectedPayloadSha256": "87758fac459248880d6ddc106a164f1a38ce5ad14895da46d1697823716856e4",
+              "serializedRequestBodySha256": "5bdc4d5e443af8190928dc5395b87de95c259a897b11d14d6b330a284cd38717"
+            },
+            {
+              "part": 2,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 61747,
+              "utf16Chars": 305296,
+              "sentPayloadSha256": "8b0da87b3d6cea565de4c0a81ed528b9f46bdc243b12136a34bd9e3723e53036",
+              "expectedPayloadSha256": "8b0da87b3d6cea565de4c0a81ed528b9f46bdc243b12136a34bd9e3723e53036",
+              "serializedRequestBodySha256": "96f702b03a70a71d014a9f72c780fd3c258a4e8a9fa24c8e4a4441e7ebe6807b"
+            },
+            {
+              "part": 3,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 61769,
+              "utf16Chars": 305296,
+              "sentPayloadSha256": "bf81ffd23059a4ece3b0be3907f4f23befe79a2e47a22653e91c3bc6582e93dd",
+              "expectedPayloadSha256": "bf81ffd23059a4ece3b0be3907f4f23befe79a2e47a22653e91c3bc6582e93dd",
+              "serializedRequestBodySha256": "f362809ee601354b95de811b7775f968c3b98171a391c15e69d9cfdddd67a0ad"
+            },
+            {
+              "part": 4,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 61750,
+              "utf16Chars": 305296,
+              "sentPayloadSha256": "6f0ccd19a310d21f8f16504128dd993d5178519952e93a051254e597e1b099cd",
+              "expectedPayloadSha256": "6f0ccd19a310d21f8f16504128dd993d5178519952e93a051254e597e1b099cd",
+              "serializedRequestBodySha256": "43953729f0850fdd6738e13714872ff81ffc6277ac19a50233d141b57c3e9d79"
+            },
+            {
+              "part": 5,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 61739,
+              "utf16Chars": 305296,
+              "sentPayloadSha256": "c7b029ad3fc6997f98eb4bc2430ece0dbbccb565729704c92124e81e0f528366",
+              "expectedPayloadSha256": "c7b029ad3fc6997f98eb4bc2430ece0dbbccb565729704c92124e81e0f528366",
+              "serializedRequestBodySha256": "19a45b94d27fb099e2063e6091d2a949eb5c67c8d002e7240aebbe213c1ca93e"
+            },
+            {
+              "part": 6,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 62718,
+              "utf16Chars": 309436,
+              "sentPayloadSha256": "006700df0da8c30a4fbeae5d29bf13b0f996bb2d0b9f7504941943eca09aecc1",
+              "expectedPayloadSha256": "006700df0da8c30a4fbeae5d29bf13b0f996bb2d0b9f7504941943eca09aecc1",
+              "serializedRequestBodySha256": "09950851b3cba51c2a76b76e680f04774009e58bbf29e1801a1e124a2b79f7f6"
+            }
+          ],
+          "responseSummary": [
+            {
+              "part": 1,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 2,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 3,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 4,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 5,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 6,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            }
+          ],
+          "rawFailures": [],
+          "rawMissingEvidence": [
+            "part-1-network-failure-without-complete-stream",
+            "part-1-incomplete-or-unknown-stream",
+            "part-1-backend-tool-delegation-unclassified",
+            "part-1-terminal-assistant-unavailable",
+            "part-2-prior-assistant-unavailable",
+            "part-2-network-failure-without-complete-stream",
+            "part-2-incomplete-or-unknown-stream",
+            "part-2-backend-tool-delegation-unclassified",
+            "part-2-terminal-assistant-unavailable",
+            "part-3-prior-assistant-unavailable",
+            "part-3-network-failure-without-complete-stream",
+            "part-3-incomplete-or-unknown-stream",
+            "part-3-backend-tool-delegation-unclassified",
+            "part-3-terminal-assistant-unavailable",
+            "part-4-prior-assistant-unavailable",
+            "part-4-network-failure-without-complete-stream",
+            "part-4-incomplete-or-unknown-stream",
+            "part-4-backend-tool-delegation-unclassified",
+            "part-4-terminal-assistant-unavailable",
+            "part-5-prior-assistant-unavailable",
+            "part-5-network-failure-without-complete-stream",
+            "part-5-incomplete-or-unknown-stream",
+            "part-5-backend-tool-delegation-unclassified",
+            "part-5-terminal-assistant-unavailable",
+            "part-6-prior-assistant-unavailable",
+            "part-6-network-failure-without-complete-stream",
+            "part-6-incomplete-or-unknown-stream",
+            "part-6-backend-tool-delegation-unclassified",
+            "part-6-terminal-assistant-unavailable"
+          ],
+          "graphReads": [
+            {
+              "afterPart": 1,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 2,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 3,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 4,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 5,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 6,
+              "available": false,
+              "httpStatus": 404
+            }
+          ],
+          "backendToolObservation": {
+            "observedAuthorNames": [
+              "a8km123"
+            ],
+            "description": "a8km123 plus async/poll metadata is consistent with Pro internal delegation; role:tool alone is not proof of external memory retrieval. Absence of substantive hidden retrieval and full delegated ancestry have not been proven.",
+            "externalMemoryToolsEnabled": false,
+            "internalDelegationFullyProven": false
+          }
+        },
+        "recall": {
+          "evaluated": true,
+          "strictJsonPassed": false,
+          "correct": 8,
+          "total": 12,
+          "byPart": [
+            {
+              "part": 1,
+              "total": 2,
+              "correct": 0
+            },
+            {
+              "part": 2,
+              "total": 2,
+              "correct": 0
+            },
+            {
+              "part": 3,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 4,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 5,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 6,
+              "total": 2,
+              "correct": 2
+            }
+          ],
+          "incorrectValuesReturnedNull": 4,
+          "scope": "Observed answer scored against an independent private random oracle; no oracle values or keys included."
+        },
+        "cleanup": {
+          "settled": true,
+          "ownedPagesClosed": 1,
+          "originalPagesPreserved": true,
+          "workerSettled": true,
+          "borrowedBrowserCloseCalled": false,
+          "errors": 0
+        },
+        "canClaimCapacity": false,
+        "canClaimNative400K": false,
+        "canClaimNative1M": false
+      },
+      {
+        "tier": 256000,
+        "status": "indeterminate",
+        "completed": true,
+        "category": "transport-unverified",
+        "localArtifactDirectory": "scratch/web-pro-057-continuity/window-256000-0ee2bae7-0fe0-49ed-8a8f-3dc6e840e89c",
+        "artifacts": [
+          {
+            "file": "report.json",
+            "sha256": "4c9150a82443b2658e9377891e1d00835e4a1acd3be4274c281544fb33b5aa09",
+            "bytes": 43549,
+            "contentsIncluded": false
+          },
+          {
+            "file": "source.json",
+            "sha256": "162c7f90ef9dd4c2b2f5e89ce3b008b7359cf0979741a3a09efe3459dcb29d50",
+            "bytes": 1204693,
+            "contentsIncluded": false
+          },
+          {
+            "file": "prepared.json",
+            "sha256": "5e975647b887898f7d3fdbc1eb7ee80f084df00cd726902c7a14558a784abe96",
+            "bytes": 1215682,
+            "contentsIncluded": false
+          },
+          {
+            "file": "physical.synthetic.json",
+            "sha256": "0dfbc62872b035d37b68827a5115063314aa05bcb221558c8f4019fbbcf41b4f",
+            "bytes": 1221048,
+            "contentsIncluded": false
+          },
+          {
+            "file": "private-oracle.json",
+            "sha256": "90bf2844110426808769a2381a3459e5f9d1cf80d23344ce9bf90b17c112b1e2",
+            "bytes": 12283,
+            "contentsIncluded": false
+          },
+          {
+            "file": "answer.txt",
+            "sha256": "e13931b4c85ab2aba4263281274eabc1f3f0c6e5f0606002b7441dc9c075b549",
+            "bytes": 724,
+            "contentsIncluded": false
+          },
+          {
+            "file": "production-preload.original.mjs",
+            "sha256": "c85b3891d3e88070812a0be20dc9c5530efa4b7db99658d5eeb210b8b5bf11c9",
+            "bytes": 52356,
+            "contentsIncluded": false
+          },
+          {
+            "file": "production-preload.harness.mjs",
+            "sha256": "e9fe516f5bf26f8b160e6a41bc76962219223a8614a03707c8a75a66c5cb7302",
+            "bytes": 53230,
+            "contentsIncluded": false
+          },
+          {
+            "file": "production-source-manifest.json",
+            "sha256": "6069b9eaae097b662be147f25a5ab5956cfc279fbf4f6e5e076cbd286a45f185",
+            "bytes": 4244,
+            "contentsIncluded": false
+          }
+        ],
+        "provenance": {
+          "pinnedCliSha256": "df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1",
+          "productionPreloadSha256": "c85b3891d3e88070812a0be20dc9c5530efa4b7db99658d5eeb210b8b5bf11c9",
+          "productionContentsSha256": "24ceee437e64f35006c3fa2ad3848daf750f6542808190e73607a88ef7a85862",
+          "productionSourceManifestSha256": "76472e0077036c45fce57d875936c4ac4017a82220959e7c1716bccdedd6e377",
+          "driverSha256AtRun": "70a5177f79f3a33c4acf073d1e8e0e76dd5efbc629ebf51f52d2f98f19ae6156",
+          "helperSha256AtRun": "2089d4ecf6d0f11dd7799dd3a503865a6496ada7f63ee72f7e0d978a544ee88a",
+          "probeCoreSha256": "10a4abe8707d28b08f9b376d7e52e3732965e8d707d56136d69ef416b090d515",
+          "productionDependenciesUnchanged": true,
+          "pinnedCliUnchanged": true
+        },
+        "production": true,
+        "transportSelection": "production-default-automatic",
+        "manualPartsRequested": null,
+        "experimentalWindowPatchApplied": false,
+        "modelFamily": "6",
+        "backendModel": "gpt-6-pro",
+        "parts": 6,
+        "elapsedMs": 145879,
+        "budget": {
+          "placeholderCompiledInputTokens": 255934,
+          "actualTransactionPreflightInputTokens": 256060,
+          "expectedAcknowledgementTokens": 323,
+          "visibleOutgoingMessageTokens": 247545,
+          "accounting": "Full transaction uses the pinned tokenizer, wrappers, expected ACKs and 8192 local reserve. Expected ACK token totals are not independently recovered server ACK receipts. Neither target nor Nt is net original-text tokens."
+        },
+        "canonicalIntegrity": {
+          "originalMessages": 97,
+          "originalSystemRecords": 1,
+          "canonicalSha256": "162c7f90ef9dd4c2b2f5e89ce3b008b7359cf0979741a3a09efe3459dcb29d50",
+          "multipartRecordsSha256": "da117cc9f47de90c06a6a588e9a82770793af25d7a7d7fa699725f9acb87387d",
+          "recordCountsByPart": [
+            17,
+            16,
+            16,
+            16,
+            16,
+            17
+          ],
+          "allOriginalRecordsVerified": true
+        },
+        "observedTransport": {
+          "status": "indeterminate",
+          "requestCount": 6,
+          "workerAcknowledgedParts": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "physicalMessages": [
+            {
+              "part": 1,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 41149,
+              "utf16Chars": 202295,
+              "sentPayloadSha256": "cb99b20b42349e493bee30ba28bffe2202126a45af2c59e1af32f438f0dd0f62",
+              "expectedPayloadSha256": "cb99b20b42349e493bee30ba28bffe2202126a45af2c59e1af32f438f0dd0f62",
+              "serializedRequestBodySha256": "a23c675bae8e69b5ac3d4409754a8e7b5e8545c404cf8a62fe9861f1a340bc71"
+            },
+            {
+              "part": 2,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 41092,
+              "utf16Chars": 202096,
+              "sentPayloadSha256": "5f86b5bf643bda59ed244078a486559bd4d88ec6b91ec84738762dc026a032f8",
+              "expectedPayloadSha256": "5f86b5bf643bda59ed244078a486559bd4d88ec6b91ec84738762dc026a032f8",
+              "serializedRequestBodySha256": "ceede2eb61f4a66f4999ef97b2a60f08a6925667d3f6bc271d74b1ce3154b50f"
+            },
+            {
+              "part": 3,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 41078,
+              "utf16Chars": 202096,
+              "sentPayloadSha256": "7e272ee0f80251f365c57b189bf21447e5e547d98679c794264bf819c7d9492d",
+              "expectedPayloadSha256": "7e272ee0f80251f365c57b189bf21447e5e547d98679c794264bf819c7d9492d",
+              "serializedRequestBodySha256": "4ecc5b78fa77636afcf75b39ba36a643fcdde8f97097c41b15970f92e53d1193"
+            },
+            {
+              "part": 4,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 41115,
+              "utf16Chars": 202096,
+              "sentPayloadSha256": "9060dba1d64c33a9aa78008c0dba34cb670797829df59545af6649c75d3938ad",
+              "expectedPayloadSha256": "9060dba1d64c33a9aa78008c0dba34cb670797829df59545af6649c75d3938ad",
+              "serializedRequestBodySha256": "65bc38af527fca4c736953ad12d6c47fd412435765b3af9dcaae84bdcc06e722"
+            },
+            {
+              "part": 5,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 41071,
+              "utf16Chars": 202096,
+              "sentPayloadSha256": "4c0f6bf288880e4eab850441d937b8626b7828be0b09a57fe06f175a4d7b111a",
+              "expectedPayloadSha256": "4c0f6bf288880e4eab850441d937b8626b7828be0b09a57fe06f175a4d7b111a",
+              "serializedRequestBodySha256": "7d47076fd743e2e55ce6920e10661a688f15d33aee75f562f7afe32000cc482d"
+            },
+            {
+              "part": 6,
+              "model": "gpt-6-pro",
+              "uiModelVerified": true,
+              "exactPayload": true,
+              "referenceTokens": 42040,
+              "utf16Chars": 206236,
+              "sentPayloadSha256": "c3fa0090c8832864b3310cc5270d268ddced18478ddeae8a06682d4f10ec2a8c",
+              "expectedPayloadSha256": "c3fa0090c8832864b3310cc5270d268ddced18478ddeae8a06682d4f10ec2a8c",
+              "serializedRequestBodySha256": "ef36bbc9e902275511dc34e5b554b1915579e2cbeadbf43e9323ff8a8705c486"
+            }
+          ],
+          "responseSummary": [
+            {
+              "part": 1,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 2,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 3,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 4,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 5,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            },
+            {
+              "part": 6,
+              "httpStatus": 200,
+              "captureSource": "cdp-stream",
+              "receiptAvailable": true,
+              "doneMarker": true,
+              "unresolvedIssues": [
+                "unresolved-patch"
+              ],
+              "terminalAssistantReceiptAvailable": false
+            }
+          ],
+          "rawFailures": [],
+          "rawMissingEvidence": [
+            "part-1-network-failure-without-complete-stream",
+            "part-1-incomplete-or-unknown-stream",
+            "part-1-backend-tool-delegation-unclassified",
+            "part-1-terminal-assistant-unavailable",
+            "part-2-prior-assistant-unavailable",
+            "part-2-network-failure-without-complete-stream",
+            "part-2-incomplete-or-unknown-stream",
+            "part-2-backend-tool-delegation-unclassified",
+            "part-2-terminal-assistant-unavailable",
+            "part-3-prior-assistant-unavailable",
+            "part-3-network-failure-without-complete-stream",
+            "part-3-incomplete-or-unknown-stream",
+            "part-3-backend-tool-delegation-unclassified",
+            "part-3-terminal-assistant-unavailable",
+            "part-4-prior-assistant-unavailable",
+            "part-4-network-failure-without-complete-stream",
+            "part-4-incomplete-or-unknown-stream",
+            "part-4-backend-tool-delegation-unclassified",
+            "part-4-terminal-assistant-unavailable",
+            "part-5-prior-assistant-unavailable",
+            "part-5-network-failure-without-complete-stream",
+            "part-5-incomplete-or-unknown-stream",
+            "part-5-backend-tool-delegation-unclassified",
+            "part-5-terminal-assistant-unavailable",
+            "part-6-prior-assistant-unavailable",
+            "part-6-network-failure-without-complete-stream",
+            "part-6-incomplete-or-unknown-stream",
+            "part-6-backend-tool-delegation-unclassified",
+            "part-6-terminal-assistant-unavailable"
+          ],
+          "graphReads": [
+            {
+              "afterPart": 1,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 2,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 3,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 4,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 5,
+              "available": false,
+              "httpStatus": 404
+            },
+            {
+              "afterPart": 6,
+              "available": false,
+              "httpStatus": 404
+            }
+          ],
+          "backendToolObservation": {
+            "observedAuthorNames": [
+              "a8km123"
+            ],
+            "description": "a8km123 plus async/poll metadata is consistent with Pro internal delegation; role:tool alone is not proof of external memory retrieval. Absence of substantive hidden retrieval and full delegated ancestry have not been proven.",
+            "externalMemoryToolsEnabled": false,
+            "internalDelegationFullyProven": false
+          }
+        },
+        "recall": {
+          "evaluated": true,
+          "strictJsonPassed": true,
+          "correct": 12,
+          "total": 12,
+          "byPart": [
+            {
+              "part": 1,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 2,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 3,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 4,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 5,
+              "total": 2,
+              "correct": 2
+            },
+            {
+              "part": 6,
+              "total": 2,
+              "correct": 2
+            }
+          ],
+          "scope": "Observed answer scored against an independent private random oracle; no oracle values or keys included."
+        },
+        "cleanup": {
+          "settled": true,
+          "ownedPagesClosed": 1,
+          "originalPagesPreserved": true,
+          "workerSettled": true,
+          "borrowedBrowserCloseCalled": false,
+          "errors": 0
+        },
+        "canClaimCapacity": false,
+        "canClaimNative400K": false,
+        "canClaimNative1M": false
       }
     ]
   },

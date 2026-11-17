@@ -10,6 +10,7 @@ import { nativeOptions as normalizeNativeOptions } from './models.mjs';
 import { CompactionService, compactionProxy } from './compaction.mjs';
 import { createFileBrokerDiagnostics } from './broker-diagnostics.mjs';
 import { normalizeNativeTurnMetadata } from './turn-metadata.mjs';
+import { writeAccountContinuityPolicy } from './account-continuity.mjs';
 
 export async function writePrivate(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -73,7 +74,7 @@ export function daemonProxy({ port, controlToken, compaction }, fetchImpl = glob
 }
 
 export class NativeDaemon {
-  constructor({ home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities = {}, nativeOptions, appName = 'Codex Magpie',
+  constructor({ home, runtimeCommand, tunnelBinary, chromeExecutablePath, browserEndpoint, storageState, capabilities = {}, nativeOptions, continuityPeers, appName = 'Codex Magpie',
     spawn = spawnProcess, fetch = globalThis.fetch, allocatePort = freePort, sleep = delay,
     startupTimeoutMs = 30_000, pollMs = 200, restartBaseMs = 1000, restartMaxMs = 30_000, env = process.env,
     compactionIdleMs = 60_000, shutdownRequestTimeoutMs = 2000, shutdownExitTimeoutMs = 5000,
@@ -83,6 +84,8 @@ export class NativeDaemon {
       shutdownRequestTimeoutMs, shutdownExitTimeoutMs, diagnosticsFactory });
     this.nextOptions = normalizeNativeOptions(nativeOptions);
     this.nextCapabilities = capabilities;
+    if (continuityPeers !== undefined && !Array.isArray(continuityPeers)) throw new TypeError('Invalid continuity peers');
+    this.continuityPeers = continuityPeers && [...continuityPeers];
     this.home = resolve(home);
     this.commandChildren = new Set();
     this.ready = false;
@@ -93,6 +96,12 @@ export class NativeDaemon {
   configure(options, capabilities = this.nextCapabilities) {
     this.nextOptions = normalizeNativeOptions(options);
     this.nextCapabilities = capabilities;
+  }
+  async configureContinuity(peers) {
+    if (!Array.isArray(peers)) throw new TypeError('Invalid continuity peers');
+    const selected = [...peers];
+    this.continuityEnv = await writeAccountContinuityPolicy(this.home, selected);
+    this.continuityPeers = selected;
   }
   descriptor() { return { port: this.config.port, controlToken: this.config.controlToken, capabilities: { ...this.capabilities, experimentalBiggerContext: this.config.experimentalBiggerContext, useTemporaryChats: this.config.useTemporaryChats },
     ...(this.compactionService ? { compaction: this.compactionService.descriptor() } : {}) }; }
@@ -155,7 +164,8 @@ export class NativeDaemon {
       this.env.CODEX_HOME ? resolve(this.env.CODEX_HOME) : null,
       resolve(homedir(), '.codex'),
     ].filter(dir => dir && isAbsolute(dir) && existsSync(dir)))];
-    this.childEnv = { ...inherited, MAGPIE_NATIVE_CHECKPOINT_HOME: this.home, MAGPIE_NATIVE_RETAINED_COMPACTION: '1', CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
+    if (this.continuityPeers) await this.configureContinuity(this.continuityPeers);
+    this.childEnv = { ...inherited, ...this.continuityEnv, MAGPIE_NATIVE_CHECKPOINT_HOME: this.home, MAGPIE_NATIVE_RETAINED_COMPACTION: '1', CODEX_CHATGPT_WEB_HOME: this.home, CODEX_HOME: join(this.home, 'codex'),
       ...(this.browserEndpoint ? { MAGPIE_NATIVE_BROWSER_CDP: this.browserEndpoint } : {}),
       ...(trustedHomes.length ? { CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES: JSON.stringify(trustedHomes) } : {}),
       TUNNEL_CLIENT_STATE_DIR: join(this.home, 'tunnel-state'), TUNNEL_CLIENT_PROFILE_DIR: join(this.home, 'tunnel'),
@@ -258,7 +268,9 @@ export class NativeDaemon {
       let output = '', settled = false;
       // The broker's MCP subprocess reads no checkpoints and must not become
       // a second store owner through the tunnel client's inherited environment.
-      const { MAGPIE_NATIVE_CHECKPOINT_HOME: _checkpointHome, ...tunnelEnv } = this.childEnv;
+      const { MAGPIE_NATIVE_CHECKPOINT_HOME: _checkpointHome,
+        MAGPIE_NATIVE_CONTINUITY_ROOT: _continuityRoot, MAGPIE_NATIVE_CONTINUITY_PEERS: _continuityPeers,
+        MAGPIE_NATIVE_CONTINUITY_POLICY: _continuityPolicy, ...tunnelEnv } = this.childEnv;
       const child = this.spawn(this.tunnelBinary, args, { cwd: this.home, env: tunnelEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       this.commandChildren.add(child);
       const finish = (error, data) => {

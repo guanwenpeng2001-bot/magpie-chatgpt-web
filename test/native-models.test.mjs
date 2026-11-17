@@ -90,7 +90,8 @@ test('reference standard windows and efforts are gated independently by explicit
       assert.equal(row('sol').context_window, proAvailable ? 111193 : 90000);
       assert.deepEqual(row('sol').supported_reasoning_levels.map(level => level.effort), ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]);
       if (proAvailable) {
-        assert.equal(row('pro').context_window, 112193);
+        assert.equal(row('pro').context_window, 400000);
+        assert.equal(row('pro').auto_compact_token_limit, 230400);
         assert.deepEqual(row('pro').supported_reasoning_levels, [{ effort: 'max' }]);
       } else assert.equal(row('pro'), undefined);
     }
@@ -205,14 +206,14 @@ test('catalog loads capabilities from each saved native account without starting
 test('published native windows make Codex compact at the reference auto-compact limits', () => {
   const cases = [
     [{ solAvailable: true }, { 'gpt-6-sol-instant': 32000, 'gpt-6-sol': 80000 }],
-    [{ solAvailable: true, proAvailable: true }, { 'gpt-6-sol-instant': 95000, 'gpt-6-sol': 95000, 'gpt-6-pro': 95000 }],
+    [{ solAvailable: true, proAvailable: true }, { 'gpt-6-sol-instant': 95000, 'gpt-6-sol': 95000, 'gpt-6-pro': 230400 }],
   ];
   for (const [capabilities, expected] of cases) {
     const rows = nativeCatalog(capabilities);
     const models = describeNativeCatalogue(rows, profile);
     for (const [slug, threshold] of Object.entries(expected)) {
       const row = rows.find(entry => entry.slug === `chatgpt-web/${slug}`);
-      const window = models[id(slug)].limit.context;
+      const window = models[id(slug)].limit.input ?? models[id(slug)].limit.context;
       assert.equal(row.auto_compact_token_limit, threshold);
       assert.ok(window <= row.context_window, `${slug} never exceeds the real window`);
       assert.ok(Math.floor(window * 0.9) >= threshold - 1 && Math.floor(window * 0.9) <= threshold, `${slug} compacts at ${threshold}`);

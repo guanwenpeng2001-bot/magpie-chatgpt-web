@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "status": "offline-account-continuity-evidence",
+  "release": "0.5.8",
+  "recordedAt": "2026-11-17T20:49:22.603Z",
+  "live": false,
+  "canClaimLiveAccountFailover": false,
+  "canClaimWebCapacity": false,
+  "canClaimOneMillionTokenProbeRerun": false,
+  "onlineRequests": 0,
+  "realSessionsTouched": false,
+  "realAccountFilesRead": false,
+  "scope": "Synthetic local account stores, daemon-owned hot policy, pinned checkpoint and canonical history boundaries; no account scheduler.",
+  "pinnedCliSha256": "df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1",
+  "verification": [
+    {
+      "source": "tool-results-observed-in-this-chat",
+      "suite": "checkpoint, history, continuity and dynamic policy regression",
+      "environment": {
+        "NATIVE_HISTORY_SMOKE": "1",
+        "NATIVE_ACCOUNT_CONTINUITY_SMOKE": "1"
+      },
+      "counts": {
+        "tests": 74,
+        "passed": 70,
+        "failed": 0,
+        "skipped": 4,
+        "cancelled": 0
+      },
+      "skipped": [
+        "three POSIX-only permission tests on Windows",
+        "opt-in pinned streaming disk-failure smoke"
+      ],
+      "qualification": "Historical passing run before production preload wiring; the pinned fixture then applied the continuity transform when absent."
+    },
+    {
+      "source": "tool-results-observed-in-this-chat",
+      "suite": "production preload pinned continuity plus daemon integration",
+      "command": "node --test test/native-continuity-daemon.test.mjs test/native-account-continuity-pinned.test.mjs",
+      "environment": {
+        "NATIVE_ACCOUNT_CONTINUITY_SMOKE": "1"
+      },
+      "counts": {
+        "tests": 5,
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "cancelled": 0
+      },
+      "qualification": "Pinned fixture asserted exactly one production lookup/scopes patch and did not apply its own transform. Daemon argument-type rejection assertions were extended afterward."
+    }
+  ],
+  "verifiedScenarios": [
+    "A issues and durably stores a checkpoint; B restores the exact task, recompacts, and A resumes the newer generation.",
+    "An already loaded registry and cached history store gain a peer through an atomic policy-file update, with unchanged process environment and no restart.",
+    "Pre-turn compaction recovers only matching thread/model/reasoning peer scopes; a restarted target can read its own accepted records without peer access.",
+    "More than 4 MiB of original Unicode text survives migration; early, late and final command-output records remain searchable and readable.",
+    "Actual pinned broker dispatch retains private scope, bounded output, untrusted-history labeling and argument rejection.",
+    "Foreign thread, turn, model, reasoning, summary ownership, invented summary and superseding user instruction cannot restore the old task.",
+    "Missing, stale, foreign or permission-conflicting canonical rollout proof prevents history migration.",
+    "Stale compaction parents, inconsistent equal-generation checkpoints, changed local state and corrupted peer storage fail closed.",
+    "History imports deduplicate before capacity checks, reject overflow atomically and preserve existing original records.",
+    "Policy writer returns only the fixed account policy env; live reads reject malformed, oversized, linked or redirected policy paths.",
+    "Native server launch follows policy persistence; tunnel/MCP commands strip checkpoint home and all three continuity environment variables.",
+    "ensureNative awaits policy updates before healthy-owner reuse and separates different policy snapshots; an active response is neither replayed nor restarted."
+  ],
+  "integrationContract": {
+    "writer": "await writeAccountContinuityPolicy(home, profiles)",
+    "returns": {
+      "MAGPIE_NATIVE_CONTINUITY_POLICY": "<owned-account-home>/continuity-policy.json"
+    },
+    "policyRoot": "Derived from dirname(home), never a request field.",
+    "profileAuthority": "Host-owned ChatGPT OAuth registry; include the selected profile.",
+    "launchAndReuse": "Write before native server launch and await configureContinuity before returning an existing owner. Every server launch path must include the policy env.",
+    "runtimePatch": "Import patchNativeAccountContinuity and apply once to contents after checkpoint persistence substitutions; current integration places it after patchNativeProWindow.",
+    "tunnelStrip": [
+      "MAGPIE_NATIVE_CHECKPOINT_HOME",
+      "MAGPIE_NATIVE_CONTINUITY_ROOT",
+      "MAGPIE_NATIVE_CONTINUITY_PEERS",
+      "MAGPIE_NATIVE_CONTINUITY_POLICY"
+    ],
+    "storage": "Independent account keys and ciphertext; peer reads authenticate in place, and target acceptance encrypts under the target key. No key or cookie copying."
+  },
+  "limitations": [
+    "Offline evidence does not establish actual browser generation, live quota failover, login persistence or the official active model context window.",
+    "No new one-million-token capacity probe was run for this artifact; native-history-capacity-0.5.8.json remains a separate earlier measurement.",
+    "Removing a peer prevents new peer reads but does not erase records already accepted into the target account.",
+    "Windows tests do not exercise POSIX UID/mode rejection; those cases are explicitly skipped.",
+    "The later full-suite result and subsequent fixes are main-reported, not independently rerun for this artifact."
+  ],
+  "sourceSnapshot": {
+    "algorithm": "sha256",
+    "basis": "Repository-relative files read when producing this report; these hashes are not retroactive per-run attestations or a complete release dependency lock.",
+    "releaseDependencyFreeze": false,
+    "excludedMutableDependencies": [
+      "src/native/runtime.mjs",
+      "src/native/daemon.mjs",
+      "src/native/index.mjs",
+      "src/native/continuity-profiles.mjs"
+    ],
+    "finalDependencyHashesOwner": "main",
+    "files": {
+      "src/native/account-continuity.mjs": "9c7237d6d9008ca1ec92a1d50c20bc54221e1385c799716fe1e4cfdaaf069bca",
+      "src/native/checkpoints.mjs": "273d7ad5948da0b303b37a1cf2f8ec5674af6b861772b277dc467b50800d0d34",
+      "src/native/history-store.mjs": "be2b280848d56c777cd15979226a5eb20756cf6f18d0983127635665efa084ec",
+      "src/native/history.mjs": "6158c3b87f5264140a7b6a5923e33aabd2c093643826024250b79c4583094a8d",
+      "test/native-account-continuity.test.mjs": "6c810a2b710d0a75b661e174736073363c1a0f3fb157981561c75a45af2cca17",
+      "test/native-continuity-policy.test.mjs": "912f20a9f148edd863e478f6f5ee2f299492cd50bbcc7cb4309acfb734b1e1f3",
+      "test/native-continuity-daemon.test.mjs": "659ea9bf7216c0cacff5d4d63270147f9f69a65bd48dbe79f4b8ee74724250f4",
+      "test/native-account-continuity-pinned.test.mjs": "7f38e0f2af0aefcecb84770cdb7add73ede199792b73aaa2b0200ee14b434045",
+      "test/fixtures/native-account-continuity-fixture.mjs": "dce75c2f308b2c92a4ca347383ae17135c2d7e63a14febdc5fe0c89514133fda"
+    }
+  },
+  "redaction": {
+    "absoluteLocalPathsIncluded": false,
+    "accountIdentifiersIncluded": false,
+    "threadOrTurnIdentifiersIncluded": false,
+    "processIdsIncluded": false,
+    "noncesIncluded": false,
+    "rawToolLogsIncluded": false,
+    "credentialsIncluded": false
+  }
+}

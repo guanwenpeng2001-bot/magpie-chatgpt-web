@@ -14,7 +14,11 @@ Magpie exposes the base family once and sends the chosen effort in `x-magpie-eff
 
 The six ordinary Chat alias catalogue rows (`-instant`, `-thinking`, `-pro` for each family) are represented by these variants rather than duplicate model cards. Without an effort header, a base ID uses the verified Medium/default browser state. `auto` remains the explicitly requested page-default mode.
 
-## Native Pro context guard (0.5.4)
+## Native Pro context allocation (0.5.8)
+
+The target Pro total context is 400K, with a local compiled-input allocation below 256K and a 230.4K automatic-compaction target. The remaining budget reserves reasoning/output and headroom. All Pro stages use max effort; complete records are sent inline or in two/six parts without deleting history. Automatic account selectors share model IDs across eligible accounts. A 256K default-production sample recalled 12/12 markers; a 380K sample recalled 8/12. The larger input allocation was not accepted. These observations are finite samples, not exhaustive retention guarantees. See [current evidence](docs/evidence/web-window-live-0.5.8.json).
+
+## Historical Native Pro context guard (0.5.4–0.5.7)
 
 Explicit Native GPT-5.6 Pro and GPT-6 Pro selectors remain available with Bigger Context off. Their published window stays approximately 105.6K with a reference 95K compaction target. Bigger Context does not enlarge Pro: ~276K live requests delivered all parts but recovered only 4/12 distributed markers in tool/no-tool controls. The runtime rejects compiled Pro input at or above 112,193 tokens before browser work, including clients holding an older 316.7K catalogue. This is the ordinary reference boundary, not a claim that every input below it has been exhaustively validated. The source history is never truncated to make it fit.
 

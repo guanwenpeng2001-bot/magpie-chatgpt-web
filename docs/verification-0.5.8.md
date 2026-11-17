@@ -1,8 +1,9 @@
 # 0.5.8 candidate verification
 
 This is a development verification record, not a release acceptance claim. The
-installed baseline is 0.5.7 until an exact candidate/release commit is installed
-and checked. The final release, tag and installation must identify the same code.
+installed recovery candidate is 0.5.8-rc.2 at commit
+`5ee4710bc9c7e3e91c51594c6165a48fa5de506e`. The final release, tag and
+installation must identify the same code.
 
 ## Required behavior
 
@@ -21,6 +22,20 @@ and checked. The final release, tag and installation must identify the same code
 
 ## Evidence currently recorded
 
+- The installed recovery candidate reused the user's completed browser login
+  through the normal Magpie sign-in callback, preserving the existing route and
+  persisting its browser-profile alias. A live check identified normal NextAuth
+  rotation on every session read; the corrected identity check accepted the
+  verified same account without overwriting cookies.
+- A real Codex run using `chatgpt-web/native/auto/gpt-6-pro` executed
+  `node --test verification.test.mjs`, passed three tests and completed its answer.
+  Both saved accounts completed Native setup through the normal plugin flow.
+- An actual isolated Magpie gateway test verified A-to-B quota failover with and
+  without Retry-After, exact canonical payload preservation and no replay after
+  output. An original pinned broker/adapter/Responses fixture proved a local
+  tool is delivered before client execution; quota before delivery executes zero
+  client commands. These do not consume real account quota.
+
 - Browser reauthentication reuses a saved profile; adding the same account binds
   the newly authenticated browser without replacing the native route. Identity,
   binding-change and cancellation regressions cover rejected account replacement
@@ -35,9 +50,18 @@ and checked. The final release, tag and installation must identify the same code
   pinned-runtime evidence, not a live million-token model request.
 - [Live window probes](evidence/web-window-live-0.5.8.json): 128K and 256K samples
   each returned 12/12 random associations. Transport evidence remains incomplete.
-  The latest 380K probe stopped before the fifth send because Pro was unavailable
-  in the model controls; it did not complete the six-part request. These results
-  do not establish production 400K acceptance.
+  A subsequent production-default 380K run completed but recalled only 8/12
+  associations, losing the four in its first two parts. The production-default
+  256K control recalled all twelve. The release therefore retains 400K total
+  metadata but allocates less than 256K compiled input, a joint 128K
+  reasoning/output reserve and 16K additional headroom. The allocation is local;
+  it is not an official maximum-input or maximum-generation claim. Pro's
+  automatic-compaction target is 230.4K; Codex's effective input is about 243.2K.
+- The integrated broad regression passed 1,818 tests with 29 skips before a
+  cancelled-lookup regression was fixed (its three tests subsequently passed).
+  The revised input allocation passed 323 focused tests without skips; account
+  failover, tool-emission, model controls, policy and package checks passed 45
+  additional focused tests without skips. Final installed checks follow below.
 
 ## Still required before final acceptance
 

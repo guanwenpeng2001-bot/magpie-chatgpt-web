@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.8 — candidate
+
+- Keep account credentials, persistent Chrome profiles and Native model routes bound together. Reauthentication reuses the saved profile; adding an already saved account retains its model route and binds the authenticated browser. Validate the actual session identity while accepting normal NextAuth cookie rotation. Cancellation preserves user pages and cleans up late-created login pages.
+- Add `native/auto/<model>` selectors shared by eligible accounts. Use Magpie's account selection and quota handling, preserve canonical requests, and keep legacy account-pinned selectors. Native quota refusals before output remain 429; verification preserves sign-in and reveals the correct browser. Tool and text output are never replayed to another account.
+- Preserve Responses turn metadata for Native execution and compaction. Store observed original history encrypted and expose current-chat search/read tools across compaction. An offline pinned-runtime test retained 1,001,368 original tokens across two processes; this is retrieval memory, not a native 1M model window.
+- Carry authenticated same-chat checkpoints and original history between registered local accounts during quota failover. Each destination encrypts its own copy; exact scope, summary and canonical-rollout authority remain enforced. Eligible account policy updates without a daemon restart.
+- Separate the official Pro total window from the usable input budget and automatic compaction target. Production maximum-input acceptance remains under test; historical failed large-context probes remain documented rather than silently dropping records.
+- Fix cancelled startup before the bridge call and preserve typed refusals. Final installed, continuity and release acceptance results are tracked in [0.5.8 verification](docs/verification-0.5.8.md).
+
 ## 0.5.7 — 2026-11-18
 
 - Publish the previously unmerged 0.5.6 improvements together with verification recovery as formal release 0.5.7. Synchronize package metadata, lockfile, README and tagged installation instructions.

@@ -240,7 +240,8 @@ export async function serve(input, output, { handlers = {}, close = async () => 
           try {
             const capabilities = accountCapabilities(await client.models(signal));
             return await driverFor(command.profileRoot).browser.run(browserProfileOf(command.auth), async context => {
-              const daemon = await ensureNative({ ...command.auth, context, capabilities }, { root: nativeSetupRoot, nativeOptions: command.nativeOptions, signal, onStage });
+              const daemon = await ensureNative({ ...command.auth, context, capabilities }, { root: nativeSetupRoot, nativeOptions: command.nativeOptions,
+                continuityPeers: command.continuityPeers, signal, onStage });
               return daemon && await daemon.health(signal);
             }, signal, { visibleTurns: true, settleOnAbort: true, auth: { ...command.auth, refresh: client.credential } });
           } finally { release(); }
@@ -253,7 +254,8 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         try {
           const capabilities = accountCapabilities(await client.models(signal));
           return await driverFor(command.profileRoot).browser.run(browserProfileOf(command.auth), async context => {
-            const daemon = await ensureNative({ ...command.auth, context, capabilities }, { resumeOnly: command.method === 'nativeRuntime', nativeOptions: command.nativeOptions, signal });
+            const daemon = await ensureNative({ ...command.auth, context, capabilities }, { resumeOnly: command.method === 'nativeRuntime', nativeOptions: command.nativeOptions,
+              continuityPeers: command.continuityPeers, signal });
             return daemon && await daemon.health(signal) ? daemon.descriptor() : null;
           }, signal, { visibleTurns: nativeVerification.visible(command), auth: { ...command.auth, refresh: client.credential } });
         } finally { release(); }

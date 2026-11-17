@@ -344,7 +344,9 @@ test('catalog uses reference context windows and per-model OpenAI NPM', () => {
   assert.equal(plus[model].variants.xhigh, undefined);
   const pro = describeNativeCatalogue(nativeCatalog({ solAvailable: true, proAvailable: true, extraHighAvailable: true }), auth.profile);
   assert.equal(pro[model].limit.context, 105556);
-  assert.equal(pro['native/account-a/gpt-6-pro'].limit.context, 105556);
+  assert.equal(pro['native/account-a/gpt-6-pro'].limit.context, 400000);
+  assert.equal(pro['native/account-a/gpt-6-pro'].limit.input, 256000);
+  assert.equal(pro['native/account-a/gpt-6-pro'].limit.output, 0);
   assert.deepEqual(pro[model].variants.xhigh, {});
 });
 

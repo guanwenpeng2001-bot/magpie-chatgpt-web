@@ -7,6 +7,7 @@ import { readSetupStatus, readNativeState } from './setup.mjs';
 import { BackendError } from '../../backend/guard.mjs';
 import { browserProfileOf } from '../../backend/browser-profile.mjs';
 import { preserveNativeVerification } from './response-errors.mjs';
+import { continuityProfiles } from './continuity-profiles.mjs';
 
 const accounts = new Map();
 const pending = new Map();
@@ -21,7 +22,7 @@ export function ensureNative(account, options = {}) {
   const { root = nativeRoot() } = options;
   const { profile, home } = identity(account, root);
   const key = JSON.stringify([browserProfileOf({ ...account, profile }), options.catalogOnly === true,
-    options.resumeOnly === true, options.nativeOptions, account.capabilities]);
+    options.resumeOnly === true, options.nativeOptions, account.capabilities, options.continuityPeers]);
   const prior = pending.get(home);
   if (prior?.key === key) return prior.work;
   const work = (async () => {
@@ -37,6 +38,7 @@ export function ensureNative(account, options = {}) {
     // options. Its descriptor continues to advertise the effective generation.
     existing?.configure?.(settings, capabilities);
     if (options.catalogOnly) return { capabilities: (existing?.config ? existing.descriptor().capabilities : undefined) ?? { ...capabilities, ...settings } };
+    if (existing && options.continuityPeers) await existing.configureContinuity?.(options.continuityPeers);
     const endpoint = browserEndpoint(account.context);
     if (existing && !options.provision && existing.browserEndpoint === endpoint && await existing.health()) return existing;
     if (existing) { await existing.stop(); accounts.delete(home); }
@@ -50,7 +52,8 @@ export function ensureNative(account, options = {}) {
     const daemon = (options.createDaemon ?? (settings => new NativeDaemon(settings)))({ home, ...installed,
       appName: `Codex Magpie ${profile.slice(0, 8)}`,
       browserEndpoint: endpoint,
-      chromeExecutablePath: account.chromeExecutablePath ?? await findChromeExecutable(), capabilities, nativeOptions: settings, storageState: async () => storage });
+      chromeExecutablePath: account.chromeExecutablePath ?? await findChromeExecutable(), capabilities, nativeOptions: settings,
+      continuityPeers: options.continuityPeers, storageState: async () => storage });
     // A failed startup may still own a live OS lease until cleanup succeeds.
     // Retain it so the next attempt and shutdown can retry that cleanup.
     accounts.set(home, daemon);
@@ -219,13 +222,21 @@ export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch =
     }
   };
   return {
-    provision: (auth, signal) => bridge.call({ method: 'nativeProvision', auth, profileRoot, nativeOptions: providerNativeOptions(input) }, signal),
+    async provision(auth, signal) {
+      const peers = await continuityProfiles(input, auth);
+      signal?.throwIfAborted();
+      return bridge.call({ method: 'nativeProvision', auth, profileRoot, nativeOptions: providerNativeOptions(input),
+        ...(peers ? { continuityPeers: peers } : {}) }, signal);
+    },
     status: auth => readSetupStatus(auth, { root }),
     async runtime(auth, signal) {
       signal?.throwIfAborted();
       const physical = browserProfileOf(auth);
       const binding = { profile: auth.profile, ...(auth.browserProfile !== undefined ? { browserProfile: physical } : {}) };
-      const descriptor = await refusing(() => bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input) }, signal), binding, signal);
+      const peers = await continuityProfiles(input, auth);
+      signal?.throwIfAborted();
+      const descriptor = await refusing(() => bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input),
+        ...(peers ? { continuityPeers: peers } : {}) }, signal), binding, signal);
       signal?.throwIfAborted();
       if (!descriptor) return null;
       const runtime = daemonProxy(descriptor, fetch);
@@ -250,7 +261,9 @@ export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch =
         if (capabilities === null) return {};
         return describeNativeCatalogue(baseModels, profile, capabilities);
       }
-      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input) });
+      const peers = await continuityProfiles(input, auth);
+      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input),
+        ...(peers ? { continuityPeers: peers } : {}) });
       if (!descriptor) return {};
       return describeNativeCatalogue(nativeCatalog(descriptor.capabilities), auth.profile);
     },
