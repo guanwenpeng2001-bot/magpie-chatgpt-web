@@ -3,40 +3,24 @@ import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isCompaction } from './fallback.mjs';
+import { normalizeNativeTurnMetadata } from './turn-metadata.mjs';
+export { nativeTurnHeaders } from './turn-metadata.mjs';
 
 const paths = new Set(['/v1/responses', '/v1/responses/compact']);
 const forwardedNames = ['x-codex-turn-metadata', 'x-codex-beta-features', 'session_id', 'conversation_id'];
-
-export function nativeTurnHeaders(body, headers) {
-  const forwarded = new Headers(headers);
-  const metadata = body.client_metadata?.['x-codex-turn-metadata'];
-  if (metadata !== undefined) {
-    const json = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
-    // Headers requires ByteString. Escape UTF-16 code units (including both
-    // halves of emoji) so JSON.parse restores the exact canonical value.
-    forwarded.set('x-codex-turn-metadata', json.replace(/[\u007f-\uffff]/g,
-      char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')));
-  }
-  return forwarded;
-}
 
 export function compactionProxy({ port, controlToken }, fetchImpl = globalThis.fetch) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid compaction daemon port');
   return (body, headers, signal, path = '/v1/responses/compact') => {
     const endpoint = path.endsWith('/responses/compact') ? '/v1/responses/compact' : '/v1/responses';
-    const incoming = nativeTurnHeaders(body, headers);
+    const normalized = normalizeNativeTurnMetadata(body, headers);
+    const incoming = normalized.headers;
     const forwarded = new Headers({ 'content-type': 'application/json',
       accept: endpoint.endsWith('/compact') || body.stream !== true ? 'application/json' : 'text/event-stream' });
     for (const name of forwardedNames) if (incoming.has(name)) forwarded.set(name, incoming.get(name));
     forwarded.set('authorization', `Bearer ${controlToken}`);
-    // The reference gives this header precedence on /responses/compact. Keep it
-    // synchronized with canonical body metadata; fill the body only when absent.
-    const metadata = incoming.get('x-codex-turn-metadata');
-    if (body.client_metadata?.['x-codex-turn-metadata'] === undefined && metadata !== null) {
-      body = { ...body, client_metadata: { ...body.client_metadata, 'x-codex-turn-metadata': metadata } };
-    }
     return fetchImpl(`http://127.0.0.1:${port}${endpoint}`, {
-      method: 'POST', headers: forwarded, body: JSON.stringify(body), signal, redirect: 'error',
+      method: 'POST', headers: forwarded, body: JSON.stringify(normalized.body), signal, redirect: 'error',
     });
   };
 }

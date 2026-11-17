@@ -168,7 +168,9 @@ test('native Responses proxy streams unchanged, strips caller credentials and ca
   assert.equal(sent.redirect, 'error');
   assert.equal(sent.headers.get('cookie'), null);
   assert.equal(sent.headers.get('authorization'), `Bearer ${daemon.config.controlToken}`);
-  assert.deepEqual(JSON.parse(sent.body), body);
+  assert.deepEqual(JSON.parse(sent.body), { ...body,
+    client_metadata: { important: 'keep', 'x-codex-turn-metadata': 'fixture' } });
+  assert.deepEqual(body.client_metadata, { important: 'keep' });
 });
 
 test('concurrent start shares work, crash restarts with new pipe, stop cancels restarts', async t => {

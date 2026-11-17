@@ -14,6 +14,7 @@ import { compile } from './prompt.mjs';
 import { normalizeAssistantContent, ToolParser } from '../src/tool-emulation.mjs';
 import { prepareSubmissionReceipt } from '../src/usage/submission.mjs';
 import { usageProfile } from '../src/usage/store.mjs';
+import { browserProfileOf } from './browser-profile.mjs';
 
 const challengeText = new RegExp(shape.challengeCard, 'i');
 const receiptCall = async (receipt, method) => {
@@ -151,7 +152,7 @@ export class TurnDriver {
       const pendingChallenge = binding.pendingChallenge;
       const effectiveVisible = command.visibleTurns === true || Boolean(pendingChallenge);
       const backgroundTurn = command.visibleTurns !== true;
-      const result = await wait(this.browser.run(command.auth.profile, async context => {
+      const result = await wait(this.browser.run(browserProfileOf(command.auth), async context => {
         await wait(this.install(context));
         activeSignal.throwIfAborted();
         page = binding.page;
@@ -185,8 +186,8 @@ export class TurnDriver {
         };
         const returnToBackground = async () => {
           if (!backgroundTurn) return;
-          let hidden = await this.browser.setBackground(command.auth.profile, true, activeSignal);
-          if (!hidden) hidden = await this.browser.setBackground(command.auth.profile, true, activeSignal);
+          let hidden = await this.browser.setBackground(browserProfileOf(command.auth), true, activeSignal);
+          if (!hidden) hidden = await this.browser.setBackground(browserProfileOf(command.auth), true, activeSignal);
           if (!hidden) throw new BackendError('backendDown');
         };
         const recoverChallenge = async () => {
@@ -197,7 +198,7 @@ export class TurnDriver {
           challengeSeen = true;
           preservePage = true;
           rememberCheckpoint();
-          const revealed = await this.browser.setBackground(command.auth.profile, false, activeSignal);
+          const revealed = await this.browser.setBackground(browserProfileOf(command.auth), false, activeSignal);
           if (!revealed) throw new BackendError('backendDown');
           const budget = Math.max(0, Math.min(deadline - this.now(), this.challengeTimeout));
           if (!budget) throw new BackendError('verification');

@@ -311,7 +311,7 @@ for (const profileAlreadyLive of [true, false]) test(`cached stale commands reta
   const upstream = createServer((request, response) => {
     if (request.url === '/api/auth/session') {
       response.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `${live}; Path=/; HttpOnly` });
-      response.end(JSON.stringify({ accessToken: 'access', expires: '2099-01-01T00:00:00Z' }));
+      response.end(JSON.stringify({ accessToken: 'access', expires: '2099-01-01T00:00:00Z', user: { email: 'fixture@example.test' } }));
     } else {
       response.writeHead(403, { 'cf-mitigated': 'challenge' });
       response.end();
@@ -374,7 +374,7 @@ for (const arm of ['turn', 'following read']) test(`cached stale turn preserves 
   const upstream = createServer((request, response) => {
     if (request.url === '/api/auth/session') {
       response.writeHead(200, { 'Set-Cookie': `${live}; Path=/; HttpOnly` });
-      response.end(JSON.stringify({ accessToken: 'access', expires: '2099-01-01T00:00:00Z' }));
+      response.end(JSON.stringify({ accessToken: 'access', expires: '2099-01-01T00:00:00Z', user: { email: 'fixture@example.test' } }));
     } else {
       response.writeHead(request.headers.cookie === live ? 200 : 401);
       response.end(JSON.stringify({ models: [{ slug: 'auto', title: 'Auto' }] }));
@@ -439,7 +439,7 @@ test('session command renews over the read client without starting login', async
   const accessToken = crypto.randomUUID();
   const expires = Date.now() + 10 * 86400000;
   let logins = 0;
-  const server = harness({ loginFlow: async () => { logins++; }, readClient: () => ({ session: async () => ({ accessToken, expires: new Date(expires).toISOString() }) }) });
+  const server = harness({ loginFlow: async () => { logins++; }, readClient: () => ({ session: async () => ({ accessToken, expires: new Date(expires).toISOString(), user: { email: 'fixture@example.test' } }) }) });
   server.send({ id: 'renew', method: 'session', auth: { refresh: crypto.randomUUID(), profile: 'fixture' } });
   await server.until(frames => frames.some(frame => frame.id === 'renew' && frame.event === 'done'));
   assert.deepEqual(server.frames.find(frame => frame.id === 'renew' && frame.event === 'data').data, { access: accessToken, expires });

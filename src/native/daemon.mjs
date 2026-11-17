@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { nativeOptions as normalizeNativeOptions } from './models.mjs';
 import { CompactionService, compactionProxy } from './compaction.mjs';
 import { createFileBrokerDiagnostics } from './broker-diagnostics.mjs';
+import { normalizeNativeTurnMetadata } from './turn-metadata.mjs';
 
 export async function writePrivate(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -59,13 +60,14 @@ export function daemonProxy({ port, controlToken, compaction }, fetchImpl = glob
     },
     responses(body, headers, signal) {
       const forwarded = new Headers({ 'content-type': 'application/json', accept: 'text/event-stream' });
-      const incoming = new Headers(headers);
+      const normalized = normalizeNativeTurnMetadata(body, headers);
+      const incoming = normalized.headers;
       for (const name of ['x-codex-turn-metadata', 'x-codex-beta-features', 'session_id', 'conversation_id']) {
         if (incoming.has(name)) forwarded.set(name, incoming.get(name));
       }
       // The control credential belongs only to this account's loopback daemon.
       if (controlToken) forwarded.set('authorization', `Bearer ${controlToken}`);
-      return fetchImpl(`${base}/v1/responses`, { method: 'POST', headers: forwarded, body: JSON.stringify(body), signal, redirect: 'error' });
+      return fetchImpl(`${base}/v1/responses`, { method: 'POST', headers: forwarded, body: JSON.stringify(normalized.body), signal, redirect: 'error' });
     },
   };
 }

@@ -63,3 +63,24 @@ test('HTTP refusals and non-SSE responses stay unchanged', async () => {
     assert.equal(await preserveNativeVerification(response), response);
   }
 });
+
+for (const [type, code] of [['rate_limit_error', 'rate_limit_exceeded'], ['insufficient_quota', 'insufficient_quota']]) {
+  test(`empty Native ${code} allows host account rotation while retaining sign-in`, async () => {
+    const event = { type: 'response.failed', response: { output: [], retryable: false, error: { type, code, message: 'fixture limit', retry_after: 120 } } };
+    const upstream = stream([frame(created), frame(event)]);
+    const response = await preserveNativeVerification(upstream.response);
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get('x-magpie-sign-in'), 'kept');
+    assert.equal(response.headers.get('retry-after'), '120');
+    assert.equal(response.headers.has('x-should-retry'), false);
+    assert.equal((await response.json()).error.code, code);
+    assert.equal(upstream.cancelled, true);
+    for (const output of [{ type: 'response.output_text.delta', delta: 'partial' },
+      { type: 'response.output_item.added', item: { type: 'function_call' } }]) {
+      const bytes = frame(created) + frame(output) + frame(event);
+      const retained = await preserveNativeVerification(new Response(bytes, { headers: { 'content-type': 'text/event-stream' } }));
+      assert.equal(retained.status, 200);
+      assert.equal(await retained.text(), bytes);
+    }
+  });
+}

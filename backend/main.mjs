@@ -1,14 +1,86 @@
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
+import { isAbsolute, resolve } from 'node:path';
 import { BackendError, AccountGuard, publicError } from './guard.mjs';
 import { ReadClient, productionReadClient } from './http.mjs';
 import { LoginStates, createLoginFlow, sessionCredential, browserRead, DEFAULT_SIGNIN_TIMEOUT_MS, signinWindow } from './browser.mjs';
+import { browserProfileOf } from './browser-profile.mjs';
 import { TurnDriver } from './turn.mjs';
 import { ensureNative, hasNative, stopNative } from '../src/native/index.mjs';
 import { accountCapabilities } from '../src/native/models.mjs';
 import { readQuota } from './quota.mjs';
 import { usageProfile } from '../src/usage/store.mjs';
 import { runNativeSetup } from '../src/native/setup.mjs';
+
+// This is a presentation action, never a login/verification verdict. Keep one
+// owned page per profile, including when navigation fails or a caller retries.
+export function createNativeVerificationRecovery(driverFor, { now = Date.now } = {}) {
+  const entries = new Map();
+  const cooldown = 60_000;
+  const keyFor = command => {
+    if (typeof command.auth?.profile !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(command.auth.profile)
+        || typeof command.profileRoot !== 'string' || !isAbsolute(command.profileRoot) || command.profileRoot.includes('\0')) {
+      throw new BackendError('browserConfiguration');
+    }
+    const root = resolve(command.profileRoot);
+    return JSON.stringify([process.platform === 'win32' ? root.toLowerCase() : root, browserProfileOf(command.auth)]);
+  };
+  const open = entry => entry?.page && !entry.page.isClosed();
+  return {
+    visible(command) {
+      let key;
+      try { key = keyFor(command); } catch { return false; }
+      const entry = entries.get(key);
+      return !!(open(entry) && entry.shown);
+    },
+    async reveal(command, signal) {
+      signal?.throwIfAborted();
+      const key = keyFor(command);
+      const profile = browserProfileOf(command.auth);
+      let entry = entries.get(key);
+      if (entry?.work) return entry.work;
+      if (entry && now() - entry.attempted < cooldown) return { shown: !!(open(entry) && entry.shown) };
+      if (!entry) {
+        for (const [id, value] of entries) {
+          if (!value.work && !open(value) && now() - value.attempted >= cooldown) entries.delete(id);
+        }
+        if (entries.size >= 64) throw new BackendError('capacity');
+        entry = {};
+        entries.set(key, entry);
+      }
+      entry.attempted = now();
+      // No cookie import, model discovery, provisioning, or user-supplied URL.
+      // Reacquire only the backend supervisor for the original account profile.
+      entry.work = Promise.resolve().then(async () => {
+        signal?.throwIfAborted();
+        const browser = driverFor(command.profileRoot).browser;
+        return browser.run(profile, async context => {
+          signal?.throwIfAborted();
+          if (entry.context !== context || !open(entry)) {
+            entry.page = await context.newPage();
+            entry.context = context;
+            entry.shown = false;
+            entry.navigated = false;
+          }
+          signal?.throwIfAborted();
+          if (!await browser.setBackground(profile, false, signal)) throw new BackendError('backendDown');
+          signal?.throwIfAborted();
+          await entry.page.bringToFront();
+          entry.shown = true;
+          // A failed goto must not create a fresh tab on every retry. Leave the
+          // page for the user even on cancellation; it may already show a check.
+          if (!entry.navigated) {
+            entry.navigated = true;
+            await entry.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 10_000 });
+          }
+          signal?.throwIfAborted();
+          return { shown: true };
+        }, signal, { visibleTurns: !!(open(entry) && entry.shown), settleOnAbort: true });
+      }).finally(() => { entry.work = undefined; });
+      return entry.work;
+    },
+  };
+}
 
 export async function serve(input, output, { handlers = {}, close = async () => {}, timeout = 300_000, signinTimeout = DEFAULT_SIGNIN_TIMEOUT_MS, loginFlow = async () => 'failed', readClient = options => new ReadClient(options), turnDriver, nativeSetupRoot } = {}) {
   const turnDrivers = new Map();
@@ -24,6 +96,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     latestDriver = driver;
     return latestDriver;
   };
+  const nativeVerification = createNativeVerificationRecovery(driverFor);
   const pending = new Map();
   const clients = new Map();
   const guards = new Map();
@@ -67,7 +140,8 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     // Browser credentials rotate; a conversation belongs to the account/profile.
     // Legacy read-only callers without either still use credential isolation.
     const stable = command.auth?.profile || command.auth?.accountId
-      ? JSON.stringify([command.profileRoot ?? '', command.auth?.profile ?? '', command.auth?.accountId ?? ''])
+      ? JSON.stringify([command.profileRoot ?? '', command.auth?.profile ?? '', command.auth?.accountId ?? '',
+        command.auth?.profile || command.auth?.browserProfile ? browserProfileOf(command.auth) : ''])
       : session || cookie;
     const identity = createHash('sha256').update(stable).digest('hex');
     const key = createHash('sha256').update(identity).update('\0').update(cookie).update('\0').update(String(command.origin)).update('\0').update(String(command.auth?.access ?? '')).digest('hex');
@@ -76,7 +150,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
       const client = readClient({ ...(Object.hasOwn(command, 'origin') ? { origin: command.origin } : {}), cookie, access: command.auth?.access, guard,
         browserRoute: async (path, signal, origin) => {
           if (typeof command.auth?.profile !== 'string' || typeof command.profileRoot !== 'string') throw new BackendError('browserConfiguration');
-          return driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
+          return driverFor(command.profileRoot).browser.run(browserProfileOf(command.auth), async context => {
             const page = await context.newPage();
             const abort = () => { page.close().catch(() => {}); };
             signal.addEventListener('abort', abort, { once: true });
@@ -92,7 +166,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
               throw error;
             }
             finally { signal.removeEventListener('abort', abort); if (!verification) await page.close().catch(() => {}); }
-          }, signal, { auth: { ...command.auth, refresh: client.credential }, origin });
+          }, signal, { visibleTurns: nativeVerification.visible(command), auth: { ...command.auth, refresh: client.credential }, origin });
         },
       });
       const idle = [...clients].filter(([, entry]) => entry.refs === 0).sort((left, right) => left[1].used - right[1].used);
@@ -124,7 +198,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     return { client: entry.client, identity, release: () => { entry.refs--; entry.used = ++clientClock; } };
   };
   const loginPromises = new Map();
-  const startLogin = (account, profileRoot, proxy) => {
+  const startLogin = (account, profileRoot, proxy, preservePages) => {
     if (loginPromises.has(account)) return;
     if (loginPromises.size >= 64) throw new BackendError('backendDown');
     login.start(account);
@@ -142,7 +216,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     };
     controller.signal.addEventListener('abort', () => settle(), { once: true });
     entry.work = Promise.resolve().then(() => {
-      const options = { proxy };
+      const options = { proxy, preservePages: preservePages === true };
       if (typeof profileRoot === 'string' && profileRoot) options.browser = driverFor(profileRoot).browser;
       return loginFlow(account, controller.signal, profileRoot, options);
     }).then(settle, error => settle({ state: 'failed', error })).finally(() => {
@@ -156,6 +230,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
     const account = command.account ?? 'default';
     if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account)) throw new BackendError('protocol');
     switch (command.method) {
+      case 'nativeVerification': return nativeVerification.reveal(command, signal);
       case 'nativeProvision': {
         return runNativeSetup(command.auth, async onStage => {
           // A completed setup needs no new browser, login, download or remote
@@ -164,7 +239,7 @@ export async function serve(input, output, { handlers = {}, close = async () => 
           const { client, release } = clientFor(command);
           try {
             const capabilities = accountCapabilities(await client.models(signal));
-            return await driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
+            return await driverFor(command.profileRoot).browser.run(browserProfileOf(command.auth), async context => {
               const daemon = await ensureNative({ ...command.auth, context, capabilities }, { root: nativeSetupRoot, nativeOptions: command.nativeOptions, signal, onStage });
               return daemon && await daemon.health(signal);
             }, signal, { visibleTurns: true, settleOnAbort: true, auth: { ...command.auth, refresh: client.credential } });
@@ -177,10 +252,10 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         const { client, release } = clientFor(command);
         try {
           const capabilities = accountCapabilities(await client.models(signal));
-          return await driverFor(command.profileRoot).browser.run(command.auth.profile, async context => {
+          return await driverFor(command.profileRoot).browser.run(browserProfileOf(command.auth), async context => {
             const daemon = await ensureNative({ ...command.auth, context, capabilities }, { resumeOnly: command.method === 'nativeRuntime', nativeOptions: command.nativeOptions, signal });
             return daemon && await daemon.health(signal) ? daemon.descriptor() : null;
-          }, signal, { visibleTurns: command.method === 'nativeProvision', auth: { ...command.auth, refresh: client.credential } });
+          }, signal, { visibleTurns: nativeVerification.visible(command), auth: { ...command.auth, refresh: client.credential } });
         } finally { release(); }
       }
       case 'models': {
@@ -206,12 +281,13 @@ export async function serve(input, output, { handlers = {}, close = async () => 
         try {
           const session = await client.session(signal, { interactive: false });
           const credential = sessionCredential(session, session.refresh ?? command.auth.refresh, command.auth.profile);
-          return { access: credential.access, expires: credential.expires, ...(session.refresh ? { refresh: session.refresh } : {}) };
+          return { access: credential.access, expires: credential.expires, ...(session.refresh ? { refresh: session.refresh } : {}),
+            ...(command.auth.browserProfile !== undefined ? { browserProfile: browserProfileOf(command.auth) } : {}) };
         } finally { release(); }
       }
       case 'loginStatus': return login.status(account);
       case 'login': {
-        startLogin(account, command.profileRoot, command.proxy);
+        startLogin(account, command.profileRoot, command.proxy, command.preservePages);
         return { ok: true };
       }
       case 'logout': loginPromises.get(account)?.cancel(); loginPromises.delete(account); login.clear(account); return { ok: true };

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { cleanSetupResult, SETUP_RETRY } from '../native/setup.mjs';
 import { PROVIDER } from './config.mjs';
+import { browserProfileOf } from '../../backend/browser-profile.mjs';
 
 const valid = auth => auth?.type === 'oauth' && typeof auth.refresh === 'string' && auth.refresh.length > 0
   && /^[A-Za-z0-9_-]{1,64}$/.test(auth.profile ?? '');
@@ -55,7 +56,8 @@ export function nativeSetupMethod(env) {
       if (!original || typeof scope !== 'string' || saved[scope] && scope !== key) return unavailable();
       const current = async () => {
         const auth = (await accounts())[key];
-        if (!auth || auth.profile !== original.profile || auth.accountId !== original.accountId) throw new Error('Account changed');
+        if (!auth || auth.profile !== original.profile || auth.accountId !== original.accountId
+            || browserProfileOf(auth) !== browserProfileOf(original)) throw new Error('Account changed');
         return auth;
       };
       return { url: '', method: 'auto', instructions: 'Resuming Native setup for the selected saved account. Its ChatGPT sign-in is kept; OpenAI Platform may ask you to sign in.',

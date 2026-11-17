@@ -26,6 +26,71 @@ export function signinTimeoutWindow() {
 
 const claimLocks = new Map();
 const browserEndpoints = new WeakMap();
+const emailIdentity = value => {
+  if (typeof value !== 'string') return '';
+  const email = value.trim();
+  const at = email.indexOf('@');
+  return at > 0 && at < email.length - 1 && !/[\s\0]/.test(email) && email.indexOf('@', at + 1) < 0 ? email.toLowerCase() : '';
+};
+
+// Closing before newPage resolves still owns the eventual page. Do not memoize
+// an empty cleanup: cancellation must be prompt even if allocation is stalled.
+function newOwnedPage(context) {
+  let page, closing = false, closePromise;
+  const close = () => {
+    closing = true;
+    if (!page) return Promise.resolve();
+    return closePromise ??= Promise.resolve().then(() => page.close());
+  };
+  const ready = Promise.resolve().then(() => context.newPage()).then(async created => {
+    page = created;
+    if (closing) await close();
+    return created;
+  });
+  return { ready, close };
+}
+
+const sessionCookies = cookies => cookies.filter(cookie => /^(?:__Secure-)?next-auth\.session-token(?:\.\d+)?$/.test(cookie.name))
+  .map(cookie => `${cookie.name}=${cookie.value}`).sort().join('; ');
+const cookieFingerprint = value => createHash('sha256').update(value).digest('hex');
+// Align with the read-client's short catalogue lifetime, while cookie changes
+// revoke a proof immediately. Proofs and cookie digests stay in this process.
+const IDENTITY_TTL_MS = 60_000;
+
+async function readBrowserAccount(context, origin, signal) {
+  const site = new URL(origin);
+  if (!(site.origin === 'https://chatgpt.com' || (['http:', 'https:'].includes(site.protocol) && ['127.0.0.1', '[::1]'].includes(site.hostname)))
+      || site.pathname !== '/' || site.username || site.password || site.search || site.hash) throw new BackendError('protocol');
+  const bounded = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]);
+  bounded.throwIfAborted();
+  const owned = newOwnedPage(context);
+  let abort;
+  const interrupted = new Promise((_, reject) => {
+    abort = () => reject(bounded.reason);
+    bounded.addEventListener('abort', abort, { once: true });
+  });
+  const wait = work => Promise.race([interrupted, work]);
+  try {
+    const page = await wait(owned.ready);
+    bounded.throwIfAborted();
+    await wait(page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 10_000 }));
+    // A session response can rotate cookies. Recheck once so an identity read
+    // under A cannot authorize B's cookies installed while that read was pending.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = sessionCookies(await wait(context.cookies(site.origin)));
+      const result = await wait(browserRead(context, page, '/api/auth/session', site, bounded));
+      bounded.throwIfAborted();
+      const credential = sessionCredential(result.value, result.cookies);
+      if (before === result.cookies.split('; ').sort().join('; ')) {
+        return { identity: emailIdentity(credential.accountId), fingerprint: cookieFingerprint(before) };
+      }
+    }
+    throw new BackendError('binding');
+  } finally {
+    bounded.removeEventListener('abort', abort);
+    await owned.close();
+  }
+}
 // Only plugin-owned ordinary Chrome contexts have a reusable native CDP endpoint.
 export const browserEndpoint = context => browserEndpoints.get(context);
 
@@ -199,6 +264,8 @@ export async function setBrowserWindowBackground(context, background, savedBound
 
 export class BrowserSupervisor {
   #accounts = new Map();
+  #signingIn = new Map();
+  #identityRequired = new Set();
   #closed = false;
   constructor({ profileRoot, profile, launch, idleMilliseconds = 300_000, headless = true, channel = 'chrome' } = {}) {
     this.profileRoot = profileRoot;
@@ -225,7 +292,8 @@ export class BrowserSupervisor {
     }
     if (!entry) {
       entry = { users: 0, context: null, timer: null, crashed: new Set(), closed: false, stopping: false, headless, background,
-        windowBounds: new Map(), windowTransition: Promise.resolve(), credentials: credentialState ?? new Map() };
+        windowBounds: new Map(), windowTransition: Promise.resolve(), credentials: credentialState ?? new Map(),
+        identities: new Map(), identityChecks: new Map() };
       this.#accounts.set(account, entry);
       entry.starting = Promise.resolve().then(() => this.launch(this.profile ?? resolve(this.profileRoot, account), {
         ...this.options, headless, background,
@@ -277,11 +345,47 @@ export class BrowserSupervisor {
     if (!entry) return false;
     return this.#setBackground(entry, background, signal);
   }
-  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com', credentialState, settleOnAbort = false } = {}) {
+  async #assertAccount(entry, auth, origin, signal) {
+    const expected = emailIdentity(auth.accountId);
+    if (!expected) throw new BackendError('binding');
+    const key = new URL(origin).origin;
+    const fingerprint = cookieFingerprint(sessionCookies(await entry.context.cookies(key)));
+    signal?.throwIfAborted();
+    let proof = entry.identities.get(key);
+    if (!proof || proof.requestedIdentity !== expected || proof.fingerprint !== fingerprint || proof.expires <= Date.now()) {
+      entry.identities.delete(key);
+      let check = entry.identityChecks.get(key);
+      if (!check || check.fingerprint !== fingerprint) {
+        check = { fingerprint };
+        check.work = readBrowserAccount(entry.context, origin, signal).finally(() => {
+          if (entry.identityChecks.get(key) === check) entry.identityChecks.delete(key);
+        });
+        entry.identityChecks.set(key, check);
+      }
+      proof = { ...await check.work, requestedIdentity: expected, expires: Date.now() + IDENTITY_TTL_MS };
+      signal?.throwIfAborted();
+      entry.identities.set(key, proof);
+    }
+    if (proof.identity !== expected) throw new BackendError('binding');
+  }
+  async run(account, operation, signal, { visibleTurns, auth, origin = 'https://chatgpt.com', credentialState, settleOnAbort = false, signingIn = false } = {}) {
+    signal?.throwIfAborted();
+    const signInOwner = signingIn ? {} : undefined;
+    if (signingIn) {
+      if (this.#signingIn.has(account) || this.#accounts.get(account)?.users) throw new BackendError('binding');
+      this.#signingIn.set(account, signInOwner);
+      this.#identityRequired.add(account);
+    } else if (auth !== undefined && this.#signingIn.has(account)) throw new BackendError('binding');
+    if (auth !== undefined && Object.hasOwn(auth, 'accountId')) this.#identityRequired.add(account);
+    try {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
       const background = visibleTurns !== true;
       const headless = this.options.headless && background;
+      const guarded = auth !== undefined && (Object.hasOwn(auth, 'accountId') || this.#identityRequired.has(account));
+      // Do not replace a user's context merely to check an account mismatch.
+      const prior = this.#accounts.get(account);
+      if (guarded && prior && prior.headless !== headless) throw new BackendError('binding');
       const entry = await this.#ensure(account, headless, background, credentialState);
       entry.users++;
       let rejectCrash;
@@ -289,13 +393,21 @@ export class BrowserSupervisor {
       let operationWork;
       try {
         const context = await entry.starting;
+        if (auth !== undefined && this.#signingIn.has(account)) throw new BackendError('binding');
+        if (signingIn) { entry.credentials.clear(); entry.identities.clear(); }
+        // Identity proof precedes presentation too. Never overwrite this
+        // browser with stale host cookies to force an account to match.
+        if (guarded) await this.#assertAccount(entry, auth, origin, signal);
         if (entry.background !== background) {
           if (entry.users > 1) throw new Error('An active operation holds the browser context in the other mode. Wait for it to finish before switching modes.');
           const moved = await this.#setBackground(entry, background, signal);
           if (!moved) {
+            if (guarded) throw new BackendError('backendDown');
             const credentials = entry.credentials;
             await this.closeAccount(account);
-            return await this.run(account, operation, signal, { visibleTurns, auth, origin, credentialState: credentials, settleOnAbort });
+            // Re-enter only after releasing this sign-in admission marker.
+            if (signingIn) this.#signingIn.delete(account);
+            return await this.run(account, operation, signal, { visibleTurns, auth, origin, credentialState: credentials, settleOnAbort, signingIn });
           }
         }
         signal?.throwIfAborted();
@@ -308,7 +420,7 @@ export class BrowserSupervisor {
             signal?.addEventListener('abort', onAbort, { once: true });
           }),
           operationWork = Promise.resolve().then(async () => {
-            if (auth !== undefined) {
+            if (auth !== undefined && !guarded) {
               const key = new URL(origin).origin;
               if (!entry.credentials.has(key) || entry.credentials.get(key) !== auth.refresh) {
                 await reconcileSessionCookies(context, auth.refresh, origin);
@@ -320,7 +432,7 @@ export class BrowserSupervisor {
           }),
         ]);
       } catch (error) {
-        if (attempt || !entry.closed || entry.stopping || this.#closed || signal?.aborted) throw error;
+        if (signingIn || attempt || !entry.closed || entry.stopping || this.#closed || signal?.aborted) throw error;
       } finally {
         entry.crashed.delete(rejectCrash);
         signal?.removeEventListener('abort', onAbort);
@@ -335,6 +447,7 @@ export class BrowserSupervisor {
         }
       }
     }
+    } finally { if (signingIn && this.#signingIn.get(account) === signInOwner) this.#signingIn.delete(account); }
   }
   async closeAccount(account) {
     const entry = this.#accounts.get(account);
@@ -391,8 +504,9 @@ class BrowserComponentError extends BackendError {
 
 export function sessionCredential(session, refresh, profile) {
   const expires = Date.parse(session?.expires);
-  if (typeof session?.accessToken !== 'string' || !session.accessToken.trim() || !Number.isFinite(expires) || expires <= Date.now()) throw new BackendError('expired');
-  return { type: 'oauth', refresh, access: session.accessToken, expires, accountId: typeof session.user?.email === 'string' ? session.user.email : 'chatgpt-web', profile, persona: 'chatgpt-paid' };
+  if (typeof session?.accessToken !== 'string' || !session.accessToken.trim() || !Number.isFinite(expires) || expires <= Date.now()
+      || !emailIdentity(session?.user?.email)) throw new BackendError('expired');
+  return { type: 'oauth', refresh, access: session.accessToken, expires, accountId: session.user.email.trim(), profile, persona: 'chatgpt-paid' };
 }
 
 export async function findChromeExecutable(candidates) {
@@ -518,12 +632,14 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
     return await button.count() > 0 && await button.first().isVisible();
   },
 } = {}) {
-  return async (account, signal, profileRoot, { proxy, browser: sharedBrowser } = {}) => {
+  return async (account, signal, profileRoot, { proxy, browser: sharedBrowser, preservePages = false } = {}) => {
     let owned;
+    let ownedPage;
     let closed = false;
     let keepContext = false;
     let closePromise;
-    const close = () => closePromise ??= Promise.resolve().then(() => sharedBrowser ? sharedBrowser.closeAccount(account) : owned?.close());
+    const close = () => sharedBrowser && preservePages ? ownedPage?.close() ?? Promise.resolve()
+      : closePromise ??= Promise.resolve().then(() => sharedBrowser ? sharedBrowser.closeAccount(account) : owned?.close());
     let interrupt;
     const interrupted = new Promise((resolve, reject) => { interrupt = reject; });
     interrupted.catch(() => {});
@@ -537,8 +653,16 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
         signal?.throwIfAborted();
         let page;
         try {
-          for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
-          page = context.pages()[0] ?? await wait(context.newPage());
+          if (preservePages) {
+            ownedPage = newOwnedPage(context);
+            page = await wait(ownedPage.ready);
+          }
+          else {
+            for (const restored of context.pages()) if (restored.url() !== 'about:blank') await wait(restored.goto('about:blank'));
+            page = context.pages()[0] ?? await wait(context.newPage());
+          }
+          signal?.throwIfAborted();
+          if (closed) throw new BackendError('browserClosed');
           await wait(page.goto(origin));
         } catch (error) {
           throw new Error('The sign-in page could not be loaded. Check the network/proxy and retry sign-in.', { cause: error });
@@ -551,8 +675,9 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
               const result = await wait(browserRead(context, page, '/api/auth/session', origin, signal));
               signal?.throwIfAborted();
               if (closed || page.isClosed()) return { state: 'cancelled' };
+              const credential = sessionCredential(result.value, result.cookies, account);
               keepContext = Boolean(sharedBrowser);
-              return { state: 'signed-in', credential: sessionCredential(result.value, result.cookies, account) };
+              return { state: 'signed-in', credential };
             }
           }
           if (!closed && !page.isClosed()) await wait(delay(pollMilliseconds, undefined, { signal }));
@@ -567,7 +692,7 @@ export function createLoginFlow({ launch = launchSignInBrowser, origin = 'https:
     try {
       if (typeof account !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(account) || typeof profileRoot !== 'string' || !profileRoot) throw new BackendError('browserConfiguration');
       signal?.throwIfAborted();
-      if (sharedBrowser) return await sharedBrowser.run(account, run, signal, { visibleTurns: true });
+      if (sharedBrowser) return await sharedBrowser.run(account, run, signal, { visibleTurns: true, signingIn: true, settleOnAbort: true });
       owned = await launch(resolve(profileRoot, account), signal, { proxy });
       return await run(owned.context);
     } catch (error) {

@@ -1,5 +1,5 @@
 // Capture the canonical local Codex request before Magpie fits it to a vendor.
-// Snapshots are memory-only, bounded, account-scoped and revoked on completion.
+// Snapshots are memory-only, bounded, route-scoped and revoked on completion.
 import { createHash, randomBytes } from 'node:crypto';
 
 const PROVIDER = 'chatgpt-web';
@@ -102,7 +102,8 @@ export function restore(body, profile, provider = PROVIDER, { headerEffort } = {
   const match = record && routePattern.exec(record.route);
   if (!record || !match || checked?.nonce !== nonce
       || ![provider, provider + '-plugin'].includes(record.provider) || checked.provider !== record.provider
-      || checked.route !== record.route || match[1] !== profile || body.model !== record.route) {
+      || checked.route !== record.route || (match[1] !== profile && match[1] !== 'auto') || body.model !== record.route
+      || typeof profile !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(profile)) {
     throw new Error('Native request account or routing proof is invalid');
   }
   // Only a missing canonical effort permits the provider's effort header to
@@ -114,7 +115,9 @@ export function restore(body, profile, provider = PROVIDER, { headerEffort } = {
   // Magpie can translate protocols, merge messages, lift additional_tools,
   // rewrite tool_search and cache keys, or mask local paths. Item tickets cannot
   // survive those transforms. Forward the exact request captured at the trusted
-  // local entry, bound to this account by the nonce + onProvider route proof.
+  // local entry, bound to the selected route by nonce + onProvider proof. An
+  // explicit native/auto route permits the host to try another eligible account
+  // with this identical request. A pinned route never grants that permission.
   // Never infer another pending request when proof was masked or lost.
   const snapshot = structuredClone(record.snapshot);
   for (const key of Object.keys(body)) delete body[key];

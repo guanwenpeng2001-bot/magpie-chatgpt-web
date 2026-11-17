@@ -452,7 +452,8 @@ test('native catalogue aligns 18 native-capable or explicit fallback rows with 1
   const textKeys = keys.filter(key => !key.startsWith('native/'));
   assert.equal(textKeys.length, 18);
   assert.equal(nativeKeys.length, 18);
-  assert.equal(keys.length, 36);
+  assert.equal(keys.length, 38);
+  assert.deepEqual(keys.filter(key => key.startsWith('native/auto/')), ['native/auto/gpt-5-6', 'native/auto/gpt-6']);
   assert.deepEqual(nativeKeys.map(key => key.slice(`native/${auth.profile}/`.length)), textKeys);
   assert.deepEqual(Object.keys(allModels[`native/${auth.profile}/gpt-6`].variants), ['low', 'medium', 'high']);
   assert.deepEqual(Object.keys(allModels['gpt-6'].variants), ['low', 'medium', 'high', 'xhigh', 'max']);
@@ -463,7 +464,8 @@ test('native catalogue aligns 18 native-capable or explicit fallback rows with 1
     assert.equal(descriptor.api.url, 'http://127.0.0.1:1/v1');
     assert.deepEqual(descriptor.provider, { npm: '@ai-sdk/openai', api: descriptor.api.url });
     if (['gpt-6', 'gpt-5-6'].includes(slug)) {
-      assert.match(descriptor.name, /\(Native tools\)$/);
+      assert.match(descriptor.name, /\(Native tools\) — Pinned account$/);
+      assert.equal(allModels[`native/auto/${slug}`].api.id, `native/auto/${slug}`);
       assert.equal(descriptor.capabilities.toolcall, true);
       assert.equal(descriptor.limit.context, 35556);
     } else {

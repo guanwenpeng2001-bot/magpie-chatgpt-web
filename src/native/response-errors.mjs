@@ -1,7 +1,7 @@
 // The native daemon sends response.created before checking the browser. Once
 // that HTTP 200 reaches Magpie, its stream decoder turns response.failed into
-// 502. Hold only the empty prelude so a verification refusal keeps its HTTP
-// status. Never buffer or replay a turn after any output/tool event.
+// 502. Hold only the empty prelude so verification and quota refusals keep their
+// HTTP status. Never buffer or replay a turn after any output/tool event.
 export async function preserveNativeVerification(response, signal) {
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) return response;
   const reader = response.body.getReader();
@@ -39,6 +39,19 @@ export async function preserveNativeVerification(response, signal) {
             status: 403,
             headers: { 'cache-control': 'no-store', 'x-magpie-sign-in': 'kept', 'x-should-retry': 'false' },
           });
+        }
+        if (event?.type === 'response.failed' && Array.isArray(event.response?.output) && !event.response.output.length
+            && ((error?.type === 'rate_limit_error' && error.code === 'rate_limit_exceeded')
+              || (error?.type === 'insufficient_quota' && error.code === 'insufficient_quota'))) {
+          await reader.cancel();
+          reader.releaseLock();
+          // This account rests; the host may choose another eligible account.
+          // A quota refusal never expires the saved browser sign-in.
+          const retry = Number(error.retry_after ?? error.retryAfter);
+          const seconds = Number.isFinite(retry) && retry > 0 ? Math.min(604800, Math.ceil(retry)) : undefined;
+          return Response.json({ error: { ...error, status: 429 } }, { status: 429,
+            headers: { 'cache-control': 'no-store', 'x-magpie-sign-in': 'kept',
+              ...(seconds === undefined ? {} : { 'retry-after': String(seconds) }) } });
         }
         if (!['response.created', 'response.in_progress'].includes(event?.type)
             || !Array.isArray(event.response?.output) || event.response.output.length) break scan;

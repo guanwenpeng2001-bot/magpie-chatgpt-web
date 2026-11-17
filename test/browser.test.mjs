@@ -408,7 +408,7 @@ test('TurnDriver reconciles the command credential before creating a turn page',
         guard, get credential() { return credential; },
         session: async () => {
           credential = '__Secure-next-auth.session-token=rotated';
-          return { accessToken: 'access', expires: '2099-01-01T00:00:00Z' };
+          return { accessToken: 'access', expires: '2099-01-01T00:00:00Z', user: { email: 'fixture@example.test' } };
         },
       }),
     });

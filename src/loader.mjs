@@ -42,7 +42,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
             // Check only the selected model/account before restoration. Vendor
             // reasoning and compaction markers cannot select the native endpoint.
             const route = nativeRoute(request.model);
-            if (route && route.profile !== current.profile) throw new BackendError('invalidRequest');
+            if (route && route.profile !== 'auto' && route.profile !== current.profile) throw new BackendError('invalidRequest');
             // Any proof marker must validate, even with native disabled or an
             // unsupported route. Partial/legacy proof is not an unproven turn.
             const hasProof = [NONCE, CHECKED].some(key => Object.hasOwn(request.client_metadata ?? {}, key))
@@ -65,7 +65,7 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                 let runtime;
                 try { runtime = await native.runtime(current, signal); } catch (error) {
                   // A known account refusal is not a daemon startup outage.
-                  if (error instanceof BackendError && ['verification', 'expired', 'cooldown'].includes(error.code)) throw error;
+                  if (error instanceof BackendError && ['verification', 'expired', 'cooldown', 'binding'].includes(error.code)) throw error;
                   /* use text when startup failed */
                 }
                 // Cancellation is not a startup failure eligible for fallback.
