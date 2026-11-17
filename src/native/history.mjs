@@ -198,14 +198,60 @@ export async function dispatchNativeHistory(channel, wireName, args, freeform, {
 export function patchNativeHistory(source) {
   // Self-contained: runtime embeds patchNativeHistory.toString(), and these
   // helpers run only in the checksum-pinned bundle's lexical scope.
+  function magpieVerifyHistoryPreTurn(request, options, source) {
+    const metadata = Zt(request);
+    if (metadata?.request_kind !== 'compaction' || metadata.compaction?.trigger !== 'auto'
+      || metadata.compaction.phase !== 'pre_turn' || !source.turnId || source.turnId === options.turnId) throw Error('Missing canonical pre-turn history boundary');
+    const input = request._rawBody?.input;
+    if (!Array.isArray(input)) throw Error('Missing canonical pre-turn history input');
+    const sources = input.filter(item => item?.type === 'message' && item.role === 'user' && $l(item, source));
+    const environments = input.filter(item => item && zn(item));
+    if (sources.length !== 1 || environments.length !== 1) throw Error('Ambiguous canonical pre-turn history source');
+    const environment = environments[0], environmentTurn = Se(environment);
+    if (typeof environment.id !== 'string' || !environment.id || !environmentTurn
+      || environmentTurn === options.turnId || environmentTurn === source.turnId) throw Error('Missing canonical pre-turn environment source');
+    // Both exact messages must precede this current task_started in the same
+    // authenticated rollout. tg retains path, thread, latest-context and policy
+    // validation; rT (inside tg) authenticates the original message contents.
+    const proof = tg({ ...options, compactionSourceTurnId: environmentTurn,
+      historicalEnvironmentMessages: [environment, sources[0]].map(item => ({ id: item.id, content: item.content })) });
+    if (!proof) throw Error('Missing canonical pre-turn history rollout');
+    const descriptor = Kf(proof.rolloutPath, 'r');
+    try {
+      const size = Jf(descriptor).size;
+      oT(tT(descriptor, size), options.lineage);
+      const context = qu(descriptor, size, 'turn_context');
+      const current = qu(descriptor, size, 'event_msg', item => item?.type === 'task_started');
+      const started = qu(descriptor, size, 'event_msg', item => item?.type === 'task_started' && item.turn_id === source.turnId);
+      const original = id => qu(descriptor, size, 'response_item', item => item?.id === id);
+      const canonicalEnvironment = original(environment.id), canonicalSource = original(source.itemId);
+      if (context?.turn_id !== environmentTurn || current?.turn_id !== options.turnId || !started
+        || canonicalEnvironment?.type !== 'message' || canonicalEnvironment.role !== 'user' || !zn(canonicalEnvironment)
+        || !$l(canonicalEnvironment, { itemId: environment.id, turnId: environmentTurn, content: environment.content })
+        || canonicalSource?.type !== 'message' || canonicalSource.role !== 'user' || !$l(canonicalSource, source)) throw Error('Canonical pre-turn history source ownership mismatch');
+    } finally { Vf(descriptor); }
+    // Parse the authenticated XML only for conflict detection. Authority and the
+    // returned environment come from the canonical turn_context, never the input.
+    if (wT(cs(request, us(environment)), proof.environment).length) throw Error('Pre-turn history environment conflicts with canonical rollout');
+    return proof.environment;
+  }
   function magpieVerifyHistoryCompaction(request, resolver) {
     const identity = ue(request), lineage = Zh(request) ?? Xh(request);
     if (!request._compactionRequest || !lineage || !identity.threadId || !identity.turnId
       || lineage.threadId !== identity.threadId || !Array.isArray(resolver.codexHomes) || !resolver.codexHomes.length) throw Error('Missing current native history proof');
-    const sourceTurn = jn(request).turnId;
-    const proof = tg({ codexHome: resolver.codexHomes[0], additionalCodexHomes: resolver.codexHomes.slice(1),
+    const source = jn(request), sourceTurn = source.turnId;
+    const options = { codexHome: resolver.codexHomes[0], additionalCodexHomes: resolver.codexHomes.slice(1),
       ...(resolver.sqliteHome ? { sqliteHome: resolver.sqliteHome } : {}), lineage, turnId: identity.turnId,
-      ...(sourceTurn ? { compactionSourceTurnId: sourceTurn } : {}), tools: request.context.tools });
+      ...(sourceTurn ? { compactionSourceTurnId: sourceTurn } : {}), tools: request.context.tools };
+    let proof;
+    try { proof = tg(options); }
+    catch (cause) {
+      // Only the pinned current/source-turn mismatch enters this narrow recovery.
+      // Corrupt/ambiguous rollouts and permission errors never fall back.
+      if (!['Codex has no canonical rollout for the requested current turn',
+        'Latest Codex rollout turn context does not belong to the requested turn'].includes(cause?.message)) throw cause;
+      return magpieVerifyHistoryPreTurn(request, options, source);
+    }
     if (!proof) throw Error('Missing canonical history rollout');
     const environment = resolver.resolve(request);
     if (wT({ environment, statesNetworkAccess: true }, proof.environment).length) throw Error('History environment conflicts with canonical rollout');
@@ -221,5 +267,5 @@ export function patchNativeHistory(source) {
   ];
   for (const [index, [before]] of edits.entries()) if (source.split(before).length !== 2) throw new Error('Native history anchor mismatch: ' + index);
   for (const [before, after] of edits) source = source.replace(before, () => after);
-  return source + '\n' + magpieVerifyHistoryCompaction.toString() + '\n';
+  return source + '\n' + magpieVerifyHistoryPreTurn.toString() + '\n' + magpieVerifyHistoryCompaction.toString() + '\n';
 }

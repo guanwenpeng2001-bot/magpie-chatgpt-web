@@ -37,7 +37,7 @@ Compared with `codex-chatgpt-web` v6.1.18; this is an implementation comparison,
 | Feature | This plugin |
 | --- | --- |
 | Temporary / ordinary Chat | Ordinary text Chat requires Temporary Chat. `native-temporary-chats` defaults to true; disable it for saved ordinary native chats. Restart Magpie after changing the option. Work and Images create saved tasks/chats. |
-| Bigger Context | `native-bigger-context` is off by default. It adds two dedicated Sol entries. On Pro-capable accounts, both Sol entries and Pro selectors retain baseline limits after failed large-window retention tests; the Sol entries no longer carry a Bigger Context label. Other capability tiers remain experimental and need separate verification. Pro selection does not require this option. |
+| Bigger Context | `native-bigger-context` is off by default. It adds two dedicated Sol entries, which retain their guarded budget on Pro-capable accounts. Pro automatically uses its separate 400K total / 256K input allocation and does not require this option. Other capability tiers remain experimental and need separate verification. |
 | Native platforms | Pinned native installation is Windows x64 only. |
 | Continuation checkpoints | Atomic AES-256-GCM persistence bound to the account directory; 256-entry LRU, 32 MiB serialized plaintext limit. Restarts recover committed checkpoints with source and metadata validation. Previously lost checkpoints cannot be recreated. Compaction/checkpoint text fallback fails closed with HTTP 503. |
 | Native model coverage | Only supported daemon models run native tools. Other entries use the exact text model with a Text fallback label, or are marked Native unavailable. A `native/` ID alone does not imply native tool support. |

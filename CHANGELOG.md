@@ -9,6 +9,7 @@
 - Separate the official Pro total window from the usable input budget and automatic compaction target. Production maximum-input acceptance remains under test; historical failed large-context probes remain documented rather than silently dropping records.
 - Fix cancelled startup before the bridge call and preserve typed refusals. Final installed, continuity and release acceptance results are tracked in [0.5.8 verification](docs/verification-0.5.8.md).
 - Keep Native metadata diagnostics on stderr. Compaction executes the same helper inside the backend, where stdout is the Bridge protocol; writing logs there terminated the backend and reset the HTTP connection. A real child-process control reproduces the reset with stdout and verifies repeated compaction plus later RPCs with stderr.
+- Authenticate automatic pre-turn compaction after interrupted resumes, before Codex writes a new turn_context. Verify exact canonical environment/source messages, the latest task_started and stored permissions; preserve archive writes and reject forged, stale or conflicting proof. Preserve typed Native compaction errors and their retry/sign-in headers instead of converting them into generic 502 retries.
 
 ## 0.5.7 — 2026-11-18
 

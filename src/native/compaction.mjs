@@ -84,7 +84,7 @@ export class CompactionService {
       controller.signal.throwIfAborted();
       const response = await compactionProxy(this.owner.config, this.owner.fetch)(body, req.headers, controller.signal, req.url);
       const headers = {};
-      for (const name of ['content-type', 'cache-control', 'retry-after', 'x-request-id']) {
+      for (const name of ['content-type', 'cache-control', 'retry-after', 'x-request-id', 'x-should-retry', 'x-magpie-sign-in']) {
         if (response.headers.has(name)) headers[name] = response.headers.get(name);
       }
       res.writeHead(response.status, headers);

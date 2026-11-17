@@ -15,6 +15,7 @@ import { patchNativeHistory } from './history.mjs';
 import { nativeProWindowEnabled, nativeProWindowPolicy, patchNativeProWindow } from './pro-window.mjs';
 import { patchNativeModelControls, nativeDisabledProRow, nativeBoundProTooltip, nativeProQuotaReason, nativeProLockEvidence } from './model-controls.mjs';
 import { patchNativeAccountContinuity } from './account-continuity.mjs';
+import { patchNativeCompactionErrors } from './compaction-errors.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
 export const RELEASES = Object.freeze([
@@ -343,6 +344,7 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     contents = (${patchNativeModelControls.toString()})(contents,
       [${[nativeDisabledProRow, nativeBoundProTooltip, nativeProQuotaReason, nativeProLockEvidence].map(fn => fn.toString()).join(',')}]);
     contents = (${patchNativeAccountContinuity.toString()})(contents);
+    contents = (${patchNativeCompactionErrors.toString()})(contents);
     return { contents, loader: 'js' };
   });
 } });

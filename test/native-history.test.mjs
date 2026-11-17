@@ -275,7 +275,7 @@ async function runPinned(t, suite) {
     if(archiveStart<0||archiveEnd<archiveStart)throw Error('Missing actual archive boundary');
     const archive=contents.slice(archiveStart,archiveEnd);
     return {contents:contents.replace(${JSON.stringify(startup)},'')+
-      '\\nexport { dn as Broker, mt as wireName, qv as mcpResult, Vu as EnvironmentStore, Fn as parseRequest, ue as identity, q as AdapterError, magpieVerifyHistoryCompaction as verifyCompaction };'+
+      '\\nexport { dn as Broker, mt as wireName, qv as mcpResult, Vu as EnvironmentStore, Fn as parseRequest, ue as identity, q as AdapterError, jn as compactionSource, tg as rolloutProof, Xh as rootLineage, Ls as responseRequest, Cs as Worker, vs as close, magpieVerifyHistoryCompaction as verifyCompaction };'+
       '\\nexport async function archiveBoundary(f,D,m,entered){'+archive+';entered?.()}',loader:'js'};`);
   const fixture = `import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
     import {randomUUID} from 'node:crypto';import {join,dirname} from 'node:path';
@@ -456,5 +456,106 @@ test('pinned tg proof captures last compaction tool result, rejects stale/foreig
     await assert.rejects(native.archiveBoundary(ordinary, environment, resolver, () => { entered++; }), error => error instanceof native.AdapterError
       && error.code === 'history_archive_unavailable' && error.status === 409 && error.retryable === false);
     assert.equal(entered, 1);
+  });
+});
+
+test('pinned pre-turn compaction authenticates resumed source messages before a new turn_context exists', pinned, async t => {
+  await runPinned(t, async (native, home) => {
+    const thread = randomUUID(), contextTurn = randomUUID(), resumeA = randomUUID(), resumeB = randomUUID(), compactTurn = randomUUID();
+    const cwd = join(home, 'workspace'); await mkdir(cwd);
+    const message = (id, text, turn, kind = 'user.text') => ({ type: 'message', role: 'user', id,
+      content: [{ type: 'input_text', text }], internal_chat_message_metadata_passthrough: { turn_id: turn, content_item_kinds: [kind] } });
+    const environment = message('environment', `<environment_context><cwd>${cwd}</cwd><filesystem><workspace_roots><root>${cwd}</root></workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile></filesystem></environment_context>`, contextTurn, 'environments.environment_context');
+    const original = message('original', 'Read the synthetic command samples in order.', contextTurn);
+    const firstResume = message('resume-a', 'Continue the retained synthetic task.', resumeA);
+    const latestResume = message('resume-b', 'Continue after the interrupted pre-sampling compaction.', resumeB);
+    const result = { type: 'function_call_output', call_id: 'synthetic-command', output: 'EARLY_COMMAND_ORIGINAL_UNCHANGED' };
+    const start = turn => ({ type: 'event_msg', payload: { type: 'task_started', turn_id: turn } });
+    const item = value => ({ type: 'response_item', payload: value });
+    const session = { type: 'session_meta', payload: { id: thread, source: 'exec', runtime_workspace_roots: [cwd] } };
+    const context = { type: 'turn_context', payload: { turn_id: contextTurn, cwd,
+      approval_policy: 'never', permission_profile: { type: 'disabled' }, sandbox_policy: { type: 'danger-full-access' } } };
+    const rows = [session, start(contextTurn), item(environment), context, item(original),
+      item({ type: 'function_call', call_id: result.call_id, name: 'offline_command', arguments: '{}' }), item(result),
+      start(resumeA), item(firstResume), start(resumeB), item(latestResume), start(compactTurn)];
+    const rollout = join(home, 'sessions', '2026', '11', '18', `rollout-2026-11-18T00-00-00-${thread}.jsonl`);
+    await mkdir(dirname(rollout), { recursive: true });
+    const save = values => writeFile(rollout, values.map(JSON.stringify).join('\n') + '\n'); await save(rows);
+    const metadata = { thread_id: thread, turn_id: compactTurn, agent_name: '/root', request_kind: 'compaction',
+      sandbox_mode: 'danger-full-access', compaction: { trigger: 'auto', phase: 'pre_turn', reason: 'context_limit',
+        implementation: 'responses_compaction_v2', strategy: 'memento' } };
+    const body = { model: 'chatgpt-web/gpt-6-pro', reasoning: { effort: 'max' }, stream: false, tools: [],
+      client_metadata: { 'x-codex-turn-metadata': JSON.stringify(metadata) },
+      input: [...rows.filter(row => row.type === 'response_item').map(row => row.payload), { type: 'compaction_trigger' }] };
+    const parsed = value => native.parseRequest(structuredClone(value ?? body));
+    const resolver = () => new native.EnvironmentStore(undefined, Date.now, home, undefined, []);
+    const request = parsed(), source = native.compactionSource(request);
+    assert.equal(source.turnId, resumeB); assert.equal(request._compactionRequest, true);
+    assert.throws(() => native.rolloutProof({ codexHome: home, lineage: native.rootLineage(request),
+      turnId: compactTurn, compactionSourceTurnId: source.turnId }), /no canonical rollout for the requested current turn/,
+    'the original failure is tg source scope, before resolver.resolve or wT');
+    assert.throws(() => resolver().resolve(request), /no canonical rollout for the requested current turn/);
+    const verified = native.verifyCompaction(request, resolver());
+    assert.equal(verified.cwd, cwd); assert.deepEqual(verified.roots, [cwd]);
+    assert.equal(verified.sandboxPolicy.type, 'dangerFullAccess');
+    process.env.MAGPIE_NATIVE_CHECKPOINT_HOME = join(home, 'owner');
+    const before = structuredClone(request);
+    let entered = 0;
+    await native.archiveBoundary(request, undefined, resolver(), () => entered++);
+    assert.equal(entered, 1); assert.deepEqual(request, before);
+    const archive = createHistoryStore(join(home, 'owner', 'history-v1'));
+    assert.equal((await archive.search(thread, 'EARLY_COMMAND_ORIGINAL_UNCHANGED')).length, 1);
+    const historyPath = join(home, 'owner', 'history-v1', 'history', thread + '.bin'), durable = await readFile(historyPath);
+    const mutations = [
+      ['invented source content', data => { data.input.find(value => value.id === 'resume-b').content[0].text = 'FORGED_SOURCE'; }],
+      ['unissued source id', data => { data.input.find(value => value.id === 'resume-b').id = 'not-on-disk'; }],
+      ['forged source attribution', data => { data.input.find(value => value.id === 'resume-b').internal_chat_message_metadata_passthrough.turn_id = resumeA; }],
+      ['duplicate source', data => { data.input.push(structuredClone(latestResume)); }],
+      ['mid-turn', (_data, _rows, meta) => { meta.compaction.phase = 'mid_turn'; }],
+      ['manual compaction', (_data, _rows, meta) => { meta.compaction.trigger = 'manual'; }],
+      ['foreign thread', (_data, _rows, meta) => { meta.thread_id = randomUUID(); }],
+      ['foreign session metadata', (_data, values) => { values[0].payload.id = randomUUID(); }],
+      ['missing current boundary', (_data, values) => { values.pop(); }],
+      ['stale current boundary', (_data, values) => { values.push(start(randomUUID())); }],
+      ['missing resumed source boundary', (_data, values) => { values.splice(values.findIndex(row => row.type === 'event_msg' && row.payload.turn_id === resumeB), 1); }],
+      ['source after current boundary', (_data, values) => { const index = values.findIndex(row => row.payload.id === 'resume-b'); values.push(...values.splice(index, 1)); }],
+      ['canonical source attribution changed', (_data, values) => { values.find(row => row.payload.id === 'resume-b').payload.internal_chat_message_metadata_passthrough.turn_id = contextTurn; }],
+      ['canonical environment attribution changed', (_data, values) => { values.find(row => row.payload.id === 'environment').payload.internal_chat_message_metadata_passthrough.turn_id = resumeA; }],
+      ['newer unrelated context', (_data, values) => { values.push({ ...context, payload: { ...context.payload, turn_id: randomUUID() } }); }],
+      ['environment permissions conflict', (data, values) => {
+        const changed = structuredClone(environment);
+        changed.content[0].text = changed.content[0].text.replace('<permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile>', '<sandbox_mode>read-only</sandbox_mode>');
+        data.input[0] = changed; values.find(row => row.payload.id === 'environment').payload = changed;
+      }],
+    ];
+    for (const [name, mutate] of mutations) {
+      const data = structuredClone(body), values = structuredClone(rows), meta = structuredClone(metadata);
+      mutate(data, values, meta); data.client_metadata['x-codex-turn-metadata'] = JSON.stringify(meta); await save(values);
+      await assert.rejects(native.archiveBoundary(parsed(data), undefined, resolver(), () => entered++),
+        error => error instanceof native.AdapterError && error.code === 'history_scope_unverified' && error.status === 403, name);
+      assert.equal(entered, 1, name); assert.deepEqual(await readFile(historyPath), durable, name);
+    }
+    await save(rows);
+    const broker = new native.Broker('unused-pre-turn'); broker.start = async () => {};
+    const token = await broker.register(verified);
+    assert.equal(broker.channels.get(token).environment.tools.length, 0, 'read-only proof never grants history tool scope');
+    await broker.revoke(token);
+    // Exercise the actual Responses adapter, not only the extracted boundary.
+    native.Worker.forProvider = () => ({ appName: 'Offline pre-turn fixture', async run(options) {
+      assert.equal(options.compaction, true); assert.equal(options.capabilities.localToolsEnabled, false);
+      const prepared = await options.prepare();
+      assert.ok(prepared.text.includes('Continue after the interrupted pre-sampling compaction.'));
+      assert.equal((await archive.search(thread, 'EARLY_COMMAND_ORIGINAL_UNCHANGED')).length, 1);
+      const summary = 'Synthetic pre-turn summary after canonical archival.';
+      options.onTextDelta?.(summary); prepared.release?.(); return summary;
+    } });
+    try {
+      const response = await native.responseRequest(new Request('http://127.0.0.1/v1/responses', { method: 'POST', body: JSON.stringify(body) }), {
+        mode: 'full', subagentProtocol: 'native', contextWindow: 256000, appName: 'Offline pre-turn fixture',
+        browserHost: 'managed-chrome', browserInteractionMode: 'automatic', storageStatePath: join(home, 'unused-storage.json'),
+        brokerSocketPath: 'unused-pre-turn-fixture', solAvailable: true, proAvailable: true, extraHighAvailable: true,
+      });
+      const result = await response.json(); assert.equal(result.status, 'completed', JSON.stringify(result));
+    } finally { await native.close(); }
   });
 });
