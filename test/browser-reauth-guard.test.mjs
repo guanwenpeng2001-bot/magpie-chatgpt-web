@@ -150,6 +150,19 @@ test('a sign-in attempt cannot mutate the browser while authenticated work holds
   await work;
 });
 
+test('normal NextAuth rotation on every session read preserves a confirmed identity and caches its latest cookie', async t => {
+  const f = fixture(t);
+  f.state.onRead = async () => { f.state.token = `rotated-${f.state.reads}`; };
+  assert.equal(await f.run(), 'authorized');
+  assert.equal(f.state.reads, 2);
+  assert.equal(await f.run(), 'authorized');
+  assert.equal(f.state.reads, 2, 'cache binds the final rotated cookie');
+  f.state.token = 'external-refresh';
+  assert.equal(await f.run(), 'authorized');
+  assert.equal(f.state.reads, 4);
+  assert.equal(f.state.writes, 0);
+});
+
 test('cookie replacement during the identity read cannot authorize the old account', async t => {
   const f = fixture(t);
   f.state.onRead = async () => {

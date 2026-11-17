@@ -74,16 +74,21 @@ async function readBrowserAccount(context, origin, signal) {
     const page = await wait(owned.ready);
     bounded.throwIfAborted();
     await wait(page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 10_000 }));
-    // A session response can rotate cookies. Recheck once so an identity read
-    // under A cannot authorize B's cookies installed while that read was pending.
+    // NextAuth legitimately rotates its cookie on every session read. Confirm
+    // identity again after a rotation, rather than requiring a fixed cookie.
+    // An A -> B switch during the first read must not authorize A's next turn.
+    let previousIdentity;
     for (let attempt = 0; attempt < 2; attempt++) {
       const before = sessionCookies(await wait(context.cookies(site.origin)));
       const result = await wait(browserRead(context, page, '/api/auth/session', site, bounded));
       bounded.throwIfAborted();
       const credential = sessionCredential(result.value, result.cookies);
-      if (before === result.cookies.split('; ').sort().join('; ')) {
-        return { identity: emailIdentity(credential.accountId), fingerprint: cookieFingerprint(before) };
+      const identity = emailIdentity(credential.accountId);
+      const after = result.cookies.split('; ').sort().join('; ');
+      if (before === after || identity === previousIdentity) {
+        return { identity, fingerprint: cookieFingerprint(after) };
       }
+      previousIdentity = identity;
     }
     throw new BackendError('binding');
   } finally {
