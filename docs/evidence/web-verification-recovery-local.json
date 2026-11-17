@@ -87,7 +87,14 @@
       "failed": 0
     },
     "package_check": "passed",
-    "full_suite": "Prior full run had fixture discovery/stale assertion failures subsequently addressed in focused runs; isolated Magpie provenance EBUSY/cold install failure remains. No fully green rerun claimed."
+    "full_suite": {
+      "tests": 1658,
+      "passed": 1631,
+      "failed": 0,
+      "skipped": 27,
+      "command": "node --test --test-concurrency=1 test/*.test.mjs",
+      "scope": "0.5.7 candidate including retained budget fix"
+    }
   },
   "publication_note": "Release-candidate observations; a separate installed v0.5.7 probe is required after publishing."
 }

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-11-17T17:48:16.542700+00:00",
+  "pluginVersion": "0.5.7",
+  "sourceRevision": "d8a5695b5beca7a31adc50d4b73099de404265cd",
+  "installation": "local Git candidate; tagged release continuation checked separately",
+  "model": "GPT-6 Pro Native, max",
+  "method": "Real Codex exec against Magpie native route; nine sequential file reads, automatic compaction, then node --test and exact recall. Isolated fixture with twelve random associations; oracle not read by model. User authorized full-access execution scoped to fixture after read-only sandbox refused its first read.",
+  "contextWindow": 105556,
+  "effectiveCodexWindow": 100278,
+  "autoCompactTokenLimit": 95000,
+  "automaticCompactions": 1,
+  "lastOrdinaryInputTokens": 93570,
+  "compactionInputTokens": 113550,
+  "compactionOutputTokens": 1188,
+  "compactionStatus": 200,
+  "compactionExtraGatewayAttempts": 0,
+  "checkpointAssociationsCorrect": 12,
+  "finalAssociationsCorrect": 12,
+  "associationCount": 12,
+  "commandsCompleted": 10,
+  "testsPassedAfterCompaction": 3,
+  "testsFailedAfterCompaction": 0,
+  "checkpointSummarySha256": "2cefd10557edd29c9d2fd6d2cbf06dd742012dbe07c1a92b970501e627044eb9",
+  "regression": {
+    "fullSuite": {
+      "tests": 1658,
+      "passed": 1631,
+      "failed": 0,
+      "skipped": 27
+    },
+    "focusedPinnedRuntimeTests": {
+      "passed": 182,
+      "failed": 0
+    }
+  },
+  "limitations": [
+    "Initial browser verification required interactive recovery; a new upstream challenge is still possible.",
+    "This live run initially encountered model-picker timeouts (one failed gateway record with seven attempts, followed by a successful record with three attempts). Subsequent tool rounds and compaction succeeded without extra gateway attempts.",
+    "Codex truncated each large tool output to about 40K characters before storing it. This is evidence for automatic compaction and continuation with the actual retained tool results, not full-file or expanded-window retention.",
+    "Twelve associations were specified for retention. This single sample does not establish lossless summarization or 1M capacity.",
+    "Physical Windows reboot was not performed."
+  ]
+}

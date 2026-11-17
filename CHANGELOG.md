@@ -3,6 +3,8 @@
 ## 0.5.7 — 2026-11-18
 
 - Publish the previously unmerged 0.5.6 improvements together with verification recovery as formal release 0.5.7. Synchronize package metadata, lockfile, README and tagged installation instructions.
+- Let authenticated retained-source compaction run before fresh-request budget checks. Count its full canonical history without treating that accounting operation as a browser submission. This fixes the 112,193-token guard rejecting an existing conversation's short summary handoff; fresh-page fallback retains the original limits and never drops history. A private accounting capability cannot be selected by serialized request options.
+- Verify real automatic compaction with 113,550 reported input tokens, followed by tool execution, three passing tests and 12/12 exact associations. Publish sanitized evidence, including client-side tool-output truncation and initial browser/model-picker failures; this does not establish larger model windows.
 - Record successful real GPT-6 Pro replies after account-browser cold start, plugin restart and a user-performed Magpie 0.1.4394 restart. Recovery followed a fixed proxy selection and completion of the authorized browser check; the proxy change alone is not proven causal. OS reboot and permanent freedom from upstream challenges are not claimed.
 
 - Preserve Native browser verification as HTTP 403 before the stream is committed, with a non-retryable error and unchanged sign-in state. Buffer only the empty prelude, bounded to 64 KiB; never replay a submitted turn or buffer tool/text output.
