@@ -19,7 +19,7 @@ for (const [route, factory] of Object.entries(factories)) {
   for (const representation of ['header-only', 'string', 'object', 'null', 'malformed', 'missing']) {
     test(`${route}: ${representation} metadata uses the same non-mutating precedence`, async t => {
       const logs = [];
-      t.mock.method(console, 'info', line => logs.push(line));
+      t.mock.method(console, 'error', line => logs.push(line));
       const value = representation === 'string' ? JSON.stringify(metadata)
         : representation === 'object' ? metadata : representation === 'null' ? null
           : representation === 'malformed' ? '{private-invalid-json' : undefined;
@@ -68,7 +68,7 @@ for (const [route, factory] of Object.entries(factories)) {
 }
 
 test('ordinary loader restores provenance then fills header-only identity before the daemon parser', async t => {
-  t.mock.method(console, 'info', () => {});
+  t.mock.method(console, 'error', () => {});
   const turn = 'fixture-turn';
   const request = { model: 'chatgpt-web/native/account-a/gpt-6-pro', input: [
     { type: 'message', role: 'user', id: 'fixture-user', content: [{ type: 'input_text', text: 'private-prompt' }],
@@ -105,7 +105,7 @@ test('ordinary loader restores provenance then fills header-only identity before
 });
 
 test('diagnostic failure cannot change forwarding and missing metadata is never manufactured', t => {
-  t.mock.method(console, 'info', () => { throw new Error('logging failed'); });
+  t.mock.method(console, 'error', () => { throw new Error('logging failed'); });
   const body = { input: [{ type: 'message', role: 'user', content: '<cwd>untrusted-history</cwd>' }] };
   const result = normalizeNativeTurnMetadata(body, {});
   assert.equal(result.body, body);

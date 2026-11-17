@@ -36,7 +36,9 @@ export function normalizeNativeTurnMetadata(body, headers) {
     requestKindPresent: present('request_kind'), sandboxModePresent: present('sandbox_mode'),
     sandboxPresent: present('sandbox'),
   };
-  try { console.info('[chatgpt-web] native_turn_metadata ' + JSON.stringify(diagnostic)); }
+  // The backend's stdout is the Bridge JSON-line protocol. Compaction invokes
+  // this helper inside that process; diagnostics must never corrupt its frames.
+  try { console.error('[chatgpt-web] native_turn_metadata ' + JSON.stringify(diagnostic)); }
   catch { /* Diagnostics must not change forwarding. */ }
   return { body: normalized, headers: forwarded };
 }

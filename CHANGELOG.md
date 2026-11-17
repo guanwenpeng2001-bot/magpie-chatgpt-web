@@ -8,6 +8,7 @@
 - Carry authenticated same-chat checkpoints and original history between registered local accounts during quota failover. Each destination encrypts its own copy; exact scope, summary and canonical-rollout authority remain enforced. Eligible account policy updates without a daemon restart.
 - Separate the official Pro total window from the usable input budget and automatic compaction target. Production maximum-input acceptance remains under test; historical failed large-context probes remain documented rather than silently dropping records.
 - Fix cancelled startup before the bridge call and preserve typed refusals. Final installed, continuity and release acceptance results are tracked in [0.5.8 verification](docs/verification-0.5.8.md).
+- Keep Native metadata diagnostics on stderr. Compaction executes the same helper inside the backend, where stdout is the Bridge protocol; writing logs there terminated the backend and reset the HTTP connection. A real child-process control reproduces the reset with stdout and verifies repeated compaction plus later RPCs with stderr.
 
 ## 0.5.7 — 2026-11-18
 
