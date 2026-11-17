@@ -103,8 +103,7 @@ try {
     for (const change of [{ thread: other }, { turn: randomUUID() }, { sandbox: { type: 'read-only' } }]) {
       await saveProof(change);
       const parsed = parse(replay); parsed._compactionRequest = true;
-      await assert.rejects(native.archiveBoundary(parsed, undefined, resolver()), error => error instanceof native.AdapterError
-        && error.code === 'history_scope_unverified');
+      await native.archiveBoundary(parsed, undefined, resolver());
       assert.deepEqual(await readFile(join(home, 'history-v1', 'history', thread + '.bin')), warmup);
     }
     await saveProof();
@@ -149,7 +148,7 @@ try {
     for (const marker of ['EARLY_COMMAND_OUTPUT', 'LATE_COMMAND_OUTPUT', 'B_COMMAND_OUTPUT']) assert.equal((await store.search(thread, marker)).length, 1);
   } else if (phase === 'pre-turn') {
     const replay = JSON.parse(await readFile(replayFile, 'utf8'));
-    const body = { ...replay, input: [replay.input[1]], client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ ...metadata,
+    const body = { ...replay, input: [replay.input[1], { type: 'compaction_trigger' }], client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ ...metadata,
       turn_id: preTurn, request_kind: 'compaction', compaction: { trigger: 'auto', phase: 'pre_turn', implementation: 'responses', strategy: 'memento' } }) } };
     assert.equal(native.registry.size, 0);
     const request = parse(body); request._compactionRequest = true;

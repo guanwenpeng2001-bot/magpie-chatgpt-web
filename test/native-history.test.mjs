@@ -108,7 +108,7 @@ test('ordinary capture binds only the current environment, preserves raw input a
   assert.equal(hits.result.length, 1);
   const page = JSON.parse((await f.invoke('read', { id: hits.result[0].id })).content);
   assert.equal(page.result.text, 'original NEEDLE_518 value');
-  assert.equal(page.coverage, 'observed_text_only');
+  assert.equal(page.coverage, 'authenticated_native_request_text_only');
   assert.equal(f.environment.tools.length, 0, 'only broker copy is decorated');
   const next = { tools: [] };
   await captureNativeHistory(f.input, next, { ...f.nativeIdentity, turnId: randomUUID() }, { store });
@@ -144,14 +144,14 @@ test('exact wire names, collisions and structured parameter bounds are enforced 
   await f.invoke('search', { query: 'x' }); assert.equal(calls, 1);
 });
 
-test('compaction requires proof, awaits the final tool-result append and adds no scope or guidance', async () => {
+test('unverified compaction skips history; verified compaction awaits final tool-result append without scope or guidance', async () => {
   const flushed = deferred(), entered = deferred(), input = request('source');
   input._compactionRequest = true;
   input._rawBody.input.push({ type: 'function_call_output', output: 'LAST_RESULT_' + randomUUID() });
   const snapshot = structuredClone(input), nativeIdentity = identity(), environment = { tools: [] };
   const saved = [];
   const store = { async append(thread, records) { saved.push({ thread, records }); entered.resolve(); await flushed.promise; } };
-  await assert.rejects(captureNativeHistory(input, environment, nativeIdentity, { store }), { code: 'history_scope_unverified', status: 403, retryable: false });
+  await captureNativeHistory(input, environment, nativeIdentity, { store });
   assert.equal(saved.length, 0);
   let complete = false;
   const pending = captureNativeHistory(input, undefined, nativeIdentity, { store, verifyCompaction: () => environment }).then(() => { complete = true; });
@@ -161,8 +161,38 @@ test('compaction requires proof, awaits the final tool-result append and adds no
   assert.deepEqual(input, snapshot);
   const broker = new BrokerFixture(), token = await broker.register(environment);
   assert.deepEqual(broker.channels.get(token).environment.tools, []);
-  await assert.rejects(captureNativeHistory(input, environment, nativeIdentity, { store, verifyCompaction() { throw Error('missing rollout'); } }), { code: 'history_scope_unverified' });
+  await captureNativeHistory(input, environment, nativeIdentity, { store, verifyCompaction() { throw Error('missing rollout'); } });
   assert.equal(saved.length, 1);
+});
+
+test('unverified or host text compaction never opens storage or acquires scope, even with plausible environment metadata', async () => {
+  for (const kind of ['missing proof', 'invalid identity', 'invalid environment', 'host text summary']) {
+    const input = request('HOST_TRANSFORMED_TEXT_MUST_NOT_BE_ARCHIVED'); input._compactionRequest = true;
+    if (kind === 'host text summary') input._compactionResponseFormat = 'message';
+    const before = structuredClone(input), environment = { tools: [] };
+    const store = { append() { assert.fail('unverified compaction touched storage'); } };
+    const nativeIdentity = kind === 'invalid identity' ? {} : identity();
+    let verified = 0;
+    await captureNativeHistory(input, environment, nativeIdentity, { store, verifyCompaction() {
+      verified++;
+      if (kind === 'missing proof') throw Error('No canonical rollout');
+      return kind === 'invalid environment' ? undefined : environment;
+    } });
+    if (['invalid identity', 'host text summary'].includes(kind)) assert.equal(verified, 0);
+    assert.deepEqual(input, before);
+    const broker = new BrokerFixture(), token = await broker.register(environment);
+    assert.deepEqual(broker.channels.get(token).environment.tools, []);
+  }
+});
+
+test('checkpoint storage failure during compaction proof still fails closed before the pinned handoff', async () => {
+  const input = request('source'); input._compactionRequest = true;
+  for (const cause of [new Error('Native checkpoint persistence unavailable; preserve the account checkpoint files and retry after restoring storage access.'),
+    Object.assign(Error('storage failed'), { code: 'ERR_HISTORY_CRYPTO' })]) {
+    await assert.rejects(captureNativeHistory(input, undefined, identity(), {
+      store: { append() { assert.fail('failed proof must not append'); } }, verifyCompaction() { throw cause; },
+    }), { code: 'history_archive_unavailable', status: 409, retryable: false });
+  }
 });
 
 test('archive failures remain typed nonretryable adapter errors and prevent compaction entry', async () => {
@@ -423,7 +453,7 @@ test('pinned tg proof captures last compaction tool result, rejects stale/foreig
       { type: 'function_call', call_id: 'call_last', name: 'offline_tool', arguments: '{}' },
       { type: 'function_call_output', call_id: 'call_last', output: needle },
     ] };
-    const parsed = () => { const value = native.parseRequest(structuredClone(body)); value._compactionRequest = true; return value; };
+    const parsed = () => native.parseRequest({ ...structuredClone(body), input: [...structuredClone(body.input), { type: 'compaction_trigger' }] });
     const resolver = new native.EnvironmentStore(undefined, Date.now, home, home, []);
     process.env.MAGPIE_NATIVE_CHECKPOINT_HOME = join(home, 'owner');
     const input = parsed(), before = structuredClone(input);
@@ -441,9 +471,9 @@ test('pinned tg proof captures last compaction tool result, rejects stale/foreig
       if (mutation === 'stale') { context.payload.turn_id = randomUUID(); await save(); }
       if (mutation === 'foreign') { session.payload.id = randomUUID(); await save(); }
       if (mutation === 'conflicting permissions') { context.payload.sandbox_policy = { type: 'read-only' }; await save(); }
-      await assert.rejects(native.archiveBoundary(parsed(), undefined, resolver, () => { entered++; }), error => error instanceof native.AdapterError
-        && error.code === 'history_scope_unverified' && error.status === 403 && error.retryable === false);
-      assert.equal(entered, 1);
+      const count = entered;
+      await native.archiveBoundary(parsed(), undefined, resolver, () => { entered++; });
+      assert.equal(entered, count + 1, 'unverified input skips the optional archive and reaches the original pinned flow');
       assert.deepEqual(await readFile(join(home, 'owner', 'history-v1', 'history', thread + '.bin')), saved);
       session.payload.id = thread; context.payload.turn_id = sourceTurn; context.payload.sandbox_policy = { type: 'danger-full-access' }; await save();
     }
@@ -455,7 +485,7 @@ test('pinned tg proof captures last compaction tool result, rejects stale/foreig
     await writeFile(join(home, 'owner', 'history-v1', 'history', thread + '.bin'), Buffer.alloc(5));
     await assert.rejects(native.archiveBoundary(ordinary, environment, resolver, () => { entered++; }), error => error instanceof native.AdapterError
       && error.code === 'history_archive_unavailable' && error.status === 409 && error.retryable === false);
-    assert.equal(entered, 1);
+    assert.equal(entered, 5);
   });
 });
 
@@ -531,9 +561,10 @@ test('pinned pre-turn compaction authenticates resumed source messages before a 
     for (const [name, mutate] of mutations) {
       const data = structuredClone(body), values = structuredClone(rows), meta = structuredClone(metadata);
       mutate(data, values, meta); data.client_metadata['x-codex-turn-metadata'] = JSON.stringify(meta); await save(values);
-      await assert.rejects(native.archiveBoundary(parsed(data), undefined, resolver(), () => entered++),
-        error => error instanceof native.AdapterError && error.code === 'history_scope_unverified' && error.status === 403, name);
-      assert.equal(entered, 1, name); assert.deepEqual(await readFile(historyPath), durable, name);
+      assert.throws(() => native.verifyCompaction(parsed(data), resolver()), undefined, name);
+      const count = entered;
+      await native.archiveBoundary(parsed(data), undefined, resolver(), () => entered++);
+      assert.equal(entered, count + 1, name); assert.deepEqual(await readFile(historyPath), durable, name);
     }
     await save(rows);
     const broker = new native.Broker('unused-pre-turn'); broker.start = async () => {};
@@ -556,6 +587,48 @@ test('pinned pre-turn compaction authenticates resumed source messages before a 
         brokerSocketPath: 'unused-pre-turn-fixture', solAvailable: true, proAvailable: true, extraHighAvailable: true,
       });
       const result = await response.json(); assert.equal(result.status, 'completed', JSON.stringify(result));
+    } finally { await native.close(); }
+  });
+});
+
+test('pinned unverified host text compaction completes through original read-only flow without an archive', pinned, async t => {
+  await runPinned(t, async (native, home) => {
+    const thread = randomUUID(), sourceTurn = randomUUID(), compactTurn = randomUUID();
+    const owner = join(home, 'unverified-owner'); process.env.MAGPIE_NATIVE_CHECKPOINT_HOME = owner;
+    const body = { model: 'chatgpt-web/gpt-6-pro', stream: false, tools: [], tool_choice: 'auto', parallel_tool_calls: false,
+      client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ thread_id: thread, turn_id: compactTurn,
+        request_kind: 'compaction', sandbox_mode: 'danger-full-access', compaction: {
+          trigger: 'auto', phase: 'pre_turn', implementation: 'responses', strategy: 'memento',
+        } }) }, input: [
+        { type: 'message', role: 'user', id: 'task', content: 'Summarize the synthetic earlier work.',
+          internal_chat_message_metadata_passthrough: { turn_id: sourceTurn, content_item_kinds: ['user.text'] } },
+        { type: 'function_call_output', call_id: 'host-result', output: 'UNVERIFIED_HOST_TEXT_EXCLUDED' },
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Write a concise checkpoint summary.' }] },
+      ] };
+    const parsed = native.parseRequest(body), before = structuredClone(parsed);
+    assert.equal(parsed._compactionResponseFormat, 'message');
+    const resolver = new native.EnvironmentStore(undefined, Date.now, home, undefined, []);
+    assert.throws(() => native.verifyCompaction(parsed, resolver));
+    await native.archiveBoundary(parsed, undefined, resolver);
+    assert.deepEqual(parsed, before);
+    let runs = 0;
+    native.Worker.forProvider = () => ({ appName: 'Offline unverified compact', async run(options) {
+      runs++; assert.equal(options.compaction, true); assert.equal(options.capabilities.localToolsEnabled, false);
+      const prompt = await options.prepare();
+      assert.doesNotMatch(prompt.text, /magpie_history__/);
+      const summary = 'Synthetic historical summary without tool authority.';
+      options.onTextDelta?.(summary); prompt.release?.(); return summary;
+    } });
+    try {
+      const response = await native.responseRequest(new Request('http://127.0.0.1/v1/responses', { method: 'POST', body: JSON.stringify(body) }), {
+        mode: 'full', subagentProtocol: 'native', contextWindow: 256000, appName: 'Offline unverified compact',
+        browserHost: 'managed-chrome', browserInteractionMode: 'automatic', storageStatePath: join(home, 'unused-storage.json'),
+        brokerSocketPath: 'unused-unverified-compact', solAvailable: true, proAvailable: true, extraHighAvailable: true,
+      });
+      const result = await response.json(); assert.equal(result.status, 'completed', JSON.stringify(result));
+      assert.equal(runs, 1); assert.equal(result.output[0].type, 'message');
+      await assert.rejects(readFile(join(owner, 'history-v1', 'history.key')), { code: 'ENOENT' });
+      await assert.rejects(readFile(join(owner, 'history-v1', 'history', thread + '.bin')), { code: 'ENOENT' });
     } finally { await native.close(); }
   });
 });

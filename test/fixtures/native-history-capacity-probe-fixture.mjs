@@ -149,7 +149,7 @@ async function binding(environment) {
     assert.deepEqual(result.structuredContent, envelope, 'actual pinned MCP conversion agrees with text block');
     assert.equal(envelope.source, 'untrusted_chat_history');
     assert.equal(envelope.scope, 'current_chat');
-    assert.equal(envelope.coverage, 'observed_text_only');
+    assert.equal(envelope.coverage, 'authenticated_native_request_text_only');
     assert.equal(envelope.error, undefined);
     return envelope.result;
   };
