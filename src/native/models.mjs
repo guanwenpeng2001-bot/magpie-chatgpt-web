@@ -23,8 +23,12 @@ export function nativeCatalog(capabilities = {}) {
     // Keep Pro at its baseline transport/compaction budget until revalidated.
     if (capabilities.experimentalBiggerContext === true && slug !== 'gpt-6-sol-instant' && !slug.endsWith('-pro')) {
       if (slug === 'gpt-5.6-luna') { context = 84000; autoCompact = 59424; }
-      else if (slug === 'gpt-6-sol') { context = proAvailable ? 240000 : 120000; autoCompact = proAvailable ? 220000 : 110000; }
-      else { context *= 3; autoCompact *= 3; }
+      // All fragments arrived in the Pro-capable account stress runs, but
+      // only 7/12 (GPT-6) and 4/12 (GPT-5.6) markers survived compaction.
+      // Baseline is a conservative fallback,
+      // not a newly measured retention capacity. Leave other tiers unchanged.
+      else if (slug === 'gpt-6-sol') { if (!proAvailable) { context = 120000; autoCompact = 110000; } }
+      else if (!(proAvailable && slug === 'gpt-5.6-sol')) { context *= 3; autoCompact *= 3; }
     }
     return { slug: `chatgpt-web/${slug}`, display_name: slug,
     context_window: context, auto_compact_token_limit: autoCompact,
@@ -105,7 +109,9 @@ export function describeNativeCatalogue(source, profile, capabilities = {}) {
         const slug = row.slug.slice('chatgpt-web/'.length);
         const id = `native/${profile}/${slug}`;
         if (!Object.hasOwn(descriptors, id)) {
-          descriptors[id] = nativeDescriptor(id, `${row.display_name}${bigger && !slug.endsWith('-pro') ? ' — Bigger Context' : ''}`, [row]);
+          const baseline = nativeCatalog({ ...capabilities, experimentalBiggerContext: false }).find(item => item.slug === row.slug);
+          const expanded = bigger && baseline && publishedWindow(row) > publishedWindow(baseline);
+          descriptors[id] = nativeDescriptor(id, `${row.display_name}${expanded ? ' — Bigger Context' : ''}`, [row]);
         }
       }
     }

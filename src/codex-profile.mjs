@@ -9,6 +9,8 @@ import { parseArgs } from 'node:util';
 
 export const PROFILE_NAME = 'chatgpt-web-http';
 export const PROFILE_FILE = `${PROFILE_NAME}.config.toml`;
+export const NATIVE_PROFILE_NAME = 'chatgpt-web-native';
+export const NATIVE_PROFILE_FILE = `${NATIVE_PROFILE_NAME}.config.toml`;
 export const PROVIDER_ID = 'magpie';
 export const MANAGED_MARKER = '# Managed by magpie-chatgpt-web; `--rollback` removes only this CLI profile.';
 export const LEGACY_MANAGED_MARKER = '# Managed by magpie-chatgpt-web; `--rollback` removes only files and settings it owns.';
@@ -23,6 +25,17 @@ function normalizeUrl(value) {
   try {
     const url = new URL(text);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function nativeUrl(value) {
+  try {
+    const url = new URL(String(value ?? '').trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || url.search || url.hash || !/^\/backend-api\/codex\/?$/.test(url.pathname)) return '';
     return url.toString().replace(/\/$/, '');
   } catch {
     return '';
@@ -157,7 +170,7 @@ async function readGatewayAddress({ env = process.env, home = homedir() } = {}) 
   }
 }
 
-async function resolveModelCatalogPath({ configPath, codexHome, home = homedir() }) {
+async function resolveModelCatalogPath({ configPath, codexHome, home = homedir(), native = false }) {
   let source;
   try { source = await readFile(configPath, 'utf8'); }
   catch { return undefined; }
@@ -171,6 +184,8 @@ async function resolveModelCatalogPath({ configPath, codexHome, home = homedir()
   ).value;
   const candidates = configured && isAbsolute(configured)
     ? [configured]
+    : native
+      ? [resolve(dirname(configPath), configured || 'magpie-desktop-models.json')]
     : configured
       ? [
           resolve(home, configured),
@@ -185,7 +200,8 @@ async function resolveModelCatalogPath({ configPath, codexHome, home = homedir()
   for (const candidate of candidates) {
     try {
       await access(candidate);
-      JSON.parse(await readFile(candidate, 'utf8'));
+      const catalog = JSON.parse(await readFile(candidate, 'utf8'));
+      if (native && (!Array.isArray(catalog?.models) || catalog.models.length === 0)) continue;
       return resolve(candidate);
     } catch {}
   }
@@ -214,6 +230,25 @@ function buildProfile(source, baseUrl, catalogPath) {
   return `${lines.join('\n')}\n`;
 }
 
+function buildNativeProfile(baseUrl, catalogPath, skillsContextTokens) {
+  return [
+    MANAGED_MARKER,
+    '# CLI only. Magpie owns the Desktop config.toml and model catalogue.',
+    '# Built-in OpenAI preserves native message provenance. Model limits come from the catalogue/base config.',
+    '',
+    'model_provider = "openai"',
+    `openai_base_url = ${JSON.stringify(baseUrl)}`,
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    '',
+    ...(skillsContextTokens === undefined ? [] : [
+      '# Skill discovery uses this part of the existing model window; it does not add capacity.',
+      '[skills]',
+      `max_context_tokens = ${skillsContextTokens}`,
+      '',
+    ]),
+  ].join('\n');
+}
+
 async function atomicWrite(path, content) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
@@ -240,31 +275,48 @@ export function resolveCodexHome({ env = process.env, home = homedir() } = {}) {
 export async function inspectCodexProfile({
   codexHome = resolveCodexHome(),
   baseUrl,
+  native = false,
+  skillsContextTokens,
   env = process.env,
   home = dirname(codexHome),
 } = {}) {
+  if (skillsContextTokens !== undefined && (!native || !Number.isInteger(skillsContextTokens)
+    || skillsContextTokens < 1 || skillsContextTokens > 10000)) {
+    throw new Error('skills context tokens require --native and an integer from 1 to 10000');
+  }
   if (env.HOME) home = resolve(env.HOME);
   const configPath = join(codexHome, 'config.toml');
-  const profilePath = join(codexHome, PROFILE_FILE);
+  const profilePath = join(codexHome, native ? NATIVE_PROFILE_FILE : PROFILE_FILE);
   const backupPath = `${profilePath}.bak`;
   let source;
   try {
     source = await readFile(configPath, 'utf8');
   } catch (error) {
-    if (error?.code === 'ENOENT') return { status: 'missing-config', configPath, profilePath, backupPath };
+    if (error?.code === 'ENOENT') return { status: 'missing-config', configPath, profilePath, backupPath,
+      ...(native ? { detail: 'Native requires the existing Magpie-managed Codex config; connect Codex through Magpie first.' } : {}) };
     throw error;
   }
   const routing = readCodexRouting(source);
-  const configuredBaseUrl = normalizeUrl(baseUrl)
+  const requestedNativeUrl = baseUrl !== undefined ? baseUrl : routing.openaiBaseUrl;
+  const configuredBaseUrl = native ? nativeUrl(requestedNativeUrl) : normalizeUrl(baseUrl)
     || normalizeUrl(routing.magpieBaseUrl)
     || normalizeUrl(routing.openaiBaseUrl)
     || normalizeUrl(env.MAGPIE_ADDR ? gatewayUrl(env.MAGPIE_ADDR) : '')
     || await readGatewayAddress({ env, home });
-  if (!configuredBaseUrl) return { status: 'missing-base-url', configPath, profilePath, backupPath, routing };
-  const catalogPath = await resolveModelCatalogPath({ configPath, codexHome, home });
+  if (!configuredBaseUrl) return {
+    status: native ? requestedNativeUrl === undefined ? 'missing-native-base-url' : 'invalid-native-base-url' : 'missing-base-url',
+    ...(native ? { detail: 'Native requires openai_base_url or --base-url pointing to Magpie at http(s)://host[:port]/backend-api/codex, without credentials, query or fragment. A custom provider /v1 URL cannot preserve native provenance.' } : {}),
+    configPath, profilePath, backupPath, routing,
+  };
+  const catalogPath = await resolveModelCatalogPath({ configPath, codexHome, home, native });
+  if (native && !catalogPath) return {
+    status: 'missing-native-catalog',
+    detail: 'Native requires a readable JSON model catalogue with a non-empty models array. Check model_catalog_json or refresh the Codex model catalogue through Magpie.',
+    configPath, profilePath, backupPath,
+  };
   let profile;
   try {
-    profile = buildProfile(source, configuredBaseUrl, catalogPath);
+    profile = native ? buildNativeProfile(configuredBaseUrl, catalogPath, skillsContextTokens) : buildProfile(source, configuredBaseUrl, catalogPath);
   } catch (error) {
     return { status: 'missing-provider', detail: error.message, configPath, profilePath, backupPath, routing };
   }
@@ -310,8 +362,8 @@ export async function applyCodexProfile(options = {}) {
   };
 }
 
-export async function rollbackCodexProfile({ codexHome = resolveCodexHome() } = {}) {
-  const profilePath = join(codexHome, PROFILE_FILE);
+export async function rollbackCodexProfile({ codexHome = resolveCodexHome(), native = false } = {}) {
+  const profilePath = join(codexHome, native ? NATIVE_PROFILE_FILE : PROFILE_FILE);
   const backupPath = `${profilePath}.bak`;
   let current;
   try {
@@ -332,12 +384,17 @@ function usage() {
   return [
     'usage: node src/codex-profile.mjs [--check | --apply | --rollback] [options]',
     '',
-    'Create an isolated HTTP-only Codex CLI profile. The main Codex Desktop config is owned by Magpie and is never modified.',
+    'Create an isolated Codex CLI profile. The main Codex Desktop config is owned by Magpie and is never modified.',
+    `  --native             use built-in OpenAI for Native tools (${NATIVE_PROFILE_FILE}); omit generic context limits`,
+    `                       run with: codex -p ${NATIVE_PROFILE_NAME}`,
+    `                       without --native: generic HTTP profile (${PROFILE_FILE})`,
     '  --check              compare without writing (default)',
     '  --apply              create or update the CLI profile',
     '  --rollback           remove only the managed CLI profile',
     '  --codex-home <path>  override CODEX_HOME',
     '  --base-url <url>     override the profile provider base URL',
+    '  --skills-context-tokens <1..10000>  Native-only skill discovery budget; consumes existing context',
+    '                       omit to inherit the base/default budget, including when reapplying',
     '  --json               print a machine-readable result',
   ].join('\n');
 }
@@ -349,8 +406,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       check: { type: 'boolean' },
       apply: { type: 'boolean' },
       rollback: { type: 'boolean' },
+      native: { type: 'boolean' },
       'codex-home': { type: 'string' },
       'base-url': { type: 'string' },
+      'skills-context-tokens': { type: 'string' },
       json: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -359,25 +418,35 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   if (values.help) return { exitCode: 0, output: usage() };
   const modes = [values.check, values.apply, values.rollback].filter(Boolean).length;
   if (modes > 1) throw new Error('choose one of --check, --apply or --rollback');
+  const skillBudget = values['skills-context-tokens'];
+  if (skillBudget !== undefined && (!values.native || values.rollback || !/^[1-9]\d*$/.test(skillBudget)
+    || Number(skillBudget) > 10000)) {
+    throw new Error('--skills-context-tokens requires --native, a whole number from 1 to 10000, and check/apply mode');
+  }
+  const skillsContextTokens = skillBudget === undefined ? undefined : Number(skillBudget);
   const codexHome = values['codex-home']
     ? resolve(values['codex-home'])
     : resolveCodexHome({ env });
   const result = values.rollback
-    ? await rollbackCodexProfile({ codexHome })
+    ? await rollbackCodexProfile({ codexHome, native: values.native })
     : values.apply
-      ? await applyCodexProfile({ codexHome, baseUrl: values['base-url'], env })
-      : await inspectCodexProfile({ codexHome, baseUrl: values['base-url'], env });
+      ? await applyCodexProfile({ codexHome, baseUrl: values['base-url'], native: values.native, skillsContextTokens, env })
+      : await inspectCodexProfile({ codexHome, baseUrl: values['base-url'], native: values.native, skillsContextTokens, env });
+  const refused = ['conflict', 'unmanaged-profile'].includes(result.status)
+    || (values.native && !['would-create', 'would-update', 'ready', 'created', 'updated', 'rolled-back', 'already-absent'].includes(result.status));
+  const exitCode = refused ? 2 : values.check && result.changed ? 1 : 0;
   if (values.json) {
     const printable = { ...result };
     for (const key of ['profile', 'routing', 'text', 'previous']) delete printable[key];
-    return { exitCode: values.check && result.changed ? 1 : 0, output: JSON.stringify(printable) };
+    return { exitCode: values.native ? exitCode : values.check && result.changed ? 1 : 0, output: JSON.stringify(printable) };
   }
   const lines = [`codex CLI profile: ${result.status}`, `main config (read-only): ${result.configPath ?? join(codexHome, 'config.toml')}`];
   if (result.profilePath) lines.push(`CLI profile: ${result.profilePath}`);
-  if (result.status === 'would-create' || result.status === 'would-update') lines.push('next: npm run codex-profile -- --apply');
-  if (result.status === 'conflict' || result.status === 'unmanaged-profile') lines.push(`refused: ${result.detail ?? 'the target is not owned by this helper'}`);
+  if (result.status === 'would-create' || result.status === 'would-update') lines.push(`next: npm run codex-profile -- ${values.native ? '--native ' : ''}${skillsContextTokens === undefined ? '' : `--skills-context-tokens ${skillsContextTokens} `}--apply`);
+  if (values.native && ['ready', 'created', 'updated'].includes(result.status)) lines.push(`run: codex -p ${NATIVE_PROFILE_NAME}`);
+  if (refused) lines.push(`refused: ${result.detail ?? 'the target is not owned by this helper'}`);
   return {
-    exitCode: ['conflict', 'unmanaged-profile'].includes(result.status) ? 2 : values.check && result.changed ? 1 : 0,
+    exitCode,
     output: lines.join('\n'),
   };
 }

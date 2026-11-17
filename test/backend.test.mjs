@@ -5,6 +5,9 @@ import { serve } from '../backend/main.mjs';
 import { BackendError } from '../backend/guard.mjs';
 import { LoginStates } from '../backend/browser.mjs';
 import { Conversations } from '../backend/conversations.mjs';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 function harness(options) {
   const input = new PassThrough();
@@ -30,6 +33,46 @@ function harness(options) {
     },
   };
 }
+
+test('explicit setup on an already configured account does not enter browser, download or provisioning', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-ready-rpc-'));
+  const home = join(root, 'accounts', 'ready-account');
+  await mkdir(home, { recursive: true });
+  const saved = { profile: 'ready-account', tunnelId: 'fixture-tunnel', runtimeKey: 'fixture-secret', connectorId: 'fixture-connector', linkId: 'fixture-link' };
+  await writeFile(join(home, 'native.json'), JSON.stringify(saved));
+  const server = harness({ nativeSetupRoot: root,
+    readClient() { assert.fail('already configured setup must not request account/browser resources'); } });
+  t.after(async () => { server.input.end(); await server.work; await rm(root, { recursive: true, force: true }); });
+  for (const id of ['first', 'repeat']) {
+    server.send({ id, method: 'nativeProvision', auth: { type: 'oauth', refresh: 'fixture-cookie', profile: saved.profile } });
+    await server.until(frames => frames.some(frame => frame.id === id && ['done', 'error'].includes(frame.event)));
+    assert.equal(server.frames.find(frame => frame.id === id && frame.event === 'data')?.data.state, 'ready');
+  }
+  assert.doesNotMatch(JSON.stringify(server.frames), /fixture-secret|fixture-cookie|fixture-tunnel|fixture-connector/);
+  assert.deepEqual(JSON.parse(await readFile(join(home, 'native.json'), 'utf8')), saved);
+});
+
+for (const [name, saved] of [
+  ['partial IDs', { connectorId: 'fixture-connector', linkId: 'fixture-link' }],
+  ['wrong profile', { profile: 'other-account', tunnelId: 't', runtimeKey: 'fixture-secret', connectorId: 'c', linkId: 'l' }],
+]) test(`explicit setup rejects ${name} before any remote work and never overwrites native state`, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-invalid-rpc-'));
+  const home = join(root, 'accounts', 'selected-account');
+  await mkdir(home, { recursive: true });
+  const bytes = JSON.stringify(saved);
+  await writeFile(join(home, 'native.json'), bytes);
+  const server = harness({ nativeSetupRoot: root,
+    readClient() { assert.fail('invalid persisted state must fail before any remote work'); } });
+  t.after(async () => { server.input.end(); await server.work; await rm(root, { recursive: true, force: true }); });
+  server.send({ id: 'invalid', method: 'nativeProvision', auth: { type: 'oauth', refresh: 'fixture-cookie', profile: 'selected-account' } });
+  await server.until(frames => frames.some(frame => frame.id === 'invalid' && ['done', 'error'].includes(frame.event)));
+  const result = server.frames.find(frame => frame.id === 'invalid' && frame.event === 'data')?.data;
+  assert.equal(result?.state, 'failed');
+  assert.equal(result.stage, 'invalidState');
+  assert.match(result.message, /incomplete|different account/);
+  assert.equal(await readFile(join(home, 'native.json'), 'utf8'), bytes);
+  assert.doesNotMatch(JSON.stringify(server.frames), /fixture-secret|fixture-cookie/);
+});
 
 test('session-token rotation preserves conversation ownership, other profiles stay isolated', async t => {
   const bindings = new Conversations();

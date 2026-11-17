@@ -136,7 +136,7 @@ test('classification keys on the interstitial evidence, not the status code alon
         assert.ok(error instanceof BackendError);
         assert.equal(error.code, expected, `expected ${expected}, got ${error.code} (${error.message})`);
         if (expected === 'verification') {
-          assert.equal(error.status, 502);
+          assert.equal(error.status, 403);
           assert.equal(error.signIn, undefined, 'a challenge must not ask the user to sign in');
           assert.notEqual(error.message, 'Sign in again to refresh the ChatGPT session.');
         }

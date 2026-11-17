@@ -24,7 +24,244 @@ const restore = body => {
 const request = body => new Request('http://127.0.0.1/v1/responses', { method: 'POST', body: JSON.stringify(body) });
 const checkpoint = summary => ({ type: 'compaction', encrypted_content: `ocx1:${Buffer.from(summary).toString('base64')}` });
 
-if (phase === 'turn-tokens') {
+if (phase === 'compaction-retirement') {
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const bounded = async (promise, label) => {
+    let timer;
+    try {
+      return await Promise.race([promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Fixture stalled: ${label}`)), 2000);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  // This is an observation interval, not a replacement for the broker's 90s timeout.
+  const observe = () => new Promise(resolve => setTimeout(resolve, 60));
+  for (const scenario of ['reordered-content', 'changed-content', 'matching', 'omitted-reasoning', 'changed-reasoning', 'different-turn-unattributed', 'missing-item-id', 'different-namespace']) {
+    const sourcePrepared = deferred(), sourceAborted = deferred(), physicalRelease = deferred();
+    const compactEntered = deferred(), compactStarted = deferred();
+    let sourceOptions, compactOptions, sourceParsed, compactParsed, sourceProvider, compactProvider;
+    let sourceSession, token, binding, invokeOutcome, pendingCompact, cancellationAt, compactFinished = false;
+    const sourceEvents = [], compactEvents = [];
+    const fixtureConfig = { ...config, brokerSocketPath: `${config.brokerSocketPath}-${scenario}` };
+    const broker = native.TurnBroker.forSocket(fixtureConfig.brokerSocketPath);
+    const sourceTurn = `source-${scenario}`, thread = `thread-${scenario}`;
+    const environment = `<environment_context><cwd>${home}</cwd><filesystem><workspace_roots><root>${home}</root></workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile></filesystem></environment_context>`;
+    const body = {
+      model: 'chatgpt-web/gpt-5.6-sol', stream: false, reasoning: { effort: 'high' },
+      tools: [{ type: 'function', name: 'exec_command', description: 'Offline inert command', parameters: { type: 'object', properties: { cmd: { type: 'string' } } } }],
+      client_metadata: { 'x-codex-turn-metadata': JSON.stringify({ thread_id: thread, turn_id: sourceTurn }) },
+      input: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: environment }],
+          internal_chat_message_metadata_passthrough: { turn_id: sourceTurn } },
+        { type: 'message', id: 'fixture-instruction', role: 'user', content: [{ type: 'input_text', text: 'Inspect the offline fixture and report the result.' }],
+          internal_chat_message_metadata_passthrough: { turn_id: sourceTurn } },
+      ],
+    };
+    const factory = kind => provider => {
+      // Observe the real HTTP route/provider and delegate unchanged to the pinned adapter.
+      const adapter = native.createAdapter(provider);
+      return { ...adapter, runTurn(parsed, incoming, emit) {
+        if (kind === 'source') { sourceParsed = parsed; sourceProvider = provider; }
+        else { compactParsed = parsed; compactProvider = provider; compactEntered.resolve(); }
+        return adapter.runTurn(parsed, incoming, event => {
+          (kind === 'source' ? sourceEvents : compactEvents).push(event);
+          emit(event);
+        });
+      } };
+    };
+    native.Worker.forProvider = () => ({
+      appName: config.appName,
+      async run(options) {
+        const prepared = await options.prepare();
+        if (!options.compaction) {
+          sourceOptions = options;
+          assert.equal(options.capabilities.localToolsEnabled, true);
+          const aborted = () => { cancellationAt = performance.now(); sourceAborted.resolve(); };
+          options.abortSignal.addEventListener('abort', aborted, { once: true });
+          if (options.abortSignal.aborted) aborted();
+          sourcePrepared.resolve();
+          // Model the browser's captured text boundary, using the real progress
+          // reader acknowledgement; this is not delivery of the tool result.
+          const batch = await options.externalProgress.waitForChange(0, options.abortSignal);
+          await options.externalProgress.acknowledgeToolBatch(batch.lastToolBatchRevision);
+          // Real adapter cancellation must abort us. Physical browser teardown is a
+          // separate boundary, deliberately held after abort to expose ownership waits.
+          await sourceAborted.promise;
+          await physicalRelease.promise;
+          prepared.release?.();
+          throw options.abortSignal.reason ?? new DOMException('Fixture browser cancelled', 'AbortError');
+        }
+        compactOptions = options;
+        assert.equal(options.capabilities.localToolsEnabled, false);
+        assert.equal(options.completionFence, undefined);
+        assert.match(prepared.text, /INERT_COMPACT_RESULT/);
+        assert.ok(!prepared.text.includes(token), 'compact prompt must not inherit the source capability');
+        compactStarted.resolve();
+        const summary = 'Offline checkpoint: inert tool output recorded; continue the original task.';
+        options.onTextDelta?.(summary);
+        prepared.release?.();
+        return summary;
+      },
+    });
+    try {
+      const sourceResponse = native.responseRequest(request(body), fixtureConfig, factory('source'));
+      await bounded(sourcePrepared.promise, 'source browser prepared');
+      const sourceKey = `${native.namespace(sourceProvider)}:${native.executionKey(sourceParsed)}`;
+      if (scenario === 'reordered-content') {
+        const reorder = value => Array.isArray(value) ? value.map(reorder)
+          : value && typeof value === 'object'
+            ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorder(item)])) : value;
+        const reordered = parse(reorder(body));
+        assert.equal(native.executionKey(sourceParsed), native.executionKey(reordered));
+        assert.equal(native.roundKey(sourceParsed), native.roundKey(reordered));
+        assert.deepEqual(native.instructionLineage(sourceParsed), native.instructionLineage(reordered));
+        for (const change of [
+          p => { p.modelId += '-different'; },
+          p => { p.options.reasoning = 'medium'; },
+          p => { p._rawBody.input[1].id += '-different'; },
+          p => { p._rawBody.input[1].content[0].text += ' '; },
+          p => { p._rawBody.input[1].content[0].extra = true; },
+        ]) {
+          const changed = parse(structuredClone(body)); change(changed);
+          assert.notEqual(native.executionKey(sourceParsed), native.executionKey(changed));
+        }
+        const orderedBody = structuredClone(body);
+        orderedBody.input[1].content.push({ type: 'input_text', text: 'Second ordered instruction.' });
+        const ordered = parse(orderedBody);
+        const swappedBody = structuredClone(orderedBody); swappedBody.input[1].content.reverse();
+        const swapped = parse(swappedBody);
+        assert.notEqual(native.executionKey(ordered), native.executionKey(swapped));
+        assert.notEqual(native.instructionLineage(ordered).current, native.instructionLineage(swapped).current);
+      }
+      sourceSession = native.sessions.find(sourceKey);
+      assert.ok(sourceSession, 'real adapter registered the source runtime');
+      assert.equal(sourceSession.runtime.mode, 'tools');
+      assert.equal(sourceSession.conversationKey(), undefined, 'managed Chrome has no launcher retained-conversation head');
+      token = await sourceSession.runtime.token;
+      binding = await native.callBroker(fixtureConfig.brokerSocketPath, { method: 'claim', token });
+      invokeOutcome = native.callBroker(fixtureConfig.brokerSocketPath, {
+        method: 'invoke', bindingId: binding.bindingId, wireName: 'exec_command', freeform: false,
+        arguments: { cmd: 'inert-offline-fixture-only' },
+      }, 90_000).then(value => ({ ok: true, value }), error => ({ ok: false, error }));
+      const response = await bounded(sourceResponse, 'native source tool call');
+      assert.equal(response.status, 200);
+      const call = sourceEvents.find(event => event.type === 'tool_call_start');
+      assert.ok(call, 'real broker invocation was emitted to the native caller');
+      assert.equal(sourceSession.outstanding().length, 1);
+      assert.equal(sourceSession.outstanding()[0].callId, call.id);
+      const compactBody = structuredClone(body);
+      compactBody.client_metadata['x-codex-turn-metadata'] = JSON.stringify({
+        thread_id: thread, turn_id: scenario === 'different-turn-unattributed' ? `compact-${scenario}` : sourceTurn, request_kind: 'compaction',
+        compaction: { trigger: 'auto', phase: 'mid_turn', implementation: 'responses', strategy: 'memento' },
+      });
+      if (scenario === 'missing-item-id') delete compactBody.input[1].id;
+      if (scenario === 'reordered-content') {
+        compactBody.input[1].content = compactBody.input[1].content.map(({ type, text }) => ({ text, type }));
+        assert.notEqual(JSON.stringify(compactBody.input[1].content), JSON.stringify(body.input[1].content));
+      }
+      if (scenario === 'changed-content') compactBody.input[1].content[0].text += ' Changed instruction.';
+      if (scenario === 'omitted-reasoning') delete compactBody.reasoning;
+      if (scenario === 'changed-reasoning') compactBody.reasoning.effort = 'medium';
+      if (scenario === 'different-turn-unattributed') {
+        for (const item of compactBody.input) delete item.internal_chat_message_metadata_passthrough;
+      }
+      compactBody.input.push({ type: 'function_call', call_id: call.id, name: 'exec_command', arguments: JSON.stringify({ cmd: 'inert-offline-fixture-only' }) },
+        { type: 'function_call_output', call_id: call.id, output: 'INERT_COMPACT_RESULT: completed offline',
+          internal_chat_message_metadata_passthrough: { turn_id: sourceTurn } });
+      const compactConfig = scenario === 'different-namespace'
+        ? { ...fixtureConfig, automaticAppName: 'Changed offline provider namespace' } : fixtureConfig;
+      const startedAt = performance.now();
+      pendingCompact = native.compactRequest(request(compactBody), compactConfig, factory('compact'))
+        .then(async result => { compactFinished = true; return { status: result.status, body: await result.json() }; });
+      await bounded(compactEntered.promise, 'compact adapter entry');
+      const lookupKey = `${native.namespace(compactProvider)}:${native.sourceKey(compactParsed)}`;
+      const sameNamespace = native.namespace(sourceProvider) === native.namespace(compactProvider);
+      const sameOwner = sameNamespace && native.ownerKey(sourceParsed) === native.ownerKey(compactParsed);
+      const sourceLineage = native.instructionLineage(sourceParsed);
+      const compactLineage = native.instructionLineage(compactParsed);
+      const sameInstruction = sourceLineage.current === compactLineage.current;
+      const sourceIsPredecessor = compactLineage.predecessors.has(sourceLineage.current);
+      const reasoning = { source: sourceParsed.options.reasoning, compact: compactParsed.options.reasoning };
+      const matched = ['matching', 'reordered-content'].includes(scenario) || (scenario === 'omitted-reasoning' && reasoning.source === reasoning.compact);
+      assert.equal(lookupKey === sourceKey, matched);
+      assert.equal(sameOwner, scenario !== 'different-namespace');
+      assert.equal(sameInstruction, !['missing-item-id', 'changed-content'].includes(scenario));
+      if (['missing-item-id', 'changed-content'].includes(scenario)) {
+        const failed = await bounded(pendingCompact, 'conflicting instruction rejection');
+        assert.match(failed.body.error?.message ?? '', /newer Codex instruction superseded/);
+        assert.equal(failed.status, 502);
+        assert.equal(sourceOptions.abortSignal.aborted, false);
+        assert.equal(native.sessions.find(sourceKey), sourceSession);
+        assert.equal(compactOptions, undefined);
+        assert.equal(sourceIsPredecessor, false, 'conflicting source is neither current nor a canonical predecessor');
+        console.log(`retirement-evidence: ${JSON.stringify({ scenario, sourceLookupMatched: false,
+          sameNamespace, sameOwner, sameInstruction, sourceIsPredecessor, reasoning,
+          cancelledBeforeSettlement: false, compactError: failed.body.error.code,
+          sourceToolOutputDelivered: false, timeoutReleaseInjected: false })}`);
+        continue;
+      }
+      let cancelledBeforeSettlement;
+      if (matched) {
+        await bounded(sourceAborted.promise, 'matched retirement abort');
+        assert.throws(() => broker.updateEnvironment(token, {}), /invalid or expired/);
+        assert.equal((await bounded(invokeOutcome, 'revoked invocation')).ok, false,
+          'compact output was not delivered as a tool completion');
+        assert.equal(native.sessions.find(sourceKey), undefined);
+        await observe();
+        assert.equal(compactOptions, undefined, 'fresh browser waits for physical teardown');
+        assert.equal(compactFinished, false);
+        cancelledBeforeSettlement = true;
+      } else {
+        if (scenario === 'different-namespace') await bounded(compactStarted.promise, 'independent compact browser');
+        else await observe();
+        assert.equal(sourceOptions.abortSignal.aborted, false, 'lookup miss did not cancel the source');
+        assert.equal(native.sessions.find(sourceKey), sourceSession);
+        assert.doesNotThrow(() => broker.updateEnvironment(token, {
+          cwd: home, roots: [home], writableRoots: [home], sandboxPolicy: { type: 'dangerFullAccess' }, tools: sourceParsed.context.tools,
+        }));
+        if (sameOwner) {
+          assert.equal(compactOptions, undefined, 'same owner waits after empty source retirement');
+          assert.equal(compactFinished, false);
+        }
+        cancelledBeforeSettlement = false;
+        // Inject the real MCP timeout-release protocol only after proving the miss.
+        // No 90s clock is simulated: this tests the failure transition, not elapsed time.
+        await native.callBroker(fixtureConfig.brokerSocketPath, { method: 'release', bindingId: binding.bindingId,
+          failure: { code: 'codex_tool_timeout', tool: 'exec_command', timeoutMs: 90_000 } });
+        await bounded(sourceAborted.promise, 'timeout release abort');
+        assert.equal(sourceOptions.abortSignal.reason.code, 'codex_tool_timeout');
+        assert.equal((await bounded(invokeOutcome, 'timeout invocation')).ok, false);
+      }
+      const beforePhysicalReleaseMs = Math.round(performance.now() - startedAt);
+      assert.equal(sourceSession.isPhysicallySettled(), false, 'abort is separate from browser cleanup settlement');
+      physicalRelease.resolve();
+      const compactResponse = await bounded(pendingCompact, 'compact after physical settlement');
+      assert.equal(compactResponse.status, 200, JSON.stringify(compactResponse.body));
+      assert.equal(compactResponse.body.error, undefined);
+      assert.equal(compactEvents.some(event => event.type === 'tool_call_start'), false);
+      assert.ok(compactOptions);
+      const compactSession = native.sessions.find(`${native.namespace(compactProvider)}:${native.executionKey(compactParsed)}`);
+      assert.equal(compactSession.runtime.mode, 'read-only');
+      assert.equal(compactSession.runtime.token, undefined);
+      assert.equal(sourceSession.outstanding().length, 1, 'incoming compact output never completed the source call');
+      console.log(`retirement-evidence: ${JSON.stringify({ scenario, sourceLookupMatched: lookupKey === sourceKey,
+        sameNamespace, sameOwner, sameInstruction, sourceIsPredecessor, reasoning, cancelledBeforeSettlement, beforePhysicalReleaseMs,
+        ...(matched ? { cancellationMs: Math.round(cancellationAt - startedAt) } : {}),
+        compactReadOnly: true, sourceToolOutputDelivered: false, timeoutReleaseInjected: !matched })}`);
+    } finally {
+      sourceSession?.cancel(new Error('Offline fixture cleanup'));
+      physicalRelease.resolve();
+      native.sessions.clear();
+      await broker.close();
+      await invokeOutcome;
+      if (pendingCompact) await bounded(pendingCompact, 'cleanup');
+    }
+  }
+} else if (phase === 'turn-tokens') {
   const broker = new native.TurnBroker(config.brokerSocketPath);
   try {
     const token = await broker.register({});
@@ -250,6 +487,9 @@ if (phase === 'turn-tokens') {
     }
     const unknown = { ...body, input: [...body.input, checkpoint('Unissued checkpoint after restart')] };
     assert.equal(restore(unknown).some(message => message.content === taskText), false);
+    const forgedMagpie = { ...body, input: [...body.input, { type: 'compaction',
+      encrypted_content: 'magpie1:' + Buffer.from('Unissued checkpoint after restart').toString('base64') }] };
+    assert.equal(restore(forgedMagpie).some(message => message.content === taskText), false);
     const steering = { ...body, input: [...body.input, { type: 'message', role: 'user', id: 'steering', content: 'Stop implementation.',
       internal_chat_message_metadata_passthrough: { turn_id: identity.turn_id } }] };
     assert.equal(restore(steering).some(message => message.content === taskText), false);
@@ -274,8 +514,8 @@ if (phase === 'turn-tokens') {
     return summary;
   } });
   const replays = [];
-  for (const kind of ['v1', 'v2', 'memento', 'v2-stream', 'memento-stream']) for (const taskKind of ['goal', 'delegation']) {
-    const protocol = kind.replace('-stream', '');
+  for (const kind of ['magpie-memento', 'v1', 'v2', 'memento', 'v2-stream', 'memento-stream']) for (const taskKind of ['goal', 'delegation']) {
+    const protocol = kind === 'magpie-memento' ? 'memento' : kind.replace('-stream', '');
     const turn = `turn-${kind}-${taskKind}`;
     const identity = { thread_id: `thread-${kind}-${taskKind}`, turn_id: turn };
     const human = { type: 'message', role: 'user', id: 'human', content: [{ type: 'input_text', text: 'Report status only.' }],
@@ -307,6 +547,9 @@ if (phase === 'turn-tokens') {
       if (protocol === 'memento') {
         assert.equal(result.output[0].type, 'message');
         assert.equal(result.output[0].content[0].text, summary);
+        if (kind === 'magpie-memento') return [human, { type: 'compaction',
+          encrypted_content: 'magpie1:' + Buffer.from(result.output[0].content[0].text).toString('base64'),
+          internal_chat_message_metadata_passthrough: { turn_id: turn } }];
         // Native memento installs the returned assistant text as a readable user
         // summary, with its exact content and current-turn attribution.
         return [human, { type: 'message', role: 'user', content: [{ type: 'input_text',
@@ -340,6 +583,8 @@ if (phase === 'turn-tokens') {
         const match = prompt.text.match(/<codex_context_json>\n([^\n]+)\n<\/codex_context_json>/);
         assert.ok(match);
         const messages = JSON.parse(match[1]).messages;
+        if (kind === 'magpie-memento') assert.ok(messages.some(message => message.content.includes(summary)),
+          'Magpie summary reaches the model as readable completed-work context');
         const taskIndex = messages.findIndex(message => message.content === taskText);
         assert.ok(taskIndex >= 0);
         assert.equal(messages[taskIndex].role, taskKind === 'goal' ? 'user' : 'agent_message');
@@ -363,6 +608,9 @@ if (phase === 'turn-tokens') {
     }
     const changedSummary = { ...base, input: [human, checkpoint('Unissued summary')] };
     assert.equal(restore(changedSummary).some(message => message.content === taskText), false);
+    const changedMagpie = { ...base, input: [human, { type: 'compaction',
+      encrypted_content: 'magpie1:' + Buffer.from('Unissued summary').toString('base64') }] };
+    assert.equal(restore(changedMagpie).some(message => message.content === taskText), false);
     const foreignOwner = { ...base, input: [human, { ...checkpoint(summary), internal_chat_message_metadata_passthrough: { turn_id: 'other-turn' } }] };
     assert.equal(restore(foreignOwner).some(message => message.content === taskText), false);
     const steering = { ...body, input: [...body.input, { type: 'message', role: 'user', id: 'steering', content: 'Stop implementation.',

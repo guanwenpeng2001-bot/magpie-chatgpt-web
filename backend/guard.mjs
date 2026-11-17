@@ -29,7 +29,7 @@ const definitions = Object.freeze(Object.fromEntries(Object.entries({
   pageShape: [502, 'The ChatGPT page or model picker changed; update the plugin.'],
   harvest: [502, 'The answer reader failed; no completed reply can be confirmed.'],
   protocol: [502, 'The backend or upstream protocol is invalid.'],
-  verification: [502, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.'],
+  verification: [403, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.'],
   capacity: [503, 'Local backend capacity is exhausted; active work and cooldowns may clear, but sign-in blocks persist until the backend restarts.'],
   browserDependency: [503, 'The playwright-core dependency is unavailable; install the packaged dependency.'],
   browserProfile: [502, 'The browser profile restored a page other than about:blank.'],
@@ -87,6 +87,7 @@ export class BackendError extends Error {
     const clean = new BackendError(this.code, { retryAfter: this.retryAfter, values: this.#values });
     return {
       status: clean.status,
+      ...(clean.code === 'verification' ? { code: 'verification', retryable: false } : {}),
       ...(outputErrors.has(clean.code) ? { code: clean.code } : {}),
       message: clean.message,
       ...(clean.#values ? { code: this.code, values: { ...clean.#values } } : {}),
@@ -96,7 +97,8 @@ export class BackendError extends Error {
   }
   get headers() {
     const clean = this.toJSON();
-    return { ...(clean.signIn ? { 'x-magpie-sign-in': clean.signIn } : outputErrors.has(this.code) ? { 'x-magpie-sign-in': 'kept' } : {}), ...(clean.retryAfter ? { 'retry-after': clean.retryAfter } : {}) };
+    return { ...(clean.signIn ? { 'x-magpie-sign-in': clean.signIn } : outputErrors.has(this.code) || this.code === 'verification' ? { 'x-magpie-sign-in': 'kept' } : {}),
+      ...(this.code === 'verification' ? { 'x-should-retry': 'false' } : {}), ...(clean.retryAfter ? { 'retry-after': clean.retryAfter } : {}) };
   }
   static fromEnvelope(envelope) {
     if (typeof envelope?.code === 'string' && Object.hasOwn(definitions, envelope.code) &&

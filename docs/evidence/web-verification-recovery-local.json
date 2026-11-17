@@ -1,0 +1,100 @@
+{
+  "recorded_at": "2026-11-17T17:15:43.530901+00:00",
+  "plugin_version": "0.5.7-local.1",
+  "code_commit": "0ec9cf4",
+  "magpie_before": {
+    "version": "0.1.4392"
+  },
+  "magpie_after": {
+    "version": "0.1.4394",
+    "started": "2026-11-17T17:13:46Z"
+  },
+  "recovery": [
+    "Selected existing fixed US AnyTLS node for the ChatGPT proxy group. The original selection is backed up locally.",
+    "Completed user-authorized browser verification in the persistent account profile.",
+    "Enabled Magpie Windows login autostart; Clash auto-launch and store-selected were already enabled."
+  ],
+  "causality_limit": "Recovery followed both a proxy selection change and successful browser verification; the proxy change alone is not proven causal.",
+  "cases": [
+    {
+      "case": "recovered",
+      "expected_reply_rendered": "WEB_PRO_RECOVERED_OK",
+      "observed_reply_markdown": "WEB\\_PRO\\_RECOVERED\\_OK",
+      "gateway": {
+        "t": "2026-11-18T01:06:57.8736124+08:00",
+        "provider": "chatgpt-web",
+        "model": "native/<profile>/gpt-6-pro",
+        "status": 200,
+        "in": 17046,
+        "out": 28
+      }
+    },
+    {
+      "case": "account_browser_cold_start",
+      "expected_reply_rendered": "BROWSER_COLD_START_OK",
+      "observed_reply_markdown": "BROWSER\\_COLD\\_START\\_OK",
+      "gateway": {
+        "t": "2026-11-18T01:08:17.4270293+08:00",
+        "provider": "chatgpt-web",
+        "model": "native/<profile>/gpt-6-pro",
+        "status": 200,
+        "tries": 3,
+        "in": 17090,
+        "out": 28
+      }
+    },
+    {
+      "case": "plugin_disable_enable",
+      "expected_reply_rendered": "PLUGIN_RESTART_OK",
+      "observed_reply_markdown": "PLUGIN\\_RESTART\\_OK",
+      "gateway": {
+        "t": "2026-11-18T01:10:39.4586323+08:00",
+        "provider": "chatgpt-web",
+        "model": "native/<profile>/gpt-6-pro",
+        "status": 200,
+        "in": 17090,
+        "out": 24
+      }
+    },
+    {
+      "case": "user_restarted_magpie",
+      "expected_reply_rendered": "MAGPIE_RESTART_OK",
+      "observed_reply_markdown": "MAGPIE\\_RESTART\\_OK",
+      "gateway": {
+        "t": "2026-11-18T01:14:45.6734864+08:00",
+        "provider": "chatgpt-web",
+        "model": "native/<profile>/gpt-6-pro",
+        "status": 200,
+        "in": 17270,
+        "out": 26
+      }
+    }
+  ],
+  "limitations": [
+    "Physical Windows reboot was not performed.",
+    "Browser cold-start request succeeded with three gateway attempts; plugin and Magpie restart probes have no tries field.",
+    "A new upstream interactive verification can still require user completion.",
+    "Codex CLI can reconnect on HTTP 403 independently of the gateway; client retries are not fixed.",
+    "Force-stop restart command was blocked by policy; the user performed the actual Magpie restart."
+  ],
+  "regression": {
+    "pinned_runtime_tests": {
+      "passed": 88,
+      "failed": 0
+    },
+    "error_and_browser_tests": {
+      "passed": 51,
+      "failed": 0
+    },
+    "package_check": "passed",
+    "full_suite": {
+      "tests": 1658,
+      "passed": 1631,
+      "failed": 0,
+      "skipped": 27,
+      "command": "node --test --test-concurrency=1 test/*.test.mjs",
+      "scope": "0.5.7 candidate including retained budget fix"
+    }
+  },
+  "publication_note": "Release-candidate observations; a separate installed v0.5.7 probe is required after publishing."
+}

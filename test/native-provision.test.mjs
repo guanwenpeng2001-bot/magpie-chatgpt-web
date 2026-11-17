@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { inspect } from 'node:util';
 import { execFileSync } from 'node:child_process';
@@ -10,6 +10,8 @@ import {
   provision, provisionNativeHarness, connectorNameFor, ProvisionError,
   capturePlatformSession, createRuntimeKeyViaUi,
 } from '../src/native/provision.mjs';
+import { ensureNative, stopNative } from '../src/native/index.mjs';
+import { runNativeSetup, readSetupStatus } from '../src/native/setup.mjs';
 
 // No Playwright browser is launched and no global fetch is used. Even the
 // serialized page.evaluate callback executes with an isolated fake fetch.
@@ -397,6 +399,52 @@ test('completed checkpoint is verified again and causes no repeated resource wri
   assert.equal(server.secrets.length, 1);
   assert.equal(server.hooks.length, 2, 'tunnel process must be ensured on every run');
   assert.equal(server.navigation.filter(url => url.endsWith('/api-keys')).length, 1);
+});
+
+test('provision cancellation before entry opens no setup pages', async t => {
+  const { options, pages, server } = await fixture(t);
+  await assert.rejects(provision({ ...options, signal: AbortSignal.abort() }), { name: 'AbortError' });
+  assert.equal(pages.length, 0);
+  assert.equal(server.created.tunnel, 0);
+});
+
+test('provision cancellation closes its waiting Platform page without closing the account context', async t => {
+  const { options, pages, server } = await fixture(t);
+  const ctl = new AbortController();
+  const original = options.context.newPage;
+  options.context.newPage = async () => {
+    const page = await original();
+    page.goto = async () => { ctl.abort(); };
+    return page;
+  };
+  await assert.rejects(provision({ ...options, signal: ctl.signal }), { name: 'AbortError' });
+  assert.ok(pages.every(page => page.closed));
+  assert.equal(server.created.tunnel, 0);
+});
+
+test('setup → ensureNative → real provisioner aborts after durable key; explicit resume reuses resources', async t => {
+  const { options, pages, server } = await fixture(t);
+  const root = dirname(options.stateFile);
+  const ctl = new AbortController();
+  const account = { profile: PROFILE, chromeExecutablePath: 'fixture',
+    context: { ...options.context, storageState: async () => ({ cookies: [], origins: [] }) } };
+  let cancelOnStart = true, stops = 0;
+  const start = signal => runNativeSetup(account, onStage => ensureNative(account, {
+    root, signal, onStage, install: async () => ({}),
+    createDaemon: () => ({ async start(credentials) { server.hooks.push(credentials); if (cancelOnStart) ctl.abort(); }, async stop() { stops++; } }),
+    provision: (context, settings) => provision({ ...options, ...settings, context }),
+  }), { root, signal });
+  t.after(stopNative);
+  await assert.rejects(start(ctl.signal), { name: 'AbortError' });
+  const stateFile = join(root, 'accounts', PROFILE, 'provision.json');
+  assert.equal(JSON.parse(await readFile(stateFile, 'utf8')).secretSaved, true);
+  assert.equal((await readSetupStatus(account, { root })).stage, 'cancelled');
+  assert.ok(stops > 0);
+  assert.deepEqual(server.created, { tunnel: 1, key: 1, connector: 0, link: 0, permission: 0 });
+  assert.ok(pages.every(page => page.closed));
+  cancelOnStart = false;
+  assert.equal((await start()).state, 'ready');
+  assert.deepEqual(server.created, { tunnel: 1, key: 1, connector: 1, link: 1, permission: 1 });
 });
 
 const interruptions = [

@@ -53,7 +53,7 @@ for (const responseType of ['', 'json']) test('harvested XHR challenge reaches o
     run: { id: 'first', queue: fixture.events },
     adapter: { probePageError: async () => null },
     guard, budget: 1000, signal: new AbortController().signal, emit: async () => {},
-  }), error => error.code === 'verification' && error.status === 502);
+  }), error => error.code === 'verification' && error.status === 403);
   (await guard.begin())();
 });
 

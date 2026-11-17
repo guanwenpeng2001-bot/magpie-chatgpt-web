@@ -31,7 +31,7 @@ const taxonomy = {
   temporary: [502, 'Temporary chat could not be confirmed; no message was sent.'],
   harvest: [502, 'The answer reader failed; no completed reply can be confirmed.'],
   protocol: [502, 'The backend or upstream protocol is invalid.'],
-  verification: [502, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.'],
+  verification: [403, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.'],
   capacity: [503, 'Local backend capacity is exhausted; active work and cooldowns may clear, but sign-in blocks persist until the backend restarts.'],
   browserDependency: [503, 'The playwright-core dependency is unavailable; install the packaged dependency.'],
   browserProfile: [502, 'The browser profile restored a page other than about:blank.'],

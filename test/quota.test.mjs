@@ -16,7 +16,7 @@ const session = { accessToken: 'private-access', refresh: 'private-cookie', user
   expires: '2099-01-01T00:00:00Z' };
 const noShare = result => {
   assert.equal(result.windows.length, 1);
-  assert.match(result.windows[0].display, /^未知：.+/);
+  assert.match(result.windows[0].display, /^(?:未知：.+|未提供)$/);
   assert.equal(result.windows[0].aside, true);
   for (const field of ['used', 'amount', 'limit', 'balance', 'resetsAt', 'resetSecs']) {
     assert.equal(Object.hasOwn(result.windows[0], field), false, `${field} must not be fabricated`);

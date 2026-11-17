@@ -1,6 +1,7 @@
 import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const PLATFORM = 'https://platform.openai.com';
 const API = 'https://api.openai.com';
@@ -286,12 +287,35 @@ function linkFrom(data) { return data && Object.hasOwn(data, 'link') ? data.link
 export async function provisionNativeHarness({
   context, profileId, stateFile, connectorName = connectorNameFor(profileId),
   saveSecret, ensureTunnelRunning, fetchImpl = globalThis.fetch,
-  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now,
+  signal, sleep = ms => delay(ms, undefined, { signal }), now = Date.now,
   tunnelTimeoutMs = 120_000, pollIntervalMs = 1_000, uiTimeoutMs = 30_000,
 }) {
   let stage = 'verify';
   const pages = [];
+  const closing = new Map();
+  const closePage = page => {
+    if (!closing.has(page)) closing.set(page, Promise.resolve().then(() => page.close()).catch(() => {}));
+    return closing.get(page);
+  };
+  const abort = () => { for (const page of pages) void closePage(page); };
+  const newPage = async () => {
+    signal?.throwIfAborted();
+    const page = await context.newPage();
+    pages.push(page);
+    if (signal?.aborted) { await closePage(page); signal.throwIfAborted(); }
+    return page;
+  };
+  const fetchWithSignal = (url, options) => {
+    signal?.throwIfAborted();
+    return fetchImpl(url, { ...options, ...(signal ? { signal: AbortSignal.any([signal, options.signal]) } : {}) });
+  };
+  const requestChat = (page, path, options) => {
+    signal?.throwIfAborted();
+    return chatRequest(page, path, options);
+  };
   try {
+    signal?.throwIfAborted();
+    signal?.addEventListener('abort', abort, { once: true });
     requireValue(context && typeof context.newPage === 'function' && typeof stateFile === 'string' && stateFile.length);
     requireValue(typeof saveSecret === 'function' && typeof ensureTunnelRunning === 'function');
     requireValue(typeof connectorName === 'string' && connectorName.trim().length > 0);
@@ -301,8 +325,7 @@ export async function provisionNativeHarness({
     delete state.verified;
     const persist = () => saveState(stateFile, state);
     stage = 'platformSignin';
-    const platform = await context.newPage();
-    pages.push(platform);
+    const platform = await newPage();
     const session = await capturePlatformSession(platform, { timeoutMs: uiTimeoutMs });
     requireValue(!state.organizationId || state.organizationId === session.organizationId);
     requireValue(!state.projectId || state.projectId === session.projectId);
@@ -310,7 +333,7 @@ export async function provisionNativeHarness({
     await persist();
 
     stage = 'verify';
-    const principals = await platformRequest(fetchImpl, session, '/v1/tunnels/principals');
+    const principals = await platformRequest(fetchWithSignal, session, '/v1/tunnels/principals');
     requireValue(principals.organizations?.some(org => org.id === session.organizationId), 'tunnelPermission');
     const workspace = state.workspaceId
       ? principals.workspaces?.find(item => item.id === state.workspaceId)
@@ -319,11 +342,11 @@ export async function provisionNativeHarness({
     state.workspaceId = idOf(workspace.id, 'tunnelPermission');
     await persist();
     const tunnelName = connectorNameFor(profileId);
-    const tunnels = await platformRequest(fetchImpl, session, `/v1/tunnels?organization_id=${encodeURIComponent(session.organizationId)}`);
+    const tunnels = await platformRequest(fetchWithSignal, session, `/v1/tunnels?organization_id=${encodeURIComponent(session.organizationId)}`);
     let tunnel = exactResource(entries(tunnels, 'tunnels'), tunnelName);
     if (state.tunnelId) requireValue(tunnel?.id === state.tunnelId);
     if (!tunnel) {
-      tunnel = await platformRequest(fetchImpl, session, '/v1/tunnels', 'POST', {
+      tunnel = await platformRequest(fetchWithSignal, session, '/v1/tunnels', 'POST', {
         name: tunnelName, description: 'Magpie ChatGPT Web native tools',
         organization_ids: [session.organizationId], workspace_ids: [state.workspaceId],
       });
@@ -333,6 +356,7 @@ export async function provisionNativeHarness({
     await persist();
 
     stage = 'keyUi';
+    signal?.throwIfAborted();
     if (!state.runtimeKey) {
       await createRuntimeKeyViaUi(platform, {
         ...session, name: `Codex Magpie tunnel ${profileId.slice(0, 8)}`, timeoutMs: uiTimeoutMs,
@@ -352,18 +376,18 @@ export async function provisionNativeHarness({
     }
 
     stage = 'connectorCreate';
-    const chat = await context.newPage();
-    pages.push(chat);
+    const chat = await newPage();
     await chat.goto(CHATGPT, { waitUntil: 'domcontentloaded', timeout: uiTimeoutMs });
-    const account = checked(await chatRequest(chat, '/api/auth/session'), stage);
+    const account = checked(await requestChat(chat, '/api/auth/session'), stage);
     requireValue(typeof account?.accessToken === 'string' && account.accessToken.length && account?.account?.id, stage);
     const auth = { accessToken: account.accessToken, accountId: account.account.id };
     requireValue(!state.accountId || state.accountId === auth.accountId);
     state.accountId = auth.accountId;
     await persist();
-    const request = (path, options = {}) => chatRequest(chat, path, { ...options, auth });
+    const request = (path, options = {}) => requestChat(chat, path, { ...options, auth });
 
     stage = 'connectorTunnelMissing';
+    signal?.throwIfAborted();
     await ensureTunnelRunning({ tunnelId: state.tunnelId, runtimeKey: state.runtimeKey });
     const deadline = now() + tunnelTimeoutMs;
     // The attempt cap also bounds injected clocks that fail to advance.
@@ -452,13 +476,16 @@ export async function provisionNativeHarness({
     requireValue(!active.connector_id || active.connector_id === state.connectorId);
     state.verified = true;
     await persist();
+    signal?.throwIfAborted();
     return { tunnelId: state.tunnelId, runtimeKey: state.runtimeKey, connectorId: state.connectorId, linkId: state.linkId };
   } catch (error) {
+    signal?.throwIfAborted();
     // Reconstruct even ProvisionError instances; injected hooks may throw one
     // whose message/cause has been replaced with credential-bearing diagnostics.
     throw new ProvisionError(error instanceof ProvisionError ? error.code : stage);
   } finally {
-    await Promise.allSettled(pages.map(page => Promise.resolve().then(() => page.close())));
+    signal?.removeEventListener('abort', abort);
+    await Promise.allSettled(pages.map(closePage));
   }
 }
 

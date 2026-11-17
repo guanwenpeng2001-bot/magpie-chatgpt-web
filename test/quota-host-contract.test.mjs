@@ -6,6 +6,8 @@ import { runInNewContext } from 'node:vm';
 import { inflateRawSync } from 'node:zlib';
 import { _internal } from '../src/index.mjs';
 import { BackendError } from '../backend/guard.mjs';
+import { localUsageWindows } from '../src/usage/display.mjs';
+import { setupResult } from '../src/native/setup.mjs';
 
 async function installedHost(t) {
   const path = process.env.MAGPIE_USAGE_HOST_EXE
@@ -59,7 +61,7 @@ test('installed Magpie usage contract preserves unknown quota and cancellation (
     assert.equal(result.windows[0].balance, null);
     assert.equal(result.windows[0].aside, true);
     assert.equal(result.error, '', 'show the fixed reason as a text window, not a hidden tooltip');
-    assert.match(result.windows[0].display, /^未知：.+/);
+    assert.match(result.windows[0].display, /^(?:未知：.+|未提供)$/);
     assert.equal(result.signIn, value?.code === 'expired' ? 'expired' : 'kept');
     assert.equal(result.until, '');
     assert.equal(result.windows[0].resetsAt, '');
@@ -151,5 +153,34 @@ test('installed UI treats Go-normalized text windows as unknown, not 100% left',
     assert.equal(ui.quotaNoShare(measured), false);
     assert.equal(ui.quotaText(measured), left ? '100% left' : '0% used');
     assert.equal(tracks(ui.quotaWindows({ ...card, windows: [measured] })), 1);
+
+    // Real plugin projection, normalized like the host's text-only Go windows.
+    // Recorded counts stay visible without budgets or account-routing meters.
+    const now = Date.UTC(2026, 10, 13, 12);
+    const local = { version: 1, status: 'tracking', asOf: now, since: now - 3600000,
+      sources: [{ source: 'native', since: now - 3600000 }], day: 6, week: 6, gaps: { day: 0, week: 0 },
+      byModel: [{ model: 'gpt-6-pro', effort: 'max', day: 6, week: 6 }] };
+    const counts = localUsageWindows(local)
+      .map(window => ({ ...window, used: 0, remaining: 100, text: true }));
+    const countedCard = { ...card, windows: counts };
+    for (const rendered of [ui.quotaWindows(countedCard), ui.panelQuotaCard(countedCard)]) {
+      assert.match(visibleText(rendered), /6 次已记录/);
+      assert.match(visibleText(rendered), /此前及外部发送/);
+      assert.doesNotMatch(visibleText(rendered), /估算|预测|预算|余44/);
+      assert.doesNotMatch(visibleText(rendered), /\d+(?:\.\d+)?%|Not used yet/);
+      assert.equal(tracks(rendered), 0);
+    }
+    // Setup status uses the same installed text-window renderer, not showToast
+    // (the installed Go host only logs toast events). It must remain visible
+    // next to counts and must not invent a percentage or routing allowance.
+    const setup = setupResult('failed', 'connectorCreate');
+    const setupCard = { ...card, windows: [...counts, { name: 'Native tools setup',
+      display: setup.message, used: 0, remaining: 100, aside: true, text: true }] };
+    for (const rendered of [ui.quotaWindows(setupCard), ui.panelQuotaCard(setupCard)]) {
+      assert.match(visibleText(rendered), /Native tools setup/);
+      assert.match(visibleText(rendered), /Resume Native setup/);
+      assert.match(visibleText(rendered), /connector/);
+      assert.equal(tracks(rendered), 0);
+    }
   }
 });

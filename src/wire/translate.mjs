@@ -208,6 +208,7 @@ export async function* translate(source, prepared) {
 }
 
 export function errorType(failure) {
+  if (failure.code === 'verification') return 'permission_error';
   return failure.code === 'cooldown'
     ? 'rate_limit_error'
     : failure.code === 'expired' ? 'authentication_error'
