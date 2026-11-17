@@ -5,6 +5,10 @@ The final runtime code was tested at commit
 promotion changes version metadata and verification documentation. The final
 release, tag and local installation identify the same release tree.
 
+The formal-version install at `0d0b94ad63ccf3d41877cd009454ed5642a4b6d0`
+also passed the live post-restart check below. All 76 installed runtime source
+files matched the release workspace after normalizing line endings.
+
 ## Required behavior
 
 1. Advertise the target Web Pro model's official 400,000-token total window and
@@ -29,6 +33,14 @@ release, tag and local installation identify the same release tree.
   70K compaction trigger; the production target is 230.4K. The model also reported
   successful history retrieval; an independent withheld-record check after the
   formal-version restart is recorded separately.
+- [Formal-version restart and history retrieval](evidence/postrestart-0.5.8.json)
+  passed: the same compacted chat ran three passing tests after normal plugin
+  installation/reload, without another login or user verification. It returned
+  an old tool-output record ID and exact requested line; both were independently
+  checked against the encrypted archive and the original sample. Only the test
+  command ran in the shell, with no sample-file reread or hash computation by the
+  model. The record existed in both local account stores, and distinct Native
+  runtime generations were observed before and after installation.
 - The final full suite ran **1,872 tests: 1,843 passed, 29 skipped, zero failures**.
   The skips are optional/platform integration checks. Focused real backend and
   pinned compaction tests passed after the live-discovered fixes. Package checks
@@ -81,7 +93,7 @@ release, tag and local installation identify the same release tree.
 Only authenticated Native request text is recorded; unverified host-generated
 summary requests and text truncated before reaching the plugin are excluded.
 The 256K recall result is a finite sample, while the 380K input sample failed.
-Formal-version checkpoint/history reopening is checked after installation.
+Formal-version checkpoint/history reopening passed after installation.
 A physical Windows reboot has not been performed. Magpie login autostart is on;
 normal restart persistence cannot prevent upstream session revocation or a new
 browser challenge. Those events remain visible rather than being treated as
