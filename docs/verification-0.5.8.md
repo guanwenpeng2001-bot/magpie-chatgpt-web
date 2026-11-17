@@ -1,9 +1,9 @@
-# 0.5.8 candidate verification
+# 0.5.8 verification
 
-This is a development verification record, not a release acceptance claim. The
-installed recovery candidate is 0.5.8-rc.2 at commit
-`5ee4710bc9c7e3e91c51594c6165a48fa5de506e`. The final release, tag and
-installation must identify the same code.
+The final runtime code was tested at commit
+`0647762608aa7a458e8096aa66468b0ed5826dbd` (0.5.8-rc.8). Formal 0.5.8
+promotion changes version metadata and verification documentation. The final
+release, tag and local installation identify the same release tree.
 
 ## Required behavior
 
@@ -21,6 +21,18 @@ installation must identify the same code.
    compaction and process restart.
 
 ## Evidence currently recorded
+
+- [Live automatic compaction and continuation](evidence/live-continuity-0.5.8.json)
+  passed in the original test chat after repairing the failure: nine sequential
+  sample reads, three passing command tests, and 12/12 original associations in
+  both the saved 3,997-character summary and the final answer. The test used a
+  70K compaction trigger; the production target is 230.4K. The model also reported
+  successful history retrieval; an independent withheld-record check after the
+  formal-version restart is recorded separately.
+- The final full suite ran **1,872 tests: 1,843 passed, 29 skipped, zero failures**.
+  The skips are optional/platform integration checks. Focused real backend and
+  pinned compaction tests passed after the live-discovered fixes. Package checks
+  and credential scans passed; installed-host tests used Magpie 0.1.4400.
 
 - The installed recovery candidate reused the user's completed browser login
   through the normal Magpie sign-in callback, preserving the existing route and
@@ -63,13 +75,17 @@ installation must identify the same code.
   failover, tool-emission, model controls, policy and package checks passed 45
   additional focused tests without skips. Final installed checks follow below.
 
-## Still required before final acceptance
+## Limits and post-install checks
 
-Installed ordinary Native command execution; actual logged-browser binding;
-complete maximum-window transmission and recall; automatic compaction and
-continuation; eligible-account quota failover including compacted history; and
-plugin/runtime restart checks. A physical Windows reboot has not been performed
-by this verification. Never replace these checks with a directory number change.
+1M is an encrypted searchable archive, not a native million-token context.
+Only authenticated Native request text is recorded; unverified host-generated
+summary requests and text truncated before reaching the plugin are excluded.
+The 256K recall result is a finite sample, while the 380K input sample failed.
+Formal-version checkpoint/history reopening is checked after installation.
+A physical Windows reboot has not been performed. Magpie login autostart is on;
+normal restart persistence cannot prevent upstream session revocation or a new
+browser challenge. Those events remain visible rather than being treated as
+proof that the account was lost.
 
 Official product source: [ChatGPT pricing](https://chatgpt.com/pricing/) lists a
 400K Pro reasoning total window. Input shares that total with other context and

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.8 — candidate
+## 0.5.8 — 2026-11-18
 
 - Keep account credentials, persistent Chrome profiles and Native model routes bound together. Reauthentication reuses the saved profile; adding an already saved account retains its model route and binds the authenticated browser. Validate the actual session identity while accepting normal NextAuth cookie rotation. Cancellation preserves user pages and cleans up late-created login pages.
 - Add `native/auto/<model>` selectors shared by eligible accounts. Use Magpie's account selection and quota handling, preserve canonical requests, and keep legacy account-pinned selectors. Native quota refusals before output remain 429; verification preserves sign-in and reveals the correct browser. Tool and text output are never replayed to another account.

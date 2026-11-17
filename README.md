@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.5.8` (candidate verification in progress). Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.5.8`. Historical host verification used: magpie `0.1.3930`; current isolated host regressions use `0.1.4400` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Native tools mode
 
@@ -52,7 +52,7 @@ Get magpie from https://usemagpie.ai or the [magpie releases](https://github.com
 Install the plugin and start sign-in in PowerShell:
 
 ```powershell
-magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.7
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.8
 magpie plugin login chatgpt-web
 ```
 
@@ -71,7 +71,7 @@ Git installs consume committed source. The installer resolves `playwright-core ~
 Finish active turns, then rerun the published installation command:
 
 ```powershell
-magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.7
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.8
 ```
 
 Local `git+file://` installs have a verified upstream magpie **stale-pin** defect (D-167): reinstalling can report success while reusing an older cached checkout because `~/.config/magpie/plugins/bun.lock` still pins the old commit. This is an upstream installer defect, not a plugin runtime bug.

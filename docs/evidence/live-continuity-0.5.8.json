@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-17T22:19:41.080Z",
+  "status": "live-compaction-and-command-continuation-pass",
+  "testedCommit": "0647762608aa7a458e8096aa66468b0ed5826dbd",
+  "testedVersion": "0.5.8-rc.8",
+  "model": "chatgpt-web/native/auto/gpt-6-pro",
+  "sameChat": true,
+  "threadSha256": "db0e37dc95e497964acbfe2dec0bf9fffe0cb9444e45e943e1f36bce322f9f7a",
+  "rolloutSha256": "a221f9b37a1e7b47e853fb17f113adafbbe2de366d63a886d1d1c13e7a1ccde9",
+  "testThresholdTokens": 70000,
+  "productionThresholdTokens": 230400,
+  "productionTotalTokens": 400000,
+  "productionInputTokens": 256000,
+  "inputBudgetIsLocalAllocation": true,
+  "initialRunFailedBeforeFixes": true,
+  "userCompletedBrowserVerification": true,
+  "reads": [
+    {
+      "file": "part-01.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-02.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-03.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-04.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-05.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-06.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-07.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-08.txt",
+      "exit": 0
+    },
+    {
+      "file": "part-09.txt",
+      "exit": 0
+    }
+  ],
+  "commandTests": {
+    "runs": 1,
+    "passingTests": 3,
+    "failedTests": 0
+  },
+  "compactionCount": 1,
+  "compactions": [
+    {
+      "replacementItems": 9,
+      "summaryChars": [
+        3997
+      ],
+      "exactAssociations": [
+        12
+      ]
+    }
+  ],
+  "recalledAssociations": {
+    "total": 12,
+    "correct": 12,
+    "checks": [
+      {
+        "key": "RECALL_01",
+        "correct": true
+      },
+      {
+        "key": "RECALL_02",
+        "correct": true
+      },
+      {
+        "key": "RECALL_03",
+        "correct": true
+      },
+      {
+        "key": "RECALL_04",
+        "correct": true
+      },
+      {
+        "key": "RECALL_05",
+        "correct": true
+      },
+      {
+        "key": "RECALL_06",
+        "correct": true
+      },
+      {
+        "key": "RECALL_07",
+        "correct": true
+      },
+      {
+        "key": "RECALL_08",
+        "correct": true
+      },
+      {
+        "key": "RECALL_09",
+        "correct": true
+      },
+      {
+        "key": "RECALL_10",
+        "correct": true
+      },
+      {
+        "key": "RECALL_11",
+        "correct": true
+      },
+      {
+        "key": "RECALL_12",
+        "correct": true
+      }
+    ]
+  },
+  "historyRetrieval": {
+    "modelReportedSuccess": true,
+    "outerHarnessRecordsInternalHistoryCalls": false,
+    "scope": "authenticated Native request text only; unverified host summaries excluded"
+  },
+  "physicalOsRebootTested": false,
+  "postReleaseCheckpointRestartTested": false,
+  "artifacts": [
+    {
+      "name": "058-installed-continuity.jsonl",
+      "sha256": "f0658d8221262518f707ab24b0116299c1c783d523815c4b9603dd2cf294e767"
+    },
+    {
+      "name": "058-verified-continuation.jsonl",
+      "sha256": "d0cd72453d6e2a47a85656dfaf60e0cbf66971f8d2d964ca2c9c8f1834b17fd8"
+    },
+    {
+      "name": "prompt.txt",
+      "sha256": "bb741aafaf5f6e54ee490823326a9853a94cc0acc84069c7955ee78b1c0fe97e"
+    },
+    {
+      "name": "verification.test.mjs",
+      "sha256": "bdd824e56bfefb46327bb0d3ad81b707e8dfac92623b5951c57066aa47695621"
+    }
+  ],
+  "limitations": [
+    "Uses a deliberately lower compaction threshold to exercise recovery without exhausting the production window.",
+    "Codex can truncate tool outputs before this plugin sees them; this is not complete-file retention proof.",
+    "Internal history tool claims in the answer are not a separate tool-call trace; a post-restart withheld-record check follows.",
+    "400K is total metadata. 380K raw-input recall failed; the release allocates less than 256K compiled input.",
+    "Verification is controlled by the upstream site; permanent freedom from challenges is not claimed."
+  ],
+  "privacy": {
+    "rawPrompts": false,
+    "rawAnswers": false,
+    "associationValues": false,
+    "credentials": false,
+    "accountIdentifiers": false,
+    "absoluteLocalPaths": false
+  }
+}
