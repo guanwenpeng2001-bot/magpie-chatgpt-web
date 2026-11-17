@@ -29,7 +29,7 @@ export const errors = Object.freeze({
   pageShape: { status: 502, template: 'The ChatGPT page or model picker changed; update the plugin.' },
   harvest: { status: 502, template: 'The answer reader failed; no completed reply can be confirmed.' },
   protocol: { status: 502, template: 'The backend or upstream protocol is invalid.' },
-  verification: { status: 502, template: 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.' },
+  verification: { status: 403, template: 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.' },
   capacity: { status: 503, template: 'Local backend capacity is exhausted; active work and cooldowns may clear, but sign-in blocks persist until the backend restarts.' },
   browserDependency: { status: 503, template: 'The playwright-core dependency is unavailable; install the packaged dependency.' },
   browserProfile: { status: 502, template: 'The browser profile restored a page other than about:blank.' },

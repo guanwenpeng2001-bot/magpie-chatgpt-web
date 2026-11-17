@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.7-local.1 — 2026-11-18
+
+- Preserve Native browser verification as HTTP 403 before the stream is committed, with a non-retryable error and unchanged sign-in state. Buffer only the empty prelude, bounded to 64 KiB; never replay a submitted turn or buffer tool/text output.
+- Give cold-start browser checks the existing 30-second composer readiness window to finish on the same page. Persistent checks remain explicit verification failures. Verification, authentication and quota failures during Native startup no longer fall through to a second text submission.
+- Return ordinary browser verification as HTTP 403 with an explicit non-retryable code rather than HTTP 502. Browser profiles and completed Native provisioning remain reusable after restart; interactive checks still require the user.
+
 ## 0.5.6 — 2026-11-13
 
 - Document a reproduced Magpie 0.1.3930 global-quota timeout path that can replace a working subscription card with a misleading balance-endpoint error. Verify the existing targeted refresh command, direct plugin hook and running gateway; publish pinned-function evidence. Do not infer missing credentials, invent a balance endpoint or estimate allowance from that placeholder.

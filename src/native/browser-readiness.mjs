@@ -52,14 +52,19 @@ export function patchNativeBrowserReadiness(source) {
   const navigationMessage = 'Execution context was destroyed, most likely because of a navigation';
   const navigationMessages = [navigationMessage, navigationMessage + '.',
     'page.evaluate: ' + navigationMessage, 'page.evaluate: ' + navigationMessage + '.'];
-  const probe = 'if(i===0){Ke(n);let magpieRemaining=o-Date.now();if(magpieRemaining>0){'
+  const probe = 'magpieVerificationPending=!1;if(i===0){Ke(n);let magpieRemaining=o-Date.now();if(magpieRemaining>0){'
     + 'let magpieVerification;try{magpieVerification=await Me(Ye(e.evaluate(' + nativeBrowserVerification.toString()
     + '),Math.min(Sf,magpieRemaining)),n)}catch(magpieProbeError){'
     + 'if(!(magpieProbeError instanceof Error)||magpieProbeError.name!=="Error"||!'
     + JSON.stringify(navigationMessages) + '.includes(magpieProbeError.message))throw magpieProbeError}'
-    + 'Ke(n);if(magpieVerification)throw new q('
+    + 'Ke(n);magpieVerificationPending=magpieVerification===!0}}';
+  // Cold Chrome starts can briefly show an automatically resolving check.
+  // Observe the same page within the original deadline; never reload or send.
+  const failure = 'if(magpieVerificationPending)throw new q('
     + '"ChatGPT requires browser verification before this message can be sent. Complete the check in the signed-in ChatGPT browser, then retry.",'
-    + '{status:403,errorType:"permission_error",code:"chatgpt_security_check",retryable:!1})}}';
-  const after = before.replace('await Me(new Promise', probe + 'await Me(new Promise');
+    + '{status:403,errorType:"permission_error",code:"chatgpt_security_check",retryable:!1});';
+  const after = before.replace('i=0;', 'i=0,magpieVerificationPending=!1;')
+    .replace('await Me(new Promise', probe + 'await Me(new Promise')
+    .replace('throw Error("ChatGPT composer', failure + 'throw Error("ChatGPT composer');
   return source.replace(before, () => after);
 }

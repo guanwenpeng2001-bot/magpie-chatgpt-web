@@ -30,7 +30,7 @@ for (const result of [{ models: [] }, { models: [{ title: 'No slug' }] }, new Ba
 }
 
 for (const [code, status, message, headers] of [
-  ['verification', 502, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.', {}],
+  ['verification', 403, 'ChatGPT asked to verify you are human. Complete verification in the Chrome window revealed by the plugin. Retry if the current request does not resume automatically.', { 'x-magpie-sign-in': 'kept', 'x-should-retry': 'false' }],
   ['expired', 401, 'Sign in again to refresh the ChatGPT session.', { 'x-magpie-sign-in': 'expired' }],
   ['cooldown', 429, 'The account is cooling down after a rate limit.', { 'retry-after': '120' }],
   ['browserDependency', 503, 'The playwright-core dependency is unavailable; install the packaged dependency.', {}],

@@ -74,7 +74,7 @@ test('every error envelope is credential-free', () => {
     const envelope = publicError(new BackendError(code));
     assert.ok(!('cookie' in envelope));
     assert.ok(!('token' in envelope));
-    assert.deepEqual(Object.keys(envelope), ['status', 'message', ...(code === 'cooldown' ? ['retryAfter'] : []), ...(code === 'expired' ? ['signIn'] : [])]);
+    assert.deepEqual(Object.keys(envelope), ['status', ...(code === 'verification' ? ['code', 'retryable'] : []), 'message', ...(code === 'cooldown' ? ['retryAfter'] : []), ...(code === 'expired' ? ['signIn'] : [])]);
   }
   const marker = globalThis.crypto.randomUUID();
   const foreign = new Error(marker);

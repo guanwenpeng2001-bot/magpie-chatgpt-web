@@ -181,11 +181,11 @@ for (const patched of [false, true]) test(`real pinned worker readiness (${patch
     const isGeneric = error => !(error instanceof AdapterError) && /composer is unavailable/.test(error.message);
 
     // Positive control proves the original bug on the same fixture, while the
-    // patched worker returns the native typed error before its existing deadline.
+    // patched worker returns the native typed error at its existing deadline.
     for (const title of ['请稍候…', 'Just a moment...']) {
       const h = makePage({ title });
       await assert.rejects(worker.activeComposer(h.page, 80), patched ? isSecurity : isGeneric, title);
-      assert.equal(h.counters.probes, patched ? 1 : 0);
+      assert.ok(patched ? h.counters.probes >= 1 : h.counters.probes === 0);
       assert.equal(h.counters.navigations, 0);
     }
     const challengeScripts = [
@@ -200,10 +200,17 @@ for (const patched of [false, true]) test(`real pinned worker readiness (${patch
     if (patched) {
       const h = makePage();
       let error;
-      try { await worker.prepareChatSurface(h.page); } catch (caught) { error = caught; }
+      try { await worker.activeComposer(h.page, 100); } catch (caught) { error = caught; }
       assert.ok(isSecurity(error), 'preparation propagates typed verification without auth handling');
       assert.equal(submittedTurnFailure({ runtime: { submission: { phase: 'prepared' } } }, error, {}), error);
-      assert.equal(h.counters.probes, 1);
+      assert.ok(h.counters.probes >= 1);
+      const transient = makePage({ counts: [0, 0, 1] });
+      assert.equal(await worker.activeComposer(transient.page, 500), transient.composer,
+        'a cold-start check may complete in the same page without a failed request');
+      assert.equal(transient.counters.navigations, 0);
+      const cleared = makePage({ probe: (() => { let attempts = 0; return () => ++attempts === 1; })() });
+      await assert.rejects(worker.activeComposer(cleared.page, 120), isGeneric,
+        'a challenge that disappeared must not be reported as still pending');
     }
 
     // No generic title, challenge-related prose, hidden/stale widget, other

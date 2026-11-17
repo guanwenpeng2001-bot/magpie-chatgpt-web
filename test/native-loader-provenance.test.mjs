@@ -5,6 +5,7 @@ import { toTextRequest } from '../src/native/fallback.mjs';
 import { prepare, complete, NONCE, CHECKED, TICKET } from '../src/native/provenance.mjs';
 import { onProvider } from '../src/native/middleware.js';
 import { parseSSE } from '../src/wire/sse.mjs';
+import { BackendError } from '../backend/guard.mjs';
 
 const auth = { type: 'oauth', refresh: 'fixture', profile: 'proof-fallback' };
 const bodyFor = (extra = {}) => ({ model: `native/${auth.profile}/gpt-5.6-pro`, stream: false,
@@ -28,6 +29,7 @@ async function fixture({ state = 'healthy', answer = () => 'Fixture title', subm
   const native = { runtime: async () => {
     stats.runtime++;
     if (state === 'startup-failed') throw new Error('fixture startup failure');
+    if (state === 'verification') throw new BackendError('verification');
     return {
       health: async () => { stats.health++; return state !== 'unhealthy'; },
       responses: async body => { stats.native++; return submit ? submit(body) : Response.json({ output: [] }); },
@@ -51,6 +53,35 @@ async function fixture({ state = 'healthy', answer = () => 'Fixture title', subm
     body: JSON.stringify(body), headers,
   }) };
 }
+
+test('native browser verification surfaces as HTTP 403 and never submits through text', async t => {
+  const events = [
+    { type: 'response.created', response: { output: [] } },
+    { type: 'response.failed', response: { output: [], retryable: false,
+      error: { code: 'chatgpt_security_check', type: 'permission_error', message: 'Complete browser verification.' } } },
+  ];
+  const { send, stats, commands } = await fixture({ submit: () => new Response(
+    events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } }) });
+  const response = await send(proven(t, { stream: true }));
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.retryable, false);
+  assert.equal(stats.native, 1);
+  assert.equal(commands.length, 0);
+});
+
+test('verification during native startup keeps sign-in and does not fall back', async t => {
+  const { send, stats, commands } = await fixture({ state: 'verification' });
+  const response = await send(proven(t, { stream: true }));
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get('x-magpie-sign-in'), 'kept');
+  assert.equal(response.headers.get('x-should-retry'), 'false');
+  const { error } = await response.json();
+  assert.equal(error.code, 'verification');
+  assert.equal(error.type, 'permission_error');
+  assert.equal(error.retryable, false);
+  assert.equal(stats.native, 0);
+  assert.equal(commands.length, 0);
+});
 
 for (const slug of ['gpt-5.6-pro', 'gpt-6-pro']) for (const stream of [false, true]) {
   for (const metadata of [undefined, {}, { 'x-codex-turn-metadata': JSON.stringify({ thread_source: 'thread_title' }) }]) {

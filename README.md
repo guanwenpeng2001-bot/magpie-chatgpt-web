@@ -303,12 +303,14 @@ Invalid definitions fail before dispatch. Streaming failures produce an error ev
 
 ## Developer verification
 
+Browser verification is a non-retryable HTTP 403 and keeps the saved login. Native cold-start checks may finish within the existing 30-second readiness window without resubmitting the message. If a check persists, complete it in the account's ChatGPT browser before retrying. Restarting Magpie reuses the existing profile and Native provisioning; it cannot bypass a new interactive verification required by ChatGPT. On Windows, `magpie autostart on` starts the gateway when the user logs in.
+
 Install dependencies in the source checkout before testing; magpie's plugin install does not populate this checkout's `node_modules`.
 
 ```powershell
 npm ci --ignore-scripts
 node scripts/check-package.mjs
-node --test
+node --test "test/*.test.mjs"
 ```
 
 Chrome is required for browser fixtures. Without `playwright-core`, some tests skip and a smaller passing suite is not full verification. The launch gate is intentionally separate: `node test/launch-gate.mjs` checks browser lifecycle with traffic forced offline. Live sign-in and live turns require separate authorization.

@@ -52,7 +52,7 @@ test('offline challenge turn routing', async t => {
       else assert.equal(frames.filter(frame => frame.type === 'delta').map(frame => frame.text).join(''), fixture.batches.join(''));
       assert.equal(fixture.requests.length - before, ['challenge', 'page-shape'].includes(mode) ? 0 : 1);
       if (expected === 'verification') {
-        assert.deepEqual(failure.toJSON(), { status: 502, message: verification });
+        assert.deepEqual(failure.toJSON(), { status: 403, code: 'verification', retryable: false, message: verification });
         (await guard.begin())();
         assert.equal(context.pages().some(page => !page.isClosed() && page.url().startsWith(fixture.origin)), true, 'unresolved challenge pages stay available for recovery');
       } else if (expected === 'expired') await assert.rejects(guard.begin(), { code: 'expired' });

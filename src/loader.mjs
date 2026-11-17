@@ -10,6 +10,7 @@ import { restore, NONCE, CHECKED, TICKET } from './native/provenance.mjs';
 import { isCompaction, textFallback } from './native/fallback.mjs';
 import { nativeTurnHeaders } from './native/compaction.mjs';
 import { adaptResponsesStream } from './native/stream.mjs';
+import { preserveNativeVerification } from './native/response-errors.mjs';
 import {
   assertPreparedInputFits,
   estimatePreparedInput,
@@ -62,7 +63,11 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
               const target = nativeRoute(nativeRequest.model, nativeRequest.reasoning?.effort ?? headerEffort);
               if (target?.daemonSupported) {
                 let runtime;
-                try { runtime = await native.runtime(current, signal); } catch { /* use text when startup failed */ }
+                try { runtime = await native.runtime(current, signal); } catch (error) {
+                  // A known account refusal is not a daemon startup outage.
+                  if (error instanceof BackendError && ['verification', 'expired', 'cooldown'].includes(error.code)) throw error;
+                  /* use text when startup failed */
+                }
                 // Cancellation is not a startup failure eligible for fallback.
                 signal?.throwIfAborted();
                 const payload = { ...nativeRequest, model: target.model,
@@ -76,7 +81,8 @@ export function makeLoader({ bridge, profileRoot, input, native }) {
                 if (!compact && hasProof && runtime && await runtime.health(signal)) {
                   preflight = false;
                   // Once submitted, never replay through text: tools may have run.
-                  return adaptResponsesStream(await runtime.responses(payload, forwardedHeaders, signal), request);
+                  return adaptResponsesStream(await preserveNativeVerification(
+                    await runtime.responses(payload, forwardedHeaders, signal), signal), request);
                 }
               }
             }
