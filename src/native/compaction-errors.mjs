@@ -31,7 +31,8 @@ export function patchNativeCompactionErrors(source) {
     headers['x-magpie-sign-in'] = authentication ? 'expired' : 'kept';
     // Native retryable:false may mean "do not repeat on this account". Quota
     // still permits the host to choose another account serving the same model.
-    if (fields.retryable === false && fields.status !== 429) headers['x-should-retry'] = 'false';
+    if (fields.retryable === false && fields.status !== 429
+        && fields.code !== 'account_model_unavailable') headers['x-should-retry'] = 'false';
     if (fields.status === 429) {
       const seconds = Number(fields.retry_after ?? fields.retryAfter);
       if (Number.isFinite(seconds) && seconds > 0) headers['retry-after'] = String(Math.min(604800, Math.ceil(seconds)));

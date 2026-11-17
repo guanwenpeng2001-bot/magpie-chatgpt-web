@@ -51,7 +51,7 @@ test('hidden or unreferenced tooltips remain explicitly unavailable, never 429',
   }
 });
 
-test('actual pinned selection range branch executes 429 only for bound quota; other disabled Pro remains 400', async t => {
+test('actual pinned selection range branch uses 429 for quota and 503 for an unavailable account model', async t => {
   const path = process.env.NATIVE_REFERENCE_CLI ?? 'C:/Users/Administrator/.config/magpie/chatgpt-web-native/runtime-6.1.18/payload/app/cli.js';
   let raw;
   try { raw = await readFile(path, 'utf8'); } catch (error) { if (error.code === 'ENOENT' && !process.env.NATIVE_REFERENCE_CLI) { t.skip('Pinned CLI not installed; never downloads'); return; } throw error; }
@@ -70,8 +70,8 @@ test('actual pinned selection range branch executes 429 only for bound quota; ot
   const helpersStart = patched.indexOf('\nfunction nativeDisabledProRow');
   assert.ok(helpersStart > 0);
   const helpers = patched.slice(helpersStart);
-  for (const [options, expected] of [[{ hidden: true }, 429], [{ reason: 'Upgrade required' }, 400],
-    [{ hoverError: true }, 400], [{ duplicateId: true }, 400]]) {
+  for (const [options, expected] of [[{ hidden: true }, 429], [{ reason: 'Upgrade required' }, 503],
+    [{ hoverError: true }, 503], [{ duplicateId: true }, 503]]) {
     const f = modelControlsMenu(options);
     class AdapterError extends Error { constructor(message, fields) { super(message); Object.assign(this, fields); } }
     const context = { q: AdapterError, e: { url: () => 'fixture:' }, u: 4,
@@ -82,8 +82,8 @@ test('actual pinned selection range branch executes 429 only for bound quota; ot
     const check = await nativeGuard;
     await assert.rejects(check({}, f.menu), error => {
       assert.equal(error.status, expected);
-      assert.equal(error.code, expected === 429 ? 'rate_limit_exceeded' : 'chatgpt_effort_locked');
-      assert.equal(error.errorType, expected === 429 ? 'rate_limit_error' : 'invalid_request_error');
+      assert.equal(error.code, expected === 429 ? 'rate_limit_exceeded' : 'account_model_unavailable');
+      assert.equal(error.errorType, expected === 429 ? 'rate_limit_error' : 'server_error');
       assert.equal(error.retryable, false);
       if (expected === 429) assert.ok(error.message.endsWith('已达限额。请在明天 14:54 后重试。'));
       assert.ok(!('retryAfter' in error) && !('retry_after' in error)); return true;

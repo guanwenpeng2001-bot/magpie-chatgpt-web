@@ -18,11 +18,11 @@ const threadId = '22222222-2222-4222-8222-222222222222';
 const turnId = '11111111-1111-4111-8111-111111111111';
 const within = (parent, child) => { const path = relative(parent, child); return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith('..\\') && !path.startsWith('../')); };
 
-function request() {
+function request(modelRoute = route, effort = 'high') {
   const turn = { thread_id: threadId, turn_id: turnId, session_id: threadId, request_kind: 'turn',
     sandbox_mode: 'workspace-write', sandbox: 'windows-sandbox', workspaces: { 'C:\\synthetic': { git: { branch: 'fixture' } } } };
-  return { model: `chatgpt-web/${route}`, stream: true, store: false, instructions: 'Synthetic offline task; preserve metadata.',
-    prompt_cache_key: threadId, reasoning: { effort: 'high', summary: 'auto' }, tool_choice: 'auto', parallel_tool_calls: true,
+  return { model: `chatgpt-web/${modelRoute}`, stream: true, store: false, instructions: 'Synthetic offline task; preserve metadata.',
+    prompt_cache_key: threadId, reasoning: { effort, summary: 'auto' }, tool_choice: 'auto', parallel_tool_calls: true,
     include: ['reasoning.encrypted_content'], client_metadata: { 'x-codex-turn-metadata': JSON.stringify(turn), thread_id: threadId, turn_id: turnId, fixture: { preserve: [1, false, null] } },
     input: [
       { type: 'message', role: 'developer', id: 'environment', content: [{ type: 'input_text', text: '<environment_context><cwd>C:\\synthetic</cwd></environment_context>' }],
@@ -73,7 +73,8 @@ async function fixtureServer(input) {
     async models(auth) {
       log({ stage: 'native-models', profile: auth.profile, authType: auth.type });
       if (auth.type !== 'oauth' || !['account-a', 'account-b'].includes(auth.profile)) throw new Error('Non-fixture account refused');
-      return describeNativeCatalogue(nativeCatalog({ solAvailable: true }).filter(row => row.slug === 'chatgpt-web/gpt-6-sol'), auth.profile);
+      return describeNativeCatalogue(nativeCatalog({ solAvailable: true, proAvailable: fixtureSlug.endsWith('-pro') })
+        .filter(row => row.slug === 'chatgpt-web/' + fixtureSlug), auth.profile);
     },
     async runtime(auth) {
       if (auth.type !== 'oauth' || !['account-a', 'account-b'].includes(auth.profile)) throw new Error('Non-fixture account refused');
@@ -95,7 +96,13 @@ async function fixtureServer(input) {
                 controller.close();
                 return;
               }
-              if (scenario === 'after-output' && auth.profile === firstProfile) {
+              if (scenario === 'account-model-unavailable' && auth.profile === firstProfile) {
+                controller.enqueue(frame({ type: 'response.failed', response: { ...response, status: 'failed', output: [], retryable: false,
+                  error: { type: 'server_error', code: 'account_model_unavailable', message: 'Synthetic requested model unavailable for this account.' } } }));
+                controller.close();
+                return;
+              }
+              if (scenario.endsWith('after-output') && auth.profile === firstProfile) {
                 const call = { type: 'function_call', id: 'fc_partial', call_id: 'call_partial', name: 'echo', namespace: 'functions', arguments: '{}', status: 'completed' };
                 controller.enqueue(frame({ type: 'response.output_item.added', output_index: 0, item: call }));
                 controller.enqueue(frame({ type: 'response.output_item.done', output_index: 0, item: call }));
@@ -103,9 +110,12 @@ async function fixtureServer(input) {
                 (async () => {
                   const until = Date.now() + 8000;
                   while (!existsSync(releaseFile) && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
-                  log({ stage: 'late-failure', clientObserved: existsSync(releaseFile), profile: auth.profile });
-                  controller.enqueue(frame({ type: 'response.failed', response: { ...response, status: 'failed', output: [call], retryable: true,
-                    error: { type: 'rate_limit_error', code: 'rate_limit_exceeded', message: 'Synthetic cooldown after output', status: 429 } } }));
+                  const unavailable = scenario === 'account-model-unavailable-after-output';
+                  const error = unavailable
+                    ? { type: 'server_error', code: 'account_model_unavailable', message: 'Synthetic requested model unavailable after output.', status: 503 }
+                    : { type: 'rate_limit_error', code: 'rate_limit_exceeded', message: 'Synthetic cooldown after output', status: 429 };
+                  log({ stage: 'late-failure', clientObserved: existsSync(releaseFile), profile: auth.profile, errorCode: error.code });
+                  controller.enqueue(frame({ type: 'response.failed', response: { ...response, status: 'failed', output: [call], retryable: !unavailable, error } }));
                   controller.close();
                 })().catch(error => { log({ stage: 'stream-cancelled', name: error.name }); });
                 return;
@@ -144,7 +154,7 @@ async function fixtureServer(input) {
         const response = await loader.fetch(url, init);
         log({ stage: 'loader-response', profile: auth.profile, status: response.status, retryAfter: response.headers.get('retry-after'),
           signIn: response.headers.get('x-magpie-sign-in'), shouldRetry: response.headers.get('x-should-retry'),
-          ...(response.status === 429 ? { error: (await response.clone().json()).error } : {}) });
+          ...([429, 503].includes(response.status) ? { error: (await response.clone().json()).error } : {}) });
         return response;
       } };
     } },
@@ -152,6 +162,8 @@ async function fixtureServer(input) {
 }
 
 async function gatewayFixture(t, scenario) {
+  const slug = scenario.startsWith('account-model-unavailable') ? 'gpt-6-pro' : 'gpt-6-sol';
+  const selectedRoute = 'native/auto/' + slug;
   const temporary = await mkdtemp(join(tmpdir(), 'magpie-native-failover-'));
   const plugin = join(temporary, 'plugin');
   await mkdir(plugin);
@@ -185,7 +197,7 @@ async function gatewayFixture(t, scenario) {
     import { providerHook } from ${JSON.stringify(source('src/hooks/provider.mjs'))};
     import { authHook } from ${JSON.stringify(source('src/hooks/auth.mjs'))};
     import { nativeCatalog, describeNativeCatalogue } from ${JSON.stringify(source('src/native/models.mjs'))};
-    const scenario=${JSON.stringify(scenario)}, releaseFile=${JSON.stringify(releaseFile)}, fixtureEndpoint=${JSON.stringify(`http://127.0.0.1:${proxyPort}/v1`)};
+    const scenario=${JSON.stringify(scenario)}, fixtureSlug=${JSON.stringify(slug)}, releaseFile=${JSON.stringify(releaseFile)}, fixtureEndpoint=${JSON.stringify(`http://127.0.0.1:${proxyPort}/v1`)};
     let firstProfile;
     setInterval(()=>{ if(existsSync(${JSON.stringify(stopFile)}))process.exit(0); },100).unref();
     export default {id:'native-failover-fixture',server:${fixtureServer.toString()}};
@@ -225,13 +237,13 @@ async function gatewayFixture(t, scenario) {
     try {
       const response = await fetch(base + '/v1/models', { signal: AbortSignal.timeout(1000) });
       catalogue = await response.json();
-      if (JSON.stringify(catalogue).includes(route)) break;
+      if (JSON.stringify(catalogue).includes(selectedRoute)) break;
     } catch { /* startup is bounded below */ }
     assert.equal(gateway.exitCode, null, gatewayLog);
     await delay(100);
   }
-  assert.match(JSON.stringify(catalogue), /native\/auto\/gpt-6-sol/, gatewayLog + '\n' + JSON.stringify(await events(eventsFile)));
-  return { base, eventsFile, releaseFile, version, blocked, log: () => gatewayLog };
+  assert.ok(JSON.stringify(catalogue).includes(selectedRoute), gatewayLog + '\n' + JSON.stringify(await events(eventsFile)));
+  return { base, eventsFile, releaseFile, version, blocked, route: selectedRoute, slug, log: () => gatewayLog };
 }
 
 test('auto provenance permits identical cross-account retries, while changed retries and pinned routes stay blocked', () => {
@@ -255,11 +267,11 @@ test('auto provenance permits identical cross-account retries, while changed ret
   }
 });
 
-for (const scenario of ['quota', 'quota-no-hint', 'after-output']) test(`installed Magpie auto-account ${scenario} uses two isolated fake OAuth accounts`, {
+for (const scenario of ['quota', 'quota-no-hint', 'after-output', 'account-model-unavailable', 'account-model-unavailable-after-output']) test(`installed Magpie auto-account ${scenario} uses two isolated fake OAuth accounts`, {
   skip: !existsSync(executable) && 'magpie.exe is not installed', timeout: 120_000,
 }, async t => {
   const fixture = await gatewayFixture(t, scenario);
-  const original = request();
+  const original = request(fixture.route, fixture.slug.endsWith('-pro') ? 'max' : 'high');
   const response = await fetch(fixture.base + '/v1/responses', { method: 'POST', headers: {
     'content-type': 'application/json', authorization: 'Bearer synthetic-local-client', 'user-agent': 'codex_cli_rs/0.162.1',
     originator: 'codex_cli_rs', session_id: threadId,
@@ -282,36 +294,43 @@ for (const scenario of ['quota', 'quota-no-hint', 'after-output']) test(`install
     await delay(20);
   }
   const calls = captured.filter(event => event.stage === 'native');
-  const catalogue = captured.filter(event => event.stage === 'models' && profiles.includes(event.profile) && event.ids.includes(route));
+  const catalogue = captured.filter(event => event.stage === 'models' && profiles.includes(event.profile) && event.ids.includes(fixture.route));
   assert.deepEqual(new Set(catalogue.map(event => event.profile)), new Set(profiles));
   assert.equal(captured.some(event => event.stage === 'text-replay'), false);
-  const expected = { ...original, model: 'chatgpt-web/gpt-6-sol' };
+  const expected = { ...original, model: 'chatgpt-web/' + fixture.slug };
   for (const call of calls) {
     assert.equal(call.authType, 'oauth');
     assert.deepEqual(call.body, expected, 'canonical metadata, tools and input must survive every account attempt');
   }
-  if (scenario.startsWith('quota')) {
+  if (!scenario.endsWith('after-output')) {
     assert.equal(response.status, 200, output + '\n' + fixture.log());
     assert.match(output, /dummy-native-success/);
     assert.equal(calls.length, 2, JSON.stringify(captured));
     assert.notEqual(calls[0].profile, calls[1].profile);
-    assert.deepEqual(captured.filter(event => event.stage === 'loader-response').map(event => [event.status, event.retryAfter]), [[429, scenario === 'quota' ? '120' : null], [200, null]]);
+    const unavailable = scenario === 'account-model-unavailable';
+    assert.deepEqual(captured.filter(event => event.stage === 'loader-response').map(event => [event.status, event.retryAfter]), [[unavailable ? 503 : 429, scenario === 'quota' ? '120' : null], [200, null]]);
     const refusal = captured.find(event => event.stage === 'loader-response');
-    assert.deepEqual(refusal.error, { type: 'rate_limit_error', code: 'rate_limit_exceeded', message: 'Synthetic Native quota exceeded',
-      ...(scenario === 'quota' ? { retry_after: 120 } : {}), status: 429 });
+    assert.deepEqual(refusal.error, unavailable
+      ? { type: 'server_error', code: 'account_model_unavailable', message: 'Synthetic requested model unavailable for this account.', status: 503 }
+      : { type: 'rate_limit_error', code: 'rate_limit_exceeded', message: 'Synthetic Native quota exceeded',
+        ...(scenario === 'quota' ? { retry_after: 120 } : {}), status: 429 });
     assert.equal(refusal.signIn, 'kept');
-    assert.equal(refusal.shouldRetry, null, 'a quota refusal must allow host account failover');
+    assert.equal(refusal.shouldRetry, null, 'an account refusal must allow host account failover');
     const loaders = captured.filter(event => event.stage === 'loader');
     assert.equal(loaders[0].body.client_metadata[NONCE], loaders[1].body.client_metadata[NONCE], 'failover must keep the original nonce');
     assert.deepEqual(loaders[0].body, loaders[1].body, 'vendor projections must also stay identical');
   } else {
+    assert.equal(response.status, 200, 'an already started stream must not become an HTTP refusal');
     assert.equal(observed, true, 'host did not expose output before failure; no no-replay claim is possible');
     assert.equal(captured.find(event => event.stage === 'late-failure')?.clientObserved, true);
+    assert.equal(captured.find(event => event.stage === 'late-failure')?.errorCode,
+      scenario.startsWith('account-model-unavailable') ? 'account_model_unavailable' : 'rate_limit_exceeded');
     assert.equal(calls.length, 1, 'host replayed an already visible Native turn');
+    assert.deepEqual(captured.filter(event => event.stage === 'loader-response').map(event => event.status), [200]);
     assert.doesNotMatch(output, /dummy-native-success/);
   }
   assert.equal(captured.filter(event => event.stage === 'onRequest').length, 1);
   assert.equal(captured.filter(event => event.stage === 'onResponse').length, 1);
   t.diagnostic(JSON.stringify({ installed: fixture.version, scenario, accountAttempts: calls.map(event => event.profile),
-    exactCanonical: true, clientObservedBeforeFailure: observed, externalRequestsBlocked: fixture.blocked.length }));
+    model: fixture.route, exactCanonical: true, clientObservedBeforeFailure: observed, externalRequestsBlocked: fixture.blocked.length }));
 });

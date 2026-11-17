@@ -161,7 +161,7 @@ async function verificationResponse(response, reveal, signal) {
           const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
           try {
             const event = JSON.parse(data);
-            if (event?.type === 'response.failed' && event.response?.retryable === false && securityCheck(event.response.error)) {
+            if (event?.type === 'response.failed' && securityCheck(event.response?.error)) {
               notified = true;
               found = true;
             }

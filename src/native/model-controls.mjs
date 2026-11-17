@@ -82,7 +82,7 @@ export async function nativeProLockEvidence(menu, { revealModelList }) {
       await row.waitForElementState('visible', { timeout: 2000 });
       await row.hover({ timeout: 1500 });
       reason = await row.evaluate(nativeBoundProTooltip, root);
-    } catch { /* Explicitly disabled without readable quota evidence stays 400. */ }
+    } catch { /* Explicit unavailability can rotate accounts without inventing a quota reason. */ }
     check = await root.evaluateHandle(nativeDisabledProRow);
     const current = check.asElement();
     if (!current || !await current.evaluate((element, original) => element === original, row)) return null;
@@ -98,6 +98,6 @@ export function patchNativeModelControls(source, helpers = [nativeDisabledProRow
   if (typeof source !== 'string' || source.split(proRangeGuard).length !== 2) throw new Error('Native Pro range guard anchor mismatch');
   if (source.includes('magpieNativePro') || helpers.some(fn => source.includes(fn.name))) throw new Error('Native model-controls helper collision');
   return source.replace(proRangeGuard, proRangeGuard
-    + 'if(u===4){let magpieProLock=await nativeProLockEvidence(P,{revealModelList:qd});if(magpieProLock)throw new q(magpieProLock.quotaConfirmed?"ChatGPT Pro usage limit reached for this account. The pending message was not sent. ChatGPT: "+magpieProLock.reason:"ChatGPT currently marks Pro unavailable for this account. The requested model was not selected and the pending message was not sent."+(magpieProLock.reason?" ChatGPT: "+magpieProLock.reason:""),{status:magpieProLock.quotaConfirmed?429:400,errorType:magpieProLock.quotaConfirmed?"rate_limit_error":"invalid_request_error",code:magpieProLock.quotaConfirmed?"rate_limit_exceeded":"chatgpt_effort_locked",retryable:!1,cause:Error(`ChatGPT Pro is explicitly disabled; requested effort index ${u}, slider range ${L.min}..${L.max}`)});}')
+    + 'if(u===4){let magpieProLock=await nativeProLockEvidence(P,{revealModelList:qd});if(magpieProLock)throw new q(magpieProLock.quotaConfirmed?"ChatGPT Pro usage limit reached for this account. The pending message was not sent. ChatGPT: "+magpieProLock.reason:"ChatGPT currently marks Pro unavailable for this account. The requested model was not selected and the pending message was not sent."+(magpieProLock.reason?" ChatGPT: "+magpieProLock.reason:""),{status:magpieProLock.quotaConfirmed?429:503,errorType:magpieProLock.quotaConfirmed?"rate_limit_error":"server_error",code:magpieProLock.quotaConfirmed?"rate_limit_exceeded":"account_model_unavailable",retryable:!1,cause:Error(`ChatGPT Pro is explicitly disabled; requested effort index ${u}, slider range ${L.min}..${L.max}`)});}')
     + '\n' + helpers.map(fn => fn.toString()).join('\n') + '\n';
 }

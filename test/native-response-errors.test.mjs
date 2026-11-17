@@ -30,7 +30,6 @@ for (const event of [
   { type: 'response.output_item.added', item: { type: 'function_call' } },
   { type: 'response.output_text.delta', delta: 'text' },
   { type: 'response.created', response: { output: [{ type: 'message' }] } },
-  { ...failed, response: { ...failed.response, retryable: true } },
   { ...failed, response: { ...failed.response, error: { ...failed.response.error, code: 'upstream_server_error' } } },
 ]) test(`never relabel or replay after ${event.type} ${event.response?.error?.code ?? ''}`, async () => {
   const text = frame(created) + frame(event) + frame(failed);
@@ -62,6 +61,36 @@ test('HTTP refusals and non-SSE responses stay unchanged', async () => {
   for (const response of [Response.json({ error: 'refusal' }, { status: 403 }), Response.json({ output: [] })]) {
     assert.equal(await preserveNativeVerification(response), response);
   }
+});
+
+test('typed verification remains non-retryable when the native encoder omits or changes retryable', async () => {
+  for (const retryable of [undefined, true, false]) {
+    const error = { ...failed.response, retryable };
+    for (const upstream of [Response.json({ ...error, status: 'failed' }),
+      new Response(frame(created) + frame({ type: 'response.failed', response: error }), { headers: { 'content-type': 'text/event-stream' } })]) {
+      const response = await preserveNativeVerification(upstream);
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get('x-should-retry'), 'false');
+      assert.equal((await response.json()).error.retryable, false);
+    }
+  }
+});
+
+test('explicit account-model unavailability allows another account before output, without inferring quota', async () => {
+  const failure = { type: 'response.failed', response: { status: 'failed', output: [],
+    error: { type: 'server_error', code: 'account_model_unavailable', message: 'Model unavailable for this account.' } } };
+  for (const upstream of [Response.json(failure.response),
+    new Response(frame(created) + frame(failure), { headers: { 'content-type': 'text/event-stream' } })]) {
+    const response = await preserveNativeVerification(upstream);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('x-magpie-sign-in'), 'kept');
+    assert.equal(response.headers.has('retry-after'), false);
+    assert.equal(response.headers.has('x-should-retry'), false);
+    assert.equal((await response.json()).error.code, 'account_model_unavailable');
+  }
+  const text = frame(created) + frame({ type: 'response.output_text.delta', delta: 'output' }) + frame(failure);
+  const preserved = await preserveNativeVerification(new Response(text, { headers: { 'content-type': 'text/event-stream' } }));
+  assert.equal(preserved.status, 200); assert.equal(await preserved.text(), text);
 });
 
 for (const [type, code] of [['rate_limit_error', 'rate_limit_exceeded'], ['insufficient_quota', 'insufficient_quota']]) {

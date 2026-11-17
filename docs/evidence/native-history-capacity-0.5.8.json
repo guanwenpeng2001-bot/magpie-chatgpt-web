@@ -251,7 +251,7 @@
       "canonicalProofs": 18,
       "missingProofRejected": true,
       "archiveUnchangedByContinuation": false,
-      "archiveSha256": "b931e7beac6d8c891882807ccdd8dc95ef9d09ac977fa49172aaf821be735a5d",
+      "archiveSha256": "b7086164bc0dc969226c56338a2854c1ea12c03c7643802655f82fd781b1562c",
       "stats": {
         "records": 17,
         "bytes": 6003135,
@@ -405,7 +405,7 @@
       "canonicalProofs": 2,
       "missingProofRejected": false,
       "archiveUnchangedByContinuation": true,
-      "archiveSha256": "b931e7beac6d8c891882807ccdd8dc95ef9d09ac977fa49172aaf821be735a5d",
+      "archiveSha256": "b7086164bc0dc969226c56338a2854c1ea12c03c7643802655f82fd781b1562c",
       "stats": {
         "records": 17,
         "bytes": 6003135,
@@ -451,7 +451,7 @@
     "The million tokens are cumulative original text in a local archive. This does not prove a million-token Web context, server acceptance, model recall or live compaction.",
     "This checks orderly process exit and reopening, not crash recovery or multiple concurrent writer processes."
   ],
-  "generatedAt": "2026-11-17T20:54:39.795Z",
+  "generatedAt": "2026-11-17T21:58:04.267Z",
   "sources": [
     {
       "path": "scripts/native-history-capacity-probe.mjs",
@@ -459,7 +459,7 @@
     },
     {
       "path": "test/fixtures/native-history-capacity-probe-fixture.mjs",
-      "sha256": "0786c03b7728645ccd2c0078e71362b1b8e98a9e61f734d4a9469d1daa930ae0"
+      "sha256": "be37f75512244a99dd71f109fde3e06a8f82a54c399106334e29c315bda9b752"
     },
     {
       "path": "src/native/history-store.mjs",
@@ -467,11 +467,11 @@
     },
     {
       "path": "src/native/history.mjs",
-      "sha256": "6158c3b87f5264140a7b6a5923e33aabd2c093643826024250b79c4583094a8d"
+      "sha256": "abb4e6aad0f33b4aacb91e928361b5231809db3671205a409398fb81c36bbd6f"
     },
     {
       "path": "src/native/runtime.mjs",
-      "sha256": "edb00376e1b8f7f65aec79571753129cf59a974e011bc059f8edc8eb5a33b78f"
+      "sha256": "94437e25106d9544ed207efca6ea834debcdf01fd05ea1c5904f8f3302cf4af1"
     },
     {
       "path": "src/native/pro-window.mjs",
@@ -483,7 +483,7 @@
     },
     {
       "path": "src/native/model-controls.mjs",
-      "sha256": "ba858b78c22e42a856d0558c32db0099251fefbb12dfbb16922ff9b43a512cc0"
+      "sha256": "af3a6f1de3810f8fee5aa4daa1f163123e309babb1a1415963e0a078e2018776"
     }
   ],
   "sanitization": {

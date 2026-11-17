@@ -388,7 +388,6 @@ test('generic/expired/rate-limit errors, HTML, model text and oversized JSON can
     () => new Response('verify you are human', { status: 403, headers: { 'content-type': 'text/html' } }),
     () => Response.json({ padding: 'x'.repeat(65537), error: security }, { status: 403 }),
     () => sse(frame({ type: 'response.output_text.delta', delta: JSON.stringify(failed) })),
-    () => sse(frame({ ...failed, response: { ...failed.response, retryable: true } })),
     () => sse('data: not valid JSON\n\n'),
   ];
   for (const sample of samples) {
@@ -398,6 +397,20 @@ test('generic/expired/rate-limit errors, HTML, model text and oversized JSON can
     assert.equal(result.status, original.status);
     assert.equal(await result.text(), expected);
     assert.equal(h.reveals().length, 0);
+  }
+});
+
+test('typed verification in a failed JSON response or missing retry metadata reveals the bound browser', async () => {
+  for (const sample of [
+    () => Response.json({ ...failed.response, status: 'failed', retryable: undefined }),
+    () => sse(frame({ ...failed, response: { ...failed.response, retryable: undefined } })),
+    () => sse(frame({ ...failed, response: { ...failed.response, retryable: true } })),
+  ]) {
+    const h = clientFixture(async () => sample());
+    const response = await (await h.client.runtime(h.auth)).compaction({});
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get('x-should-retry'), 'false');
+    assert.equal(h.reveals().length, 1);
   }
 });
 
