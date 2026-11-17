@@ -4,6 +4,10 @@ import { NativeDaemon, writePrivate, daemonProxy } from './daemon.mjs';
 import { exportStorageState, findChromeExecutable, browserEndpoint } from '../../backend/browser.mjs';
 import { nativeCatalog, describeNativeCatalogue, nativeOptions, providerNativeOptions, accountCapabilities } from './models.mjs';
 import { readSetupStatus, readNativeState } from './setup.mjs';
+import { BackendError } from '../../backend/guard.mjs';
+import { browserProfileOf } from '../../backend/browser-profile.mjs';
+import { preserveNativeVerification } from './response-errors.mjs';
+import { continuityProfiles } from './continuity-profiles.mjs';
 
 const accounts = new Map();
 const pending = new Map();
@@ -17,7 +21,8 @@ function identity(account, root) {
 export function ensureNative(account, options = {}) {
   const { root = nativeRoot() } = options;
   const { profile, home } = identity(account, root);
-  const key = JSON.stringify([options.catalogOnly === true, options.resumeOnly === true, options.nativeOptions, account.capabilities]);
+  const key = JSON.stringify([browserProfileOf({ ...account, profile }), options.catalogOnly === true,
+    options.resumeOnly === true, options.nativeOptions, account.capabilities, options.continuityPeers]);
   const prior = pending.get(home);
   if (prior?.key === key) return prior.work;
   const work = (async () => {
@@ -33,6 +38,7 @@ export function ensureNative(account, options = {}) {
     // options. Its descriptor continues to advertise the effective generation.
     existing?.configure?.(settings, capabilities);
     if (options.catalogOnly) return { capabilities: (existing?.config ? existing.descriptor().capabilities : undefined) ?? { ...capabilities, ...settings } };
+    if (existing && options.continuityPeers) await existing.configureContinuity?.(options.continuityPeers);
     const endpoint = browserEndpoint(account.context);
     if (existing && !options.provision && existing.browserEndpoint === endpoint && await existing.health()) return existing;
     if (existing) { await existing.stop(); accounts.delete(home); }
@@ -46,7 +52,8 @@ export function ensureNative(account, options = {}) {
     const daemon = (options.createDaemon ?? (settings => new NativeDaemon(settings)))({ home, ...installed,
       appName: `Codex Magpie ${profile.slice(0, 8)}`,
       browserEndpoint: endpoint,
-      chromeExecutablePath: account.chromeExecutablePath ?? await findChromeExecutable(), capabilities, nativeOptions: settings, storageState: async () => storage });
+      chromeExecutablePath: account.chromeExecutablePath ?? await findChromeExecutable(), capabilities, nativeOptions: settings,
+      continuityPeers: options.continuityPeers, storageState: async () => storage });
     // A failed startup may still own a live OS lease until cleanup succeeds.
     // Retain it so the next attempt and shutdown can retry that cleanup.
     accounts.set(home, daemon);
@@ -98,16 +105,147 @@ export async function stopNative() {
   }));
 }
 
+const securityCheck = error => error?.code === 'chatgpt_security_check' && error.type === 'permission_error';
+
+async function verificationResponse(response, reveal, signal) {
+  response = await preserveNativeVerification(response, signal);
+  if (response.status === 403 && response.body && /application\/(?:[\w.-]+\+)?json\b/i.test(response.headers.get('content-type') ?? '')) {
+    // Inspect only a bounded copy of an error. Never consume the caller's body,
+    // and do not let a broken error stream delay its original refusal forever.
+    const reader = response.clone().body.getReader();
+    const inspection = AbortSignal.any([AbortSignal.timeout(2000), ...(signal ? [signal] : [])]);
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    inspection.addEventListener('abort', cancel, { once: true });
+    let text = '', bytes = 0, complete = false, verification = false;
+    const decoder = new TextDecoder();
+    try {
+      while (!inspection.aborted) {
+        const next = await reader.read();
+        if (next.done) { complete = true; break; }
+        bytes += next.value.byteLength;
+        if (bytes > 65536) break;
+        text += decoder.decode(next.value, { stream: true });
+      }
+      verification = complete && !inspection.aborted && securityCheck(JSON.parse(text + decoder.decode())?.error);
+      if (verification) await reveal();
+    } catch { /* Inspection/presentation cannot replace the original refusal. */ }
+    finally {
+      inspection.removeEventListener('abort', cancel);
+      // Awaiting cancellation of a tee would wait for the caller to drain it.
+      cancel();
+      reader.releaseLock();
+    }
+    if (!verification) return response;
+    const headers = new Headers(response.headers);
+    headers.set('cache-control', 'no-store');
+    headers.set('x-magpie-sign-in', 'kept');
+    headers.set('x-should-retry', 'false');
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+  if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) return response;
+
+  // A check can also arrive after output. Observe typed failure events without
+  // changing those bytes/status or replaying the already submitted turn.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', skipping = false, notified = false, stopped = false;
+  const scan = bytes => {
+    let found = false;
+    for (let offset = 0; offset < bytes.length && !notified; offset += 8192) {
+      buffer += decoder.decode(bytes.subarray(offset, offset + 8192), { stream: true });
+      let boundary;
+      while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary[0].length);
+        if (!skipping && frame.length <= 65536) {
+          const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+          try {
+            const event = JSON.parse(data);
+            if (event?.type === 'response.failed' && securityCheck(event.response?.error)) {
+              notified = true;
+              found = true;
+            }
+          } catch { /* Malformed/ordinary model text is never verification. */ }
+        }
+        skipping = false;
+      }
+      if (buffer.length > 65536) { skipping = true; buffer = buffer.slice(-3); }
+    }
+    return found;
+  };
+  const abort = () => { void reader.cancel(signal.reason).catch(() => {}); };
+  signal?.addEventListener('abort', abort, { once: true });
+  const finish = () => { stopped = true; signal?.removeEventListener('abort', abort); reader.releaseLock(); };
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      try {
+        signal?.throwIfAborted();
+        const next = await reader.read();
+        if (stopped) return;
+        signal?.throwIfAborted();
+        if (next.done) { finish(); controller.close(); return; }
+        if (scan(next.value)) await reveal();
+        if (!stopped) controller.enqueue(next.value);
+      } catch (error) {
+        if (!stopped) { await reader.cancel(error).catch(() => {}); finish(); controller.error(error); }
+      }
+    },
+    async cancel(reason) { try { await reader.cancel(reason); } finally { finish(); } },
+  }, { highWaterMark: 0 }), { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
 /** Plugin-side facade: no browser ownership or credentials copied into requests. */
 export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch = globalThis.fetch, input }) {
+  const revealing = new Map();
+  const reveal = async (binding, signal) => {
+    if (signal?.aborted) return;
+    const profile = browserProfileOf(binding);
+    if (!revealing.has(profile)) {
+      const budget = AbortSignal.any([AbortSignal.timeout(15_000), ...(signal ? [signal] : [])]);
+      const work = Promise.resolve().then(() => {
+        budget.throwIfAborted();
+        return bridge.call({ method: 'nativeVerification', profileRoot, auth: binding }, budget);
+      }).catch(() => { /* Preserve the typed refusal even if presentation fails. */ })
+        .finally(() => { if (revealing.get(profile) === work) revealing.delete(profile); });
+      revealing.set(profile, work);
+    }
+    await revealing.get(profile);
+  };
+  const refusing = async (operation, binding, signal) => {
+    try { return await operation(); }
+    catch (error) {
+      if (error instanceof BackendError && error.code === 'verification'
+          || error?.status === 403 && error.retryable === false && securityCheck({ ...error, type: error.errorType ?? error.type })) {
+        await reveal(binding, signal);
+      }
+      throw error;
+    }
+  };
   return {
-    provision: (auth, signal) => bridge.call({ method: 'nativeProvision', auth, profileRoot, nativeOptions: providerNativeOptions(input) }, signal),
+    async provision(auth, signal) {
+      const peers = await continuityProfiles(input, auth);
+      signal?.throwIfAborted();
+      return bridge.call({ method: 'nativeProvision', auth, profileRoot, nativeOptions: providerNativeOptions(input),
+        ...(peers ? { continuityPeers: peers } : {}) }, signal);
+    },
     status: auth => readSetupStatus(auth, { root }),
     async runtime(auth, signal) {
       signal?.throwIfAborted();
-      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input) }, signal);
+      const physical = browserProfileOf(auth);
+      const binding = { profile: auth.profile, ...(auth.browserProfile !== undefined ? { browserProfile: physical } : {}) };
+      const peers = await continuityProfiles(input, auth);
       signal?.throwIfAborted();
-      return descriptor ? daemonProxy(descriptor, fetch) : null;
+      const descriptor = await refusing(() => bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input),
+        ...(peers ? { continuityPeers: peers } : {}) }, signal), binding, signal);
+      signal?.throwIfAborted();
+      if (!descriptor) return null;
+      const runtime = daemonProxy(descriptor, fetch);
+      const wrap = operation => (body, headers, requestSignal, ...rest) => refusing(async () => {
+        requestSignal?.throwIfAborted();
+        const response = await operation(body, headers, requestSignal, ...rest);
+        return verificationResponse(response, () => reveal(binding, requestSignal), requestSignal);
+      }, binding, requestSignal);
+      return { ...runtime, responses: wrap(runtime.responses), ...(runtime.compaction ? { compaction: wrap(runtime.compaction) } : {}) };
     },
     async models(auth, baseModels, catalogue) {
       if (baseModels && typeof baseModels === 'object' && !Array.isArray(baseModels) && Object.keys(baseModels).length) {
@@ -123,7 +261,9 @@ export function nativeClient({ bridge, profileRoot, root = nativeRoot(), fetch =
         if (capabilities === null) return {};
         return describeNativeCatalogue(baseModels, profile, capabilities);
       }
-      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input) });
+      const peers = await continuityProfiles(input, auth);
+      const descriptor = await bridge.call({ method: 'nativeRuntime', auth, profileRoot, nativeOptions: providerNativeOptions(input),
+        ...(peers ? { continuityPeers: peers } : {}) });
       if (!descriptor) return {};
       return describeNativeCatalogue(nativeCatalog(descriptor.capabilities), auth.profile);
     },

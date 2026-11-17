@@ -2,7 +2,7 @@
 
 Use your ChatGPT web session as a magpie provider. Sign-in always opens visible Chrome; chat turns run in the background by default. Sign-in lifecycle is live-verified; two consecutive live turns completed on Windows using the same ordinary Chrome session. Site verification can still occur. Turn budget and delivery cadence remain unmeasured. Whole-block replies are acceptable: progressive or token-level streaming is not verified.
 
-Plugin version: `0.5.7`. Historical host verification used: magpie `0.1.3930` (see [release verification status](#release-verification-status) for scope and evidence).
+Plugin version: `0.5.8`. Historical host verification used: magpie `0.1.3930`; current isolated host regressions use `0.1.4400` (see [release verification status](#release-verification-status) for scope and evidence).
 
 ## Native tools mode
 
@@ -12,7 +12,7 @@ If setup was interrupted or Native tools were enabled after text-only sign-in, c
 
 中文：Native 配置中断，或先登录文本模式、再开启 Native 时，在登录方式中选择 **Resume Native setup (existing account)** 并选原账号，也可运行 `magpie plugin login chatgpt-web 2`。用量卡片会显示配置状态和恢复提示；刷新卡片不会自动创建资源。恢复会复用原账号及已保存的配置进度。
 
-Setup adds a matching `native/<profile>/<model>` entry for each text model. An 18-model Plus account exposes 36 entries; a Pro account also gets two stable, explicit Pro selectors (38 total), even with Bigger Context off. Enabling `native-bigger-context` adds two dedicated Sol entries (38 Plus / 40 Pro total); Pro selectors retain the guarded ordinary budget. Existing aliases keep their conservative Instant-safe window; dedicated Sol routes remain available. Pro-capable Sol and Pro expansion are disabled after large-context retention failed live verification; other tiers remain experimental. Supported Chat families use native tools. Work, mini and experimental entries that the reference daemon cannot serve use the exact matching text model and are labeled **Text fallback**; unsupported entries are labeled **Native unavailable**. The plugin never silently substitutes a different model family. Native limits and reasoning variants follow the saved account capabilities and the smallest window among an entry's efforts. Published windows use the reference auto-compaction target with a 90% mapping (Plus 32K Instant / 80K Medium–High, Pro 95K); Codex may reserve additional capacity. Pro advertises about 105.6K, and the runtime rejects compiled Pro input at or above 112,193 tokens before browser submission, even if a client still caches an older catalogue. Sol on Pro-capable accounts also advertises about 105.6K and rejects full input at or above 111,193, including before compaction trimming. These guards include the reference reserve and never silently truncate input.
+Eligible accounts publish the same `native/auto/<model>` selector. Select `chatgpt-web/native/auto/gpt-6-pro` for Pro with Magpie account rotation; legacy `native/<profile>/<model>` entries remain available and are labeled **Pinned account**. Magpie selects the current account, observes quota refusals and tries another eligible account. Only accounts that have completed Native setup advertise the shared Native model. Work, mini and experimental entries unsupported by the pinned daemon remain explicitly labeled Text fallback or Native unavailable. The selected model family is never silently replaced.
 
 Use Magpie's native Codex Desktop route, with the built-in OpenAI provider pointing at Magpie. A generic Codex custom provider can remove native message identities before the plugin sees them. Native turns reuse the plugin-owned ordinary Chrome login context; the reference runtime disconnects from it on shutdown without closing the account browser.
 
@@ -28,7 +28,7 @@ Provider options: `native-bigger-context` defaults to **false**. `native-tempora
 
 Before Magpie transforms a native request, the local request hook captures its canonical body in bounded memory. The account-scoped loader restores that exact body after checking a private nonce and provider route. This preserves message identities, native metadata, tool definitions and trusted local environment paths across protocol conversion and masking. **Native mode sends original history and local paths to ChatGPT without gateway masking.** Snapshots are removed on request completion; they are never saved to disk. When the native runtime is unavailable, only ordinary uncompacted turns without native checkpoints may fall back to text before submission; a submitted native tool turn is never replayed through text mode.
 
-中文：登录后自动创建或复用隧道、受限运行密钥及 MCP 连接器；可能需要再登录 OpenAI Platform。18 个文本模型会有 18 个对应入口；Plus 默认 36 个，Pro 另有 2 个稳定的独立 Pro 选择项，默认 38 个。Bigger Context 开启后增加 2 个专用 Sol 项，合计 Plus 38 个、Pro 40 个；Pro 账户的 Sol 和 Pro 大窗口因保留验证失败而停用，目录窗口均约 10.56 万；Sol 完整输入上限为 111,193，Pro 为 112,193，达到上限明确报错，不静默裁剪；原别名保留 Instant 保守窗口；参考运行时不支持的 Work、mini 等条目明确标记为文本备用，保持原模型身份。原生模式复用已登录的普通 Chrome，并通过账户目录绑定的 AES 加密检查点跨守护进程重启续接（最多 256 条、序列化明文上限 32 MiB）。旧版本已经丢失的检查点不能事后恢复。`native-temporary-chats` 默认开启，关闭后原生模式保存普通聊天；修改开关后重启 Magpie 生效。为验证 Codex 的工具环境，原生模式向 ChatGPT 发送未经网关脱敏的原始历史和本地路径；可关闭此选项并使用文本模型。原生工具提交后不会通过文本方式重放。
+中文：推荐选择 `chatgpt-web/native/auto/gpt-6-pro`，由 Magpie 在具备同一模型权限且完成 Native 配置的账号间选择。旧账号专属入口保留并标注 Pinned account。登录资料持久保存，正常重启无需重新添加账号；同一账号重新登录不会更换已有模型路由。网页新要求的真人验证或已撤销的登录仍需完成恢复。Pro 目录记录官方 400K 总窗口，本地输入预算为 256K，提前压缩目标为 230.4K；Codex 可能显示约 243.2K 有效输入空间。1M 指加密保存并可检索的历史原文，不是单次 1M 推理窗口。
 
 ## Reference feature differences
 
@@ -37,7 +37,7 @@ Compared with `codex-chatgpt-web` v6.1.18; this is an implementation comparison,
 | Feature | This plugin |
 | --- | --- |
 | Temporary / ordinary Chat | Ordinary text Chat requires Temporary Chat. `native-temporary-chats` defaults to true; disable it for saved ordinary native chats. Restart Magpie after changing the option. Work and Images create saved tasks/chats. |
-| Bigger Context | `native-bigger-context` is off by default. It adds two dedicated Sol entries. On Pro-capable accounts, both Sol entries and Pro selectors retain baseline limits after failed large-window retention tests; the Sol entries no longer carry a Bigger Context label. Other capability tiers remain experimental and need separate verification. Pro selection does not require this option. |
+| Bigger Context | `native-bigger-context` is off by default. It adds two dedicated Sol entries, which retain their guarded budget on Pro-capable accounts. Pro automatically uses its separate 400K total / 256K input allocation and does not require this option. Other capability tiers remain experimental and need separate verification. |
 | Native platforms | Pinned native installation is Windows x64 only. |
 | Continuation checkpoints | Atomic AES-256-GCM persistence bound to the account directory; 256-entry LRU, 32 MiB serialized plaintext limit. Restarts recover committed checkpoints with source and metadata validation. Previously lost checkpoints cannot be recreated. Compaction/checkpoint text fallback fails closed with HTTP 503. |
 | Native model coverage | Only supported daemon models run native tools. Other entries use the exact text model with a Text fallback label, or are marked Native unavailable. A `native/` ID alone does not imply native tool support. |
@@ -52,7 +52,7 @@ Get magpie from https://usemagpie.ai or the [magpie releases](https://github.com
 Install the plugin and start sign-in in PowerShell:
 
 ```powershell
-magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.7
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.8
 magpie plugin login chatgpt-web
 ```
 
@@ -71,7 +71,7 @@ Git installs consume committed source. The installer resolves `playwright-core ~
 Finish active turns, then rerun the published installation command:
 
 ```powershell
-magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.7
+magpie plugin add github:guanwenpeng2001-bot/magpie-chatgpt-web#v0.5.8
 ```
 
 Local `git+file://` installs have a verified upstream magpie **stale-pin** defect (D-167): reinstalling can report success while reusing an older cached checkout because `~/.config/magpie/plugins/bun.lock` still pins the old commit. This is an upstream installer defect, not a plugin runtime bug.
@@ -171,19 +171,25 @@ The following are current catalogue settings for the tested Pro-capable account,
 
 | Entry | Published window | Codex effective display (95%) | Default compaction trigger (90%) |
 | --- | ---: | ---: | ---: |
-| Native GPT-5.6 Pro / GPT-6 Pro | 105,556 | 100,278 | 95,000 |
+| Native GPT-5.6 Pro / GPT-6 Pro | 400,000 total; 256,000 input | 243,200 | 230,400 |
 | Native GPT-6 Sol, including Bigger option on | 105,556 | 100,278 | 95,000 |
 | Native GPT-5.6 Sol, including Bigger option on | 105,556 | 100,278 | 95,000 |
 | Text reasoning / Work and their Text fallback entries | 90,000 | 85,500 | 81,000 |
 | Text mini / conservative unknown routes | 41,000 | 38,950 | 36,900 |
 
-These are configuration values, not successful full-window recall results. Supported Native Sol and Pro entries on this account publish 105,556 tokens with Bigger Context on or off. Grouped entries use the smallest window among their efforts. Unsupported entries do not become usable merely because a window is listed. This Magpie contract cannot forward a separate per-model compaction threshold, so the published window maps to Codex's 90% default. The inspected global Codex configuration had no `model_context_window` or `model_auto_compact_token_limit` override.
+These are separate configuration values. Pro records the official 400K total context, while this adapter allocates 256K to compiled input, reserves 128K jointly for reasoning/output and leaves 16K of additional headroom. The 8,192-token platform reserve is already included in compiled input. These reserves are a local allocation, not verified generation limits or a claim of official 256K maximum input. Magpie uses the smaller input field for its Codex catalogue; Codex may apply its additional 5% margin and compact earlier. A production-default 256K sample recalled 12/12 distributed markers; 380K recalled 8/12, so 380K input is not enabled. Sol/core aliases retain the smallest supported effort window. See [0.5.8 verification](docs/verification-0.5.8.md).
 
 The reference's 1,050,000 Luna value is a separate rolling-checkpoint route. Its ordinary Free browser request budget is 28,000 tokens. That value is not evidence that a single Web request, every Work model, or the two Pro models can retain 1M tokens. Reference Bigger Context itself also uses smaller, model-specific limits.
 
 Codex monitors estimated context usage and starts compaction at its configured threshold; `/compact` can request it explicitly. **90% is the trigger, not a fixed summary compression ratio.** The Native adapter asks the model for a continuation summary preserving progress, decisions, constraints, relevant results and unfinished work. Codex continues from the summary and retained messages. Summary length varies, and summarization can lose detail; it does not provide lossless expansion of the model window. Files already edited on disk remain on disk and can be read again.
 
 The Native daemon records authenticated continuation state in an account-owned encrypted checkpoint store. A short live session compacted, survived a daemon restart, then read files and passed tests again. If that daemon or checkpoint state is unavailable, the plugin rejects Native compaction/continuation rather than silently substituting an unauthenticated text summary. Full large-window retention failed: Pro trials recovered 4/12 markers; renewed Sol summaries retained 7/12 (GPT-6) and 4/12 (GPT-5.6). Sol expansion on Pro-capable accounts is consequently withdrawn, with a 111,193 full-input boundary and rejection before compaction can silently trim history. Pro retains its 112,193 boundary. These conservative baseline limits are not newly measured capacities. See [the live evidence and remaining context limits](docs/verification-0.5.6.md).
+
+## Searchable history and account continuity
+
+Native mode records user, assistant and tool text from authenticated Native requests in an encrypted per-chat archive. The model can discover `magpie_history__search`, `magpie_history__read` and `magpie_history__stats` through its Native tool inventory. The current canonical Codex chat determines the scope; a tool cannot choose another account, path or chat. Each chat stores up to 32 MiB of unique original text and 16,384 records without silently evicting originals. A pinned-runtime offline test stored over one million tokenizer-measured tokens and recovered every page after process restart. Text already truncated by Codex or never received cannot be reconstructed. Magpie's internal summary requests can bypass the normal request hook and lose message identity; when that input cannot be authenticated, it is excluded from the archive and retains the existing read-only compaction path. This archive is not a lossless recording of every intermediate tool result.
+
+When Magpie switches eligible accounts, accepted same-chat checkpoints and original history can be imported from registered local peer accounts. The destination encrypts its own copy and validates checkpoint scope, summary hash and canonical rollout authority. This does not copy browser cookies or grant access based on model-supplied paths. Account policy updates without restarting the daemon.
 
 ## Account quota and token accounting
 

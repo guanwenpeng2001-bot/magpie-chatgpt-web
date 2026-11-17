@@ -12,7 +12,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const entry = resolve(process.env.NATIVE_PRO_CONTEXT_CLI
   ?? join(nativeRoot(), 'runtime-6.1.18/payload/app/cli.js'));
 const oldAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);let re=this.config.turnTimeoutMs';
-const patchedAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs';
+const patchedAnchor = 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q,!1,e.modelId,e.modelFamily,i);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs';
 const roundAnchor = 'let D;if(y.localTools)try{D=m.resolve(f)}';
 const roundPrefix = 'if((!f._compactionRequest||!magpieManagedRetention||!l.localToolsEnabled||!i)&&(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R))){try{';
 
@@ -61,7 +61,7 @@ function executionSource(source, anchor, includeHelper) {
     assert.ok(nextImport > helperStart);
     const helperEnd = source.lastIndexOf('}', nextImport) + 1;
     helper = source.slice(helperStart, helperEnd);
-    const guard = source.indexOf('assertNativeProContext(b,a.effort,q);', start);
+    const guard = source.indexOf('assertNativeProContext(b,a.effort,q,!1,e.modelId,e.modelFamily,i);', start);
     assert.ok(guard > anchorIndex && guard < stage, 'guard executes before browser_page');
   }
   // Preserve actual if/else preflight, guard invocation, timeout and browser_page
@@ -87,7 +87,7 @@ function execute(script, { inputTokens, effort, multipart, family = '6', modelId
   const result = runInNewContext(script, {
     q: FakeAdapterError, worker,
     b: inputTokens, _: 500, e: { modelId, modelFamily: family, traceId: 'fixture' },
-    a: { effort }, i: { proAvailable }, y: 0,
+    a: { effort }, i: { solAvailable: true, proAvailable }, y: 0,
     c: { multipart: multipart ? { parts: [{}, {}] } : undefined },
     I: multipart ? [{}, {}] : undefined, M: 'commit', L: 1000, W: 4000,
     X: { effort: 'low' }, R: 500, Pi: () => 0,
@@ -130,7 +130,7 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
   const history = Object.freeze({ role: 'user', content: 'full canonical history fixture', fixtureTokens: inputTokens - 13 });
   const parsed = Object.freeze({ modelId, _chatgptModelFamily: family, _compactionRequest: compaction, context: { messages: [history, toolResult] }, browserDelta: [toolResult] });
   const canonical = Object.freeze({ ...parsed, fixtureUsageInput: true });
-  const capabilities = Object.freeze({ proAvailable });
+  const capabilities = Object.freeze({ solAvailable: true, proAvailable });
   const environment = Object.freeze({ fixtureEnvironment: true });
   const signal = Object.freeze({ fixtureSignal: true });
   const scope = {
@@ -162,6 +162,17 @@ function executeAdapter(script, { inputTokens, effort = 'max', localTools = true
       return { inputTokens: input.context.messages.reduce((sum, message) => sum + message.fixtureTokens, 0), outputTokens: 999999 };
     },
     m: { resolve(input) { assert.equal(input, parsed); events.push('resolveEnvironment'); return environment; } },
+    ue(input) { assert.equal(input, parsed); return { threadId: 'fixture-thread', turnId: 'fixture-turn' }; },
+    async captureNativeHistory(input, trusted, identity, options) {
+      assert.equal(input, parsed);
+      assert.equal(trusted, localTools ? environment : undefined);
+      assert.equal(identity.threadId, 'fixture-thread');
+      assert.equal(identity.turnId, 'fixture-turn');
+      assert.equal(typeof options.verifyCompaction, 'function');
+      assert.equal(options.AdapterError, CapturedAdapterError);
+      // Canonical compaction proof and persistence run in native-history.test;
+      // this fixture only isolates budget ordering before session creation.
+    },
     De: { async getOrCreateAfterOwnerRetirement(...args) {
       events.push('createSession');
       assert.equal(typeof args[2], 'function');
@@ -191,6 +202,26 @@ test('pinned Native Pro context guard through actual patched preload', async t =
   assert.equal(patched.contents.includes(oldAnchor), false);
   const script = executionSource(patched.contents, patchedAnchor, true);
   const adapterScript = adapterExecutionSource(patched.contents);
+
+  for (const family of ['6', '5.6']) for (const inputTokens of [100000, 128000, 224000, 255000, 255999, 256000, 380000]) {
+    await t.test(`${family} production Pro canonical/worker boundary ${inputTokens}`, async () => {
+      const args = { inputTokens, effort: 'max', family, modelId: 'gpt-5.6-sol' };
+      const round = executeAdapter(adapterScript, args);
+      await round.result;
+      const worker = execute(script, { ...args, multipart: true });
+      if (inputTokens < 256000) {
+        assert.equal(round.emitted.length, 0);
+        assert.equal(round.events.at(-1), 'createSession');
+        await worker.result;
+        assert.equal(worker.events.at(-1).kind, 'browser_page');
+      } else {
+        assert.deepEqual(round.events, ['currentUsageInput', 'estimateFullHistory', 'emitError']);
+        assert.equal(round.emitted[0].code, 'context_length_exceeded');
+        await assert.rejects(worker.result, { code: 'context_length_exceeded', retryable: false });
+        assert.equal(worker.events.length, 1);
+      }
+    });
+  }
 
   for (const family of ['6', '5.6']) for (const effort of ['medium', 'high', 'xhigh']) {
     for (const multipart of [false, true]) for (const inputTokens of [111192, 111193, 224736, 294383]) {

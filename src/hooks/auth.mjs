@@ -4,6 +4,7 @@ import { signinProfileClaim, releaseSigninProfileClaim, unlockSigninProfile, sig
 import { makeLoader } from '../loader.mjs';
 import { PROVIDER } from './config.mjs';
 import { nativeSetupMethod, reportSetupStatus } from './native-setup.mjs';
+import { scopedBrowserAccount, verifyBrowserAccount, bindSignedInBrowser } from './browser-account.mjs';
 
 export function requireAuth(auth) {
   if (auth?.type !== 'oauth' || typeof auth.refresh !== 'string' || !auth.refresh) throw new BackendError('expired');
@@ -18,7 +19,7 @@ export function authHook(env) {
     options: [{ key: 'visible-turns', label: 'Show browser during chats',
       description: 'Keep installed Chrome visible during chats. Leave this off for background chats; verification automatically reveals the same Chrome window for recovery.', default: false },
       { key: 'native-tools', label: 'Native tools mode', description: 'Set up native Codex tools and an OpenAI tunnel. Native mode sends the original Codex history and local paths to ChatGPT without gateway masking, so tools can use the trusted environment. Text mode remains available.', default: true },
-      { key: 'native-bigger-context', label: 'Native Bigger Context', description: 'Experimental staged context for eligible native models. Pro and GPT-6/GPT-5.6 Sol on Pro-capable accounts retain baseline limits; larger-context retention has not passed verification. / Pro 及支持 Pro 的账号上的 GPT-6/GPT-5.6 Sol 保持基础窗口，大窗口保留验证未通过。 Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: false },
+      { key: 'native-bigger-context', label: 'Native Bigger Context', description: 'Experimental context for other eligible native models. Pro automatically uses its own account window and does not need this switch. Sol on Pro-capable accounts retains its guarded window. / Pro 自动使用自身窗口，无需开启；其他符合条件的模型使用此实验开关。 Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: false },
       { key: 'native-temporary-chats', label: 'Native temporary chats', description: 'Use temporary ChatGPT chats in native reference mode. Turn off to save ordinary chats in ChatGPT history. Takes effect after restarting Magpie / 重启 Magpie 后生效.', default: true }],
     async refresh(auth) { return bridge.call({ method: 'session', auth: requireAuth(auth), profileRoot }); },
     loader: makeLoader(env),
@@ -27,9 +28,10 @@ export function authHook(env) {
       async authorize(_inputs, { signal } = {}) {
         signal?.throwIfAborted();
         const owner = Symbol('sign-in');
-        const account = await signinProfileClaim(profileRoot, owner);
+        const existing = await scopedBrowserAccount(env.input);
+        const account = existing?.browserProfile ?? await signinProfileClaim(profileRoot, owner);
         const proxy = browserProxy();
-        try { await bridge.call({ method: 'login', account, profileRoot, ...(proxy ? { proxy } : {}) }, signal); }
+        try { await bridge.call({ method: 'login', account, profileRoot, ...(existing ? { preservePages: true } : {}), ...(proxy ? { proxy } : {}) }, signal); }
         catch (error) { await unlockSigninProfile(profileRoot, owner); throw error; }
         return {
           url: '', method: 'auto',
@@ -41,16 +43,28 @@ export function authHook(env) {
                 activeSignal?.throwIfAborted();
                 const result = await bridge.call({ method: 'loginStatus', account }, activeSignal);
                 if (result.state === 'signed-in') {
+                  await verifyBrowserAccount(env.input, existing, result.credential);
+                  const prepared = env.input?.directory
+                    ? await bindSignedInBrowser(env.input, existing, result.credential, account) : { credential: result.credential };
+                  const { credential } = prepared;
                   if (env.native && (env.input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
-                    try { await reportSetupStatus(env, await env.native.provision(result.credential, activeSignal)); }
+                    try { await reportSetupStatus(env, await env.native.provision(credential, activeSignal)); }
                     catch {
                       activeSignal?.throwIfAborted();
                       await reportSetupStatus(env, { state: 'failed', stage: 'verify' });
                     }
                   }
                   activeSignal?.throwIfAborted();
-                  await releaseSigninProfileClaim(profileRoot, owner);
-                  return { ...result.credential, type: 'success' };
+                  await verifyBrowserAccount(env.input, existing, result.credential);
+                  if (env.input?.directory) {
+                    const final = await bindSignedInBrowser(env.input, existing, result.credential, account);
+                    if (final.credential.profile !== credential.profile || final.credential.browserProfile !== credential.browserProfile
+                        || JSON.stringify(final.binding) !== JSON.stringify(prepared.binding)) {
+                      throw new Error('The saved ChatGPT browser binding changed during sign-in. Start sign-in again.');
+                    }
+                  }
+                  if (!existing) await releaseSigninProfileClaim(profileRoot, owner);
+                  return { ...credential, type: 'success' };
                 }
                 if (result.state === 'cancelled') return { type: 'failed', error: 'The sign-in window was closed. Start sign-in again to resume the same profile.' };
                 if (result.state === 'failed') return { type: 'failed', error: result.reason };

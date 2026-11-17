@@ -90,6 +90,17 @@ test('serialized account descriptor compacts in the full daemon with shared owne
   assert.deepEqual(JSON.parse(sent.options.body), body());
 });
 
+test('compaction service preserves typed refusal retry and sign-in semantics', async t => {
+  const failure = { error: { code: 'history_scope_unverified', type: 'permission_error', retryable: false, message: 'Fixture proof missing' } };
+  const { proxy } = await fixture(t, { respond: () => Response.json(failure, { status: 403,
+    headers: { 'cache-control': 'no-store', 'x-should-retry': 'false', 'x-magpie-sign-in': 'kept' } }) });
+  const response = await proxy.compaction(body());
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get('x-should-retry'), 'false');
+  assert.equal(response.headers.get('x-magpie-sign-in'), 'kept');
+  assert.deepEqual(await response.json(), failure);
+});
+
 test('concurrent compactions and later continuations keep the same owner beyond the former idle limit', async t => {
   const { daemon, proxy, calls, children, requests } = await fixture(t);
   await Promise.all(Array.from({ length: 5 }, async () => (await proxy.compaction(body())).text()));

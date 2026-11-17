@@ -137,7 +137,12 @@ async function compilerFixture() {
     // Exercise the new rule with the complete-history fallback, not only explicit parts.
     p.context.messages.unshift({ role: 'user', content: 'Existing history '.repeat(9000) });
     const unchanged = JSON.stringify(p);
-    const c = n.compile(p, caps), baseline = n.baseline(p, caps);
+    const c = n.compile(p, caps);
+    // The extracted pre-guidance compiler has no production Pro selector.
+    // Compare fidelity at the selected allocation; default selection is covered
+    // by native-pro-window's actual preload/worker regression.
+    const baseline = n.baseline(p, caps, undefined,
+      effort === 'max' ? { experimentalMultipartParts: c.multipart?.parts.length } : undefined);
     guidance(c.text);
     assert.equal(c.multipart.parts.length, 2);
     assert.deepEqual(records(c), records(baseline));

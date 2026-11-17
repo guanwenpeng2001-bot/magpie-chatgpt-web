@@ -2,6 +2,7 @@ import { BackendError } from '../bridge.mjs';
 import { describeCatalogue } from '../models.mjs';
 import { requireAuth } from './auth.mjs';
 import { providerNativeOptions } from '../native/models.mjs';
+import { withSharedNativeModels } from '../native/shared-models.mjs';
 import { PROVIDER } from './config.mjs';
 
 export function providerHook({ bridge, profileRoot, native, input }) {
@@ -17,7 +18,7 @@ export function providerHook({ bridge, profileRoot, native, input }) {
         if (native && (input?.magpie?.option?.(PROVIDER, 'native-tools') ?? true)) {
           try {
             const nativeModels = await native.models(auth, models, catalogue);
-            if (Object.keys(nativeModels).length) return { ...nativeModels, ...models };
+            if (Object.keys(nativeModels).length) return { ...withSharedNativeModels(nativeModels), ...models };
           } catch { /* account remains usable through text mode */ }
         }
         if (Object.keys(models).length) return models;

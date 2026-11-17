@@ -1,4 +1,6 @@
-// v6.1.18 chatgpt-web-models.ts automatic-mode measured transport limits.
+import { nativeProWindowPolicy } from './pro-window.mjs';
+
+// v6.1.18 automatic transport limits plus the local Pro total-window policy.
 export function nativeOptions(value = {}) {
   for (const key of ['experimentalBiggerContext', 'useTemporaryChats']) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') throw new TypeError(`Invalid native option: ${key}`);
@@ -19,8 +21,7 @@ export function nativeCatalog(capabilities = {}) {
   const proAvailable = capabilities?.proAvailable === true;
   const extraHighAvailable = capabilities?.extraHighAvailable === true;
   const row = (slug, context, autoCompact, efforts) => {
-    // Live 275K retention failed with both original and Pro-only staging.
-    // Keep Pro at its baseline transport/compaction budget until revalidated.
+    // Pro uses its default production allocation independently of Bigger.
     if (capabilities.experimentalBiggerContext === true && slug !== 'gpt-6-sol-instant' && !slug.endsWith('-pro')) {
       if (slug === 'gpt-5.6-luna') { context = 84000; autoCompact = 59424; }
       // All fragments arrived in the Pro-capable account stress runs, but
@@ -38,10 +39,11 @@ export function nativeCatalog(capabilities = {}) {
   return ['gpt-6', 'gpt-5.6'].flatMap(family => [
     row(`${family}-sol-instant`, proAvailable ? 111193 : 41000, proAvailable ? 95000 : 32000, ['low']),
     row(`${family}-sol`, proAvailable ? 111193 : 90000, proAvailable ? 95000 : 80000, ['medium', 'high', ...(extraHighAvailable ? ['xhigh'] : [])]),
-    ...(proAvailable ? [row(`${family}-pro`, 112193, 95000, ['max'])] : []),
+    ...(proAvailable ? [row(`${family}-pro`, nativeProWindowPolicy().totalWindow, nativeProWindowPolicy().autoCompact, ['max'])] : []),
   ]);
 }
 
+// This returns prompt capacity, not the model's total-window presentation.
 // Codex compacts at 90% of a model's window when the catalog names no
 // threshold, and a plugin cannot name one through Magpie. Publishing the
 // window whose 90% is the reference's measured auto-compact limit makes Codex
@@ -58,13 +60,17 @@ function coreFamily(slug) {
 
 function nativeDescriptor(id, name, rows) {
   const image = rows.every(row => row.input_modalities?.includes('image'));
+  const pro = rows.length === 1 && /^chatgpt-web\/gpt-(?:6|5\.6)-pro$/.test(rows[0].slug);
   return {
     name: `${name} (Native tools)`, npm: '@ai-sdk/openai',
     provider: { npm: '@ai-sdk/openai', api: 'http://127.0.0.1:1/v1' },
     api: { id, npm: '@ai-sdk/openai', url: 'http://127.0.0.1:1/v1' },
     // Core aliases group Instant, reasoning and Pro. The published limit must
     // fit every advertised effort, including the smallest Instant window.
-    limit: { context: Math.min(...rows.map(publishedWindow)), output: 0 },
+    // Dedicated Pro exposes the total separately from its local prompt cap.
+    // output:0 does not claim the reserved 128K is a verified generation limit.
+    limit: pro ? { context: rows[0].context_window, input: publishedWindow(rows[0]), output: 0 }
+      : { context: Math.min(...rows.map(publishedWindow)), output: 0 },
     prefer_websockets: false,
     capabilities: { reasoning: true, toolcall: true, attachment: image, temperature: false,
       input: { text: true, image }, output: { text: true } },

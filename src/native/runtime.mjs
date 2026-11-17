@@ -11,6 +11,11 @@ import { patchToolDiscovery } from './tool-discovery.mjs';
 import { patchNativeManagedRetention } from './retained-host.mjs';
 import { patchNativeRetainedBudget } from './retained-budget.mjs';
 import { patchNativeAdditionalContext } from './additional-context.mjs';
+import { patchNativeHistory } from './history.mjs';
+import { nativeProWindowEnabled, nativeProWindowPolicy, patchNativeProWindow } from './pro-window.mjs';
+import { patchNativeModelControls, nativeDisabledProRow, nativeBoundProTooltip, nativeProQuotaReason, nativeProLockEvidence } from './model-controls.mjs';
+import { patchNativeAccountContinuity } from './account-continuity.mjs';
+import { patchNativeCompactionErrors } from './compaction-errors.mjs';
 
 export const nativeRoot = () => resolve(homedir(), '.config/magpie/chatgpt-web-native');
 export const RELEASES = Object.freeze([
@@ -63,7 +68,7 @@ const solTrimGuard = 'while(b()&&T.length>1){let y=_===0?1:0;';
 // Xt/Ai/Nt/gs/Pe/pn/Pi/v_/y_ are verified by the pinned bundle checksum.
 // In particular v_ and y_ are pure staging selection and multipart preflight;
 // they require no worker, browser or mutable account state.
-const compactionTransportFallback = 'if(!o&&!u&&!c&&!s.localTools&&e.modelId===Wn&&t.proAvailable===!0&&(e._chatgptModelFamily==="6"||e._chatgptModelFamily==="5.6")&&(s.effort==="max"||nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))&&rf(I.text)>Fx)return chooseNativeCompactionTransport(e,t,n,r,s.effort,{compile:Xt,messages:Ai,inputTokens:Nt,messageTokens:gs,textTokens:Pe,skillTokens:pn,imageTokens:Pi,stagingMode:v_,assertMultipart:y_,AdapterError:q});';
+const compactionTransportFallback = 'if(!o&&!u&&!c&&!s.localTools&&e.modelId===Wn&&t.proAvailable===!0&&(e._chatgptModelFamily==="6"||e._chatgptModelFamily==="5.6")&&nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&rf(I.text)>Fx)return chooseNativeCompactionTransport(e,t,n,r,s.effort,{compile:Xt,messages:Ai,inputTokens:Nt,messageTokens:gs,textTokens:Pe,skillTokens:pn,imageTokens:Pi,stagingMode:v_,assertMultipart:y_,AdapterError:q});';
 // Inside reconcileAssistantTurnBinding, after the missing/duplicate binding check
 // and multipart reconciliation. This classifies failure only; it never rebinds.
 const submittedAlertAnchor = 'await this.reconcileMultipartHistory(e,t,i,r);let a=new Set([...n.acceptedTurnIdentities,...t.initialTurnIdentities])';
@@ -77,15 +82,14 @@ const submittedInitialAlertAnchor = 'd=0,h=o?.snapshot();let g=Gi(u.initialTurnI
 const submittedStageBaseline = 'let V=await this.captureSubmissionBaseline(O,z.text,ze);';
 const submittedFinalBaseline = 'let oe=await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),ae=';
 
-// The 275K live multipart test delivered all stages but recovered only 4/12
-// independent markers, even when all stages used Pro. Do not advertise or
-// submit the experimental triple Pro budget until retention is verified.
-// Keep the pinned reference's ordinary Pro boundary (including its reserve).
-export function assertNativeProContext(inputTokens, effort, AdapterError, requiresTrimming = false) {
-  if (effort === 'max' && (requiresTrimming || inputTokens >= 112193)) {
+// The production Pro policy counts the full input including the pinned reserve.
+// Unrecognized models/capabilities retain the previous conservative boundary.
+export function assertNativeProContext(inputTokens, effort, AdapterError, requiresTrimming = false, modelId, family, capabilities) {
+  const limit = nativeProWindowEnabled(modelId, effort, capabilities, family) ? nativeProWindowPolicy().inputCeilingExclusive : 112193;
+  if (effort === 'max' && (requiresTrimming || !Number.isFinite(inputTokens) || inputTokens >= limit)) {
     throw new AdapterError(requiresTrimming
       ? 'Native Pro compaction cannot fit the complete history without dropping records. Reduce the supplied history explicitly or use another verified route; no history was silently removed.'
-      : 'Native Pro input exceeds the guarded 112,193-token context limit. Compact the conversation or reduce its input; larger Pro contexts have not passed retention verification.', {
+      : `Native Pro input must remain below ${limit.toLocaleString('en-US')} tokens including the platform reserve. Compact the conversation or reduce its input.`, {
       status: 400, errorType: 'invalid_request_error', code: 'context_length_exceeded', retryable: false,
     });
   }
@@ -298,10 +302,10 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       .replace(submittedInitialAlert, 'if(magpieSubmittedFailure)throw magpieSubmittedFailure.error;' + submittedInitialAlert)
       .replace(submittedStage, 'let V=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,z.text,ze),A,"stage",E+1,c.multipart.parts.length,z.text);')
       .replace(submittedFinal, 'let oe=rememberNativeMultipartSubmission(await this.captureSubmissionBaseline(O,Be,ze,c.turnToken),A,"commit",c.multipart?.parts.length,c.multipart?.parts.length,M),ae=')
-      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs')
-      .replace(roundGuard, 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{let magpieInput=wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens;assertNativeProContext(magpieInput,y.effort,q);assertNativeSolContext(magpieInput,f.modelId,f._chatgptModelFamily,y.effort,R,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status,errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
-      .replace(solCompileGuard, 'A=T.length,I=v(T);if(s.effort==="max")assertNativeProContext(Nt(I,e.modelId),s.effort,q);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;' + ${JSON.stringify(compactionTransportFallback)})
-      .replace(solTrimGuard, 'if(s.effort==="max"&&b())assertNativeProContext(0,s.effort,q,!0);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
+      .replace(contextGuard, 'else Iu(b,_,e.modelId,a.effort,i,y);assertNativeProContext(b,a.effort,q,!1,e.modelId,e.modelFamily,i);assertNativeSolContext(b,e.modelId,e.modelFamily,a.effort,i,q);let re=this.config.turnTimeoutMs')
+      .replace(roundGuard, 'if(y.effort==="max"||nativeSolContextGuarded(f.modelId,f._chatgptModelFamily,y.effort,R)){try{let magpieInput=wo(w(f),{reasoning:[]},R,c,s,e.chatgptWeb?.appName).inputTokens;assertNativeProContext(magpieInput,y.effort,q,!1,f.modelId,f._chatgptModelFamily,R);assertNativeSolContext(magpieInput,f.modelId,f._chatgptModelFamily,y.effort,R,q)}catch(magpieContextError){if(!(magpieContextError instanceof q))throw magpieContextError;T({type:"error",message:magpieContextError.message,status:magpieContextError.status, errorType:magpieContextError.errorType,code:magpieContextError.code,retryable:!1});return}}let D;if(y.localTools)try{D=m.resolve(f)}')
+      .replace(solCompileGuard, 'A=T.length,I=v(T);if(s.effort==="max")assertNativeProContext(Nt(I,e.modelId),s.effort,q,!1,e.modelId,e._chatgptModelFamily,t);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t))assertNativeSolContext(Nt(I,e.modelId),e.modelId,e._chatgptModelFamily,s.effort,t,q);if(!e._compactionRequest)return I;' + ${JSON.stringify(compactionTransportFallback)})
+      .replace(solTrimGuard, 'if(s.effort==="max"&&b())assertNativeProContext(0,s.effort,q,!0,e.modelId,e._chatgptModelFamily,t);if(nativeSolContextGuarded(e.modelId,e._chatgptModelFamily,s.effort,t)&&b())assertNativeSolContext(0,e.modelId,e._chatgptModelFamily,s.effort,t,q,!0);' + solTrimGuard)
       .replace(markdown, ${JSON.stringify(markdownGfmSetup + 'Vt.addRule("magpieTableCell",{filter:["th","td"],replacement:' + nativeMarkdownTableCell.toString() + '});')})
       .replace(registry, 'var magpieCheckpointPersistence=process.env.MAGPIE_NATIVE_CHECKPOINT_HOME?magpieOpenCheckpoints(process.env.MAGPIE_NATIVE_CHECKPOINT_HOME):null;var Kt=magpieCheckpointPersistence?.map??new Map,dx=256;')
       .replace(remember, 'while(Kt.size>dx)Kt.delete(Kt.keys().next().value);magpieCheckpointPersistence?.commit()}function Nh')
@@ -313,6 +317,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + '\\n' + ${JSON.stringify(createNativeTurnToken.toString())}
       + '\\n' + ${JSON.stringify(nativeTerminalErrorAlert.toString())}
       + '\\n' + ${JSON.stringify(assertNativeProContext.toString())}
+      + '\\n' + ${JSON.stringify(nativeProWindowEnabled.toString())}
+      + '\\n' + ${JSON.stringify(nativeProWindowPolicy.toString())}
       + '\\n' + ${JSON.stringify(nativeSolContextGuarded.toString())}
       + '\\n' + ${JSON.stringify(assertNativeSolContext.toString())}
       + ${JSON.stringify('\nimport { checkpointStore as magpieOpenCheckpoints } from ' + JSON.stringify(new URL('./checkpoints.mjs', import.meta.url).href) + ';')}
@@ -323,6 +329,8 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
       + ${JSON.stringify('\nimport { identityJson } from ' + JSON.stringify(new URL('./identity-json.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { decodeMagpieSummary } from ' + JSON.stringify(new URL('./summary-envelope.mjs', import.meta.url).href) + ';')}
       + ${JSON.stringify('\nimport { nativeSubmittedTerminalAlert, rememberNativeMultipartSubmission } from ' + JSON.stringify(new URL('./submitted-alert.mjs', import.meta.url).href) + ';')};
+    contents += ${JSON.stringify('\nimport { captureNativeHistory, installNativeHistory, dispatchNativeHistory } from ' + JSON.stringify(new URL('./history.mjs', import.meta.url).href) + ';')};
+    contents += ${JSON.stringify('\nimport { chooseNativeProTransport } from ' + JSON.stringify(new URL('./pro-window.mjs', import.meta.url).href) + ';')};
     contents = patchReferenceFixes(contents);
     contents = (${patchNativeBrowserReadiness.toString()})(contents);
     contents = (${patchNativeTokenCopyGuidance.toString()})(contents);
@@ -331,6 +339,12 @@ Bun.plugin({ name: 'magpie-shared-compaction-6.1.18', setup(build) {
     contents = (${patchNativeManagedRetention.toString()})(contents);
     contents = (${patchNativeRetainedBudget.toString()})(contents);
     contents = (${patchNativeAdditionalContext.toString()})(contents);
+    contents = (${patchNativeHistory.toString()})(contents);
+    contents = (${patchNativeProWindow.toString()})(contents);
+    contents = (${patchNativeModelControls.toString()})(contents,
+      [${[nativeDisabledProRow, nativeBoundProTooltip, nativeProQuotaReason, nativeProLockEvidence].map(fn => fn.toString()).join(',')}]);
+    contents = (${patchNativeAccountContinuity.toString()})(contents);
+    contents = (${patchNativeCompactionErrors.toString()})(contents);
     return { contents, loader: 'js' };
   });
 } });

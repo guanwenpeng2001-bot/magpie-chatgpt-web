@@ -5,6 +5,32 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureNative, stopNative } from '../src/native/index.mjs';
 
+test('a newly bound browser queues behind startup without inheriting the old browser result', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-browser-rebind-'));
+  t.after(async () => { await stopNative(); await rm(root, { recursive: true, force: true }); });
+  let unblock, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const held = new Promise(resolve => { unblock = resolve; });
+  const profiles = [];
+  const account = browserProfile => ({ profile: 'stable-route', browserProfile, chromeExecutablePath: 'fixture',
+    context: { id: browserProfile, storageState: async () => ({}) } });
+  const options = { root, install: async () => ({}),
+    provision: async context => {
+      profiles.push(context.id);
+      if (profiles.length === 1) { entered(); await held; }
+      return { tunnelId: 'fixture', runtimeKey: 'fixture', connectorId: 'fixture', linkId: 'fixture' };
+    },
+    createDaemon: () => ({ health: async () => true, start: async () => {}, stop: async () => {} }),
+  };
+  const first = ensureNative(account('old-browser'), options);
+  await started;
+  const second = ensureNative(account('verified-browser'), options);
+  unblock();
+  const [oldRuntime, newRuntime] = await Promise.all([first, second]);
+  assert.notEqual(oldRuntime, newRuntime);
+  assert.deepEqual(profiles, ['old-browser', 'verified-browser']);
+});
+
 for (const recovery of ['next start', 'shutdown retry']) {
   test(`failed startup retains its owner for ${recovery} after cleanup fails`, async t => {
     const root = await mkdtemp(join(tmpdir(), 'native-owner-recovery-'));

@@ -1,0 +1,390 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-17T22:30:54.642Z",
+  "status": "live-postrestart-history-and-command-pass",
+  "testedVersion": "0.5.8",
+  "testedCommit": "0d0b94ad63ccf3d41877cd009454ed5642a4b6d0",
+  "model": "chatgpt-web/native/auto/gpt-6-pro",
+  "sameCompactedChat": true,
+  "threadSha256": "db0e37dc95e497964acbfe2dec0bf9fffe0cb9444e45e943e1f36bce322f9f7a",
+  "userLoginRepeated": false,
+  "userVerificationRepeated": false,
+  "pluginReloadedByNormalInstall": true,
+  "distinctNativeRuns": 3,
+  "priorAndPostInstallNativeRunsObserved": true,
+  "physicalOsRebootTested": false,
+  "command": {
+    "name": "node --test verification.test.mjs",
+    "count": 1,
+    "exit": 0,
+    "testsPassed": 3
+  },
+  "retrieval": {
+    "withheldQuery": "Record 01-0123",
+    "recordIdSha256": "13beef32143f6a048302850cff76d33b44df7a9d70145f2523e36335d852303f",
+    "originalLineSha256": "78d596c245b981551b7181fa0271ca4139790bcbee9adbd98e13f08a4534ca18",
+    "matchedEncryptedToolOutput": true,
+    "matchedOriginalFixtureLine": true,
+    "matchingAccountStores": [
+      {
+        "account": 1,
+        "role": "tool",
+        "type": "function_call_output",
+        "recordChars": 40210,
+        "archiveStats": {
+          "records": 26,
+          "bytes": 332055,
+          "encryptedBytes": 332816,
+          "maxBytes": 33554432,
+          "maxRecords": 16384,
+          "maxReadChars": 12000,
+          "maxSnippetChars": 512
+        }
+      },
+      {
+        "account": 2,
+        "role": "tool",
+        "type": "function_call_output",
+        "recordChars": 40210,
+        "archiveStats": {
+          "records": 28,
+          "bytes": 332529,
+          "encryptedBytes": 333352,
+          "maxBytes": 33554432,
+          "maxRecords": 16384,
+          "maxReadChars": 12000,
+          "maxSnippetChars": 512
+        }
+      }
+    ],
+    "answerNormalization": "Markdown backslash-underscore escaping only",
+    "sampleFilesReadByModel": false,
+    "hashCommandsRunByModel": false,
+    "outerHarnessRecordsInternalHistoryCalls": false
+  },
+  "sourceFiles": [
+    {
+      "path": "backend/browser-profile.mjs",
+      "sha256": "ed2f4d58426eeffc00ae6551310e6ae143372df90d4ef49eba19d6f99a99d16d"
+    },
+    {
+      "path": "backend/browser.mjs",
+      "sha256": "1ce84dddcda368d346d64b80d5cbc48d30387883aee7237cf23d2396c5b4f3a0"
+    },
+    {
+      "path": "backend/conversations.mjs",
+      "sha256": "66279db96fbc437728d656fdf75f33d57022a569779d81bffb0a4223d22ae63c"
+    },
+    {
+      "path": "backend/guard.mjs",
+      "sha256": "5cb028191286f7772be29cfd9442ae31cdc3837851ef7a40833b619c7081f8c8"
+    },
+    {
+      "path": "backend/harvest.mjs",
+      "sha256": "08b33d10f9ea99da2788bd00a34d48f82733ab4f8803df077cdc97c7e47e5d58"
+    },
+    {
+      "path": "backend/http.mjs",
+      "sha256": "6a1590e8b5b5f7647553d6b69bff3f83b782034c7ebd6807ac5bdf6c09a83c45"
+    },
+    {
+      "path": "backend/main.mjs",
+      "sha256": "285b3029144da0a7ce15c345496490bc9e41f4f4f734aaa8c9b4fc0387800bc2"
+    },
+    {
+      "path": "backend/observe.mjs",
+      "sha256": "1aeab641e87441453a5eea39a1d93b3458e3d4657d7e35d2aed7b6d4ccd01328"
+    },
+    {
+      "path": "backend/prompt.mjs",
+      "sha256": "a06049b6a504ab9b6bc604c696f75cd114e3ad4c44ccbb620bf3c3f20675c996"
+    },
+    {
+      "path": "backend/quota.mjs",
+      "sha256": "a85757193be74eb767d9dae67521c83d3e789f714d0b5b4ac96728df55eb3363"
+    },
+    {
+      "path": "backend/site-adapter/compatibility.mjs",
+      "sha256": "2292ea7c4e7eb1c413e823f7d1c7999c42d117303b1d37b39e16910ce711c4e8"
+    },
+    {
+      "path": "backend/site-adapter/images.mjs",
+      "sha256": "5a1c63fa1641fb1d96d6e22a33c58e8437c2a30a3a50b84c0b80dd2d89836166"
+    },
+    {
+      "path": "backend/site-adapter/index.mjs",
+      "sha256": "be9e567a111c6aef655ff045149b0f8dd3b0c2309d2bef29495eade276a04d1d"
+    },
+    {
+      "path": "backend/site-adapter/selectors.mjs",
+      "sha256": "deddc9019cf79d03246510a74210a38eb87435394cc5f8bc72abc3ee7ec27a01"
+    },
+    {
+      "path": "backend/site-adapter/work.mjs",
+      "sha256": "0107a661553c8a354c4ace9bf5fd480caf48e52487d081db13b073abcdc105df"
+    },
+    {
+      "path": "backend/turn.mjs",
+      "sha256": "67f05438143013efb0bc91a72bca05de45e9f103266caa1fd7d2eefc0c9b5da8"
+    },
+    {
+      "path": "src/bridge.mjs",
+      "sha256": "11e81388c3eb60e8d9f7ae6aef106cec475af4e7185ed03d96138df0955ccc8e"
+    },
+    {
+      "path": "src/codex-profile.mjs",
+      "sha256": "bf95b162b363198df7fd3b71ece3bfd55dd63cca232edf00c0b4a6bc43659815"
+    },
+    {
+      "path": "src/errors.mjs",
+      "sha256": "da26255ba7125ec9e5574d4bf51a459c19ffc7c7ceaf857c5217de745a897910"
+    },
+    {
+      "path": "src/hooks/auth.mjs",
+      "sha256": "2a400102f8c9184b5cba0a66a9a46cec27e9cbf07c63a6e4b9f368231825647c"
+    },
+    {
+      "path": "src/hooks/browser-account.mjs",
+      "sha256": "246dfab34b41abc277aa6eeff9d8351f61f119231db2e1983ae4edd11d415709"
+    },
+    {
+      "path": "src/hooks/chat-headers.mjs",
+      "sha256": "7869e5a328507dd5138e4a28ec0826706ee0707027eb029be4c5205b7b2af173"
+    },
+    {
+      "path": "src/hooks/config.mjs",
+      "sha256": "09ab5ba42a2bd43db88012842ef0e4e454cb518836ccc8766884d8581dfcb156"
+    },
+    {
+      "path": "src/hooks/native-setup.mjs",
+      "sha256": "ab724bdb707613c71cdf8e1271306ab86d2e1004eb365bd029b535b142087899"
+    },
+    {
+      "path": "src/hooks/provider.mjs",
+      "sha256": "64d5d45828407d895ed9e990c8a7187d04771e098875f5ab562322ed1ead9439"
+    },
+    {
+      "path": "src/hooks/usage.mjs",
+      "sha256": "88b9f45a0805dd978316cd018cb0ba7727a7bbf9e12b8db6f8bb0b8f0b3ffc98"
+    },
+    {
+      "path": "src/index.mjs",
+      "sha256": "93382054b3c41a951d6f0f5e0fafcaab71662d079b2cea93eff1c45d99761a38"
+    },
+    {
+      "path": "src/loader.mjs",
+      "sha256": "6a94f1dbf5d3c845dc8de8bfa77fc5834de530141fe209ab5c9f5f3d6a935562"
+    },
+    {
+      "path": "src/models.mjs",
+      "sha256": "c26ccb858587aff2272b2d19e36f48f8d3936bdc30ceef67f3f8bda70db156ef"
+    },
+    {
+      "path": "src/native/account-continuity.mjs",
+      "sha256": "9c7237d6d9008ca1ec92a1d50c20bc54221e1385c799716fe1e4cfdaaf069bca"
+    },
+    {
+      "path": "src/native/additional-context.mjs",
+      "sha256": "07521d68f10d2847b5011a45b339611a1c6423ab512117a07bfb4983a871802b"
+    },
+    {
+      "path": "src/native/broker-diagnostics.mjs",
+      "sha256": "b9a4aa06bb7ff5a207cde62ee886959a3e305d1f26cb64c81fd8c3cac8b476ad"
+    },
+    {
+      "path": "src/native/browser-readiness.mjs",
+      "sha256": "b185e41107d43224acafaa57d2da4395aa6b2393da641a816f7a36287054613e"
+    },
+    {
+      "path": "src/native/checkpoints.mjs",
+      "sha256": "820dd6035bd2825001e07fc7436428b95ecbb60001c9ce5b1a4877fa091ebe2e"
+    },
+    {
+      "path": "src/native/compaction-errors.mjs",
+      "sha256": "1050dd0aba17b1507a9357767b49d763ec38d361d014b8b1138331be3b959fb4"
+    },
+    {
+      "path": "src/native/compaction-guidance.mjs",
+      "sha256": "c139468a4b71af654920e98795001b80107062b7a4b68c6afd09cf611b0af1a2"
+    },
+    {
+      "path": "src/native/compaction-transport.mjs",
+      "sha256": "9f1b2b6d7006303c16a62904ef9869c1850af263feced1d217663f92887a1202"
+    },
+    {
+      "path": "src/native/compaction.mjs",
+      "sha256": "237fb5eb86f3a4df23969fd0e7dd8d823743c57d6e61adc5ca8fbfd2157bdaf9"
+    },
+    {
+      "path": "src/native/continuity-profiles.mjs",
+      "sha256": "d5e957b95351a4b9cccb7aa9e2f7e1901cd609e1e634410fa8fa08d8013c6a58"
+    },
+    {
+      "path": "src/native/daemon.mjs",
+      "sha256": "ad9c886c001a0fab4d3361d9f3154b207bfe6ffc368d0937441ccb9914a2335a"
+    },
+    {
+      "path": "src/native/fallback.mjs",
+      "sha256": "20facab6944ca67861ba67fd598fbdfbfb2250fcc1b97dcb2321238e0812f69a"
+    },
+    {
+      "path": "src/native/history-store.mjs",
+      "sha256": "be2b280848d56c777cd15979226a5eb20756cf6f18d0983127635665efa084ec"
+    },
+    {
+      "path": "src/native/history.mjs",
+      "sha256": "abb4e6aad0f33b4aacb91e928361b5231809db3671205a409398fb81c36bbd6f"
+    },
+    {
+      "path": "src/native/hooks.mjs",
+      "sha256": "624eacbaa108ed7dfed6167f25347e20e221f4f5b081e41aaec8cb6063f1a76f"
+    },
+    {
+      "path": "src/native/identity-json.mjs",
+      "sha256": "182ebfafaa5a4896220abd1387fad08a2ac1d6938f141d3ed1ae33b96777e1a2"
+    },
+    {
+      "path": "src/native/index.mjs",
+      "sha256": "f9647259a8f8fcb2524f1c1876b5cebea9e5753cd0cfe0acd5ae92bafd2bf0d7"
+    },
+    {
+      "path": "src/native/middleware.js",
+      "sha256": "f9d6e973d630f9597ed061b829e6fb4a0b172874f275cf3f4ac2162e716c5983"
+    },
+    {
+      "path": "src/native/model-controls.mjs",
+      "sha256": "4f74d065a0241ff7860e326bf8558a6fa4fe64fae67d37fa2ed50195845953ca"
+    },
+    {
+      "path": "src/native/models.mjs",
+      "sha256": "317e7b66e7380dce008fa868e06e85bad1748d21472fa0962e902e7a6cb18737"
+    },
+    {
+      "path": "src/native/ownership-diagnostics.mjs",
+      "sha256": "076dba080afb438f1a9ca6976d254f9709f2e09a6445779009eaecce3f3badff"
+    },
+    {
+      "path": "src/native/pro-window.mjs",
+      "sha256": "e511555ef0f1828fc452b95470e7c2b4165662de28f8938b774cd49398817790"
+    },
+    {
+      "path": "src/native/provenance.mjs",
+      "sha256": "9f2abb73958e682ea9df00f789122cfe9ed7db7b6e3852d57772ee2063d27409"
+    },
+    {
+      "path": "src/native/provision.mjs",
+      "sha256": "0278ecac2fe6205e7419b29da460f61c0824d775a2072791289738c3eecf889d"
+    },
+    {
+      "path": "src/native/reference-fixes.mjs",
+      "sha256": "5f2fbd9897e9dad194f511aa76770729b4c7fd55ddcc4579d2529ce981ced3fd"
+    },
+    {
+      "path": "src/native/response-errors.mjs",
+      "sha256": "a44f28cf9a1c614d48c6ed3c1dc8ef7aae719c4a5b23a1d73be6133381e322e2"
+    },
+    {
+      "path": "src/native/retained-budget.mjs",
+      "sha256": "cfa5b7450ba41501a4656b734013f688536ec63d4447b31cdced4040a488fac5"
+    },
+    {
+      "path": "src/native/retained-host.mjs",
+      "sha256": "77a34e505d0fa289af84538ccd190646996a7f112a77ed8ca28ab8717912913f"
+    },
+    {
+      "path": "src/native/retained-pages.mjs",
+      "sha256": "7c2880ad4d55f54c88889beeb1338a9634781be7b637ffc1f352b8b7310757eb"
+    },
+    {
+      "path": "src/native/runtime.mjs",
+      "sha256": "9456fd0e69cb655067d1a3dbedc93d50a2076da2719c131a5f22dce030d645bb"
+    },
+    {
+      "path": "src/native/setup.mjs",
+      "sha256": "69ac4e89c95b4caa3f99353bd51d7341ad7a7e59982d3c4db4d77324da37467a"
+    },
+    {
+      "path": "src/native/shared-models.mjs",
+      "sha256": "4229b582d7905b87ac1bd8ec1f82fe1ea21b3862f1f1ccfc3398625d7c626cf5"
+    },
+    {
+      "path": "src/native/stream.mjs",
+      "sha256": "87382151337c0b0e94c66f30a12b87516e68fd5c62e2547fa22015891c79e372"
+    },
+    {
+      "path": "src/native/submitted-alert.mjs",
+      "sha256": "04e024c575900c3f2fa6df6ad574bbc9ab862ddeaed5abe0213a7f863a053a51"
+    },
+    {
+      "path": "src/native/summary-envelope.mjs",
+      "sha256": "9db4c9c9235420e1d379fce08e99b40932f4062357449a4b097f6a9276995e23"
+    },
+    {
+      "path": "src/native/token-copy-guidance.mjs",
+      "sha256": "db75810f3e16dac194c792c36713601849c8c96de2e20c54a04302849e3b261c"
+    },
+    {
+      "path": "src/native/tool-discovery.mjs",
+      "sha256": "2fc2f6b6caa5e6b6d9815b01749866008e90fb9f4cd45c1c34741d0c6d1d2d56"
+    },
+    {
+      "path": "src/native/turn-metadata.mjs",
+      "sha256": "994ec6a27e5a9ee404b05c84e30456a46f515b274a637a54eff4ac0af8612bb4"
+    },
+    {
+      "path": "src/native/window-policy.mjs",
+      "sha256": "3d0d0d0e311b430c6217eb47c868247ffc7e4190ac9b90353b4960e4964e5e03"
+    },
+    {
+      "path": "src/tool-emulation.mjs",
+      "sha256": "653aea6900904d9ed0af40cf0b8d2cbc7dee8c958308f7a34b6b0ae6e71d6a8a"
+    },
+    {
+      "path": "src/usage/context.mjs",
+      "sha256": "4ea25b11eedc062a6e152124bd1a643a58b80d4223089ffe664a859b6e362743"
+    },
+    {
+      "path": "src/usage/display.mjs",
+      "sha256": "9a0e3e0e7bd832123f4110fb4fde56bf91e39f3ef73898ca64753a9a6b472a33"
+    },
+    {
+      "path": "src/usage/store.mjs",
+      "sha256": "822611cf53a0dae31bbeb1c268af381f0f6fe29d01e440c72b35e11161bd57ad"
+    },
+    {
+      "path": "src/usage/submission.mjs",
+      "sha256": "893e6e167a0c53c3d44ef9891ebe20577601ac742d027a974c2de5fb1b4e07df"
+    },
+    {
+      "path": "src/wire/prepare.mjs",
+      "sha256": "f126d9ed9a5768281c53252cdde3220c48c54e6fad7686fc6f6fe85a32ff6307"
+    },
+    {
+      "path": "src/wire/sse.mjs",
+      "sha256": "92cb6304429d42953cb44762e236ebd8099a64375b3604aabfe73c10e859a7a5"
+    },
+    {
+      "path": "src/wire/translate.mjs",
+      "sha256": "321521428397d580f2da481c5808b7731f8b3f7d8292e5f315140b34dcec1a59"
+    }
+  ],
+  "normalizedSourceManifestSha256": "cb190f64fa0338c3d2d6e899efc11166c258060ed4993aefdc82c445c4cc2822",
+  "artifacts": [
+    {
+      "name": "058-postrestart-memory.jsonl",
+      "sha256": "aaf300b2556adffcd37606b31a35a0244323a302c1a5b427e007aef41cf66b17"
+    }
+  ],
+  "limitations": [
+    "This is one current-chat retrieval sample, not an exhaustive recall guarantee.",
+    "The separate million-token capacity evidence is offline; this test validates live retrieval after plugin/runtime restart.",
+    "Native history calls are internal to the browser/broker; the returned record id and original line were independently checked against the encrypted store."
+  ],
+  "privacy": {
+    "credentials": false,
+    "accountIdentifiers": false,
+    "rawAnswers": false,
+    "rawOriginalLine": false,
+    "absoluteLocalPaths": false
+  }
+}

@@ -1,0 +1,499 @@
+{
+  "schemaVersion": 1,
+  "status": "offline-pinned-history-capacity-pass",
+  "live": false,
+  "canClaimWebCapacity": false,
+  "onlineRequests": 0,
+  "realSessionsTouched": false,
+  "realAccountFilesRead": false,
+  "pinnedCliSha256": "df24ed1df556e0f51470ad13e48ebded6a4efa345afa165f0f64ead4a3fe87c1",
+  "tokenizer": {
+    "method": "dC().encode_ordinary(text).length",
+    "measurement": "sum of whole original record encodings",
+    "excludes": [
+      "environment metadata",
+      "compaction summary",
+      "tool wrappers",
+      "model input/output reserves"
+    ]
+  },
+  "corpus": {
+    "capacityRecords": 16,
+    "capacityTokens": 1001368,
+    "records": 17,
+    "tokens": 1001380,
+    "utf8Bytes": 6003135,
+    "utf16Chars": 6002959,
+    "sha256": "d2efd8828a14ea4209e56cb509dae51d71439160d2fbae7f71dd23edfd90fdd9",
+    "recordDigests": [
+      {
+        "id": "7c36ee3752534e6fa7cd6db45555a0aa2e9f30072bfecf1d05ea62c16274705c",
+        "tokens": 62578,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "cb560539a7501cef23d697d791ac066c750678d06b72e4e613cc35b0664639b8",
+        "tokens": 62590,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "b429c9a307ccd35a32dc24b49e4736b4248bdae19399d07861efb2c739c6510e",
+        "tokens": 62581,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "39f39d788566041581b0e9cb71184a71c3e10e4b701d79e72a8f2a16d8d420f4",
+        "tokens": 62578,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "ed656e8620ac0f7ed36ca02a93233df79888c64c377e869343207901560bae44",
+        "tokens": 62584,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "e86e54d048f6e13fa329c8a1856afcb6d5b8095006eca96bb6b83fa8ab896316",
+        "tokens": 62587,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "0ce60cb7461116f59c0d7e386082a2f3fc52d19534b57437c7bd6fc688b4e0fe",
+        "tokens": 62575,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "e690fc4f8789aba4c8e75d9506d320a01ff01b19725b3b77f197c525c784d431",
+        "tokens": 62599,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "83f405ccfd080a2f4c834354581bc427ab4a4dde99e50b6ef2e7becdb1bf07d3",
+        "tokens": 62593,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "b4a6e964692cf02966ba5b633848730dcbe6774b3e7ef21760e2acbf51995f01",
+        "tokens": 62578,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "bea6b14d64f00517396f31a0e13aa63a33ec92f969beb55661aa7f9580e311b2",
+        "tokens": 62596,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "c8901fc6be3f7dcd27c4ca1b95db4758b2b1f9c97470597136da2ffeb7604ad3",
+        "tokens": 62593,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "48bfba9ac1230784a4b8d262385d16d3d3bbdfe7e5b233eb4cf5dca289781c63",
+        "tokens": 62590,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "0a6297accdbdbe7deae2aceb48a4c00eb8e18259671538cb8e7894ea5ce64771",
+        "tokens": 62578,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "09b341ff4c000b8fb6827192ca046cca896012b5568f148ced5c3ad4f620714a",
+        "tokens": 62581,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "3d341b01030a16541b23c1866bb3012c6aad3decbc8f538ab015f62f6ac7cd0d",
+        "tokens": 62587,
+        "bytes": 375192,
+        "chars": 375181
+      },
+      {
+        "id": "85213d9768252f2c952a1d2b1e279387c96f08cca4a03d93f1916fbf0262b45b",
+        "tokens": 12,
+        "bytes": 63,
+        "chars": 63
+      }
+    ]
+  },
+  "runs": [
+    {
+      "phase": "ingest",
+      "live": false,
+      "corpus": {
+        "capacityRecords": 16,
+        "capacityTokens": 1001368,
+        "records": 17,
+        "tokens": 1001380,
+        "utf8Bytes": 6003135,
+        "utf16Chars": 6002959,
+        "sha256": "d2efd8828a14ea4209e56cb509dae51d71439160d2fbae7f71dd23edfd90fdd9",
+        "recordDigests": [
+          {
+            "id": "7c36ee3752534e6fa7cd6db45555a0aa2e9f30072bfecf1d05ea62c16274705c",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "cb560539a7501cef23d697d791ac066c750678d06b72e4e613cc35b0664639b8",
+            "tokens": 62590,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "b429c9a307ccd35a32dc24b49e4736b4248bdae19399d07861efb2c739c6510e",
+            "tokens": 62581,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "39f39d788566041581b0e9cb71184a71c3e10e4b701d79e72a8f2a16d8d420f4",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "ed656e8620ac0f7ed36ca02a93233df79888c64c377e869343207901560bae44",
+            "tokens": 62584,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "e86e54d048f6e13fa329c8a1856afcb6d5b8095006eca96bb6b83fa8ab896316",
+            "tokens": 62587,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "0ce60cb7461116f59c0d7e386082a2f3fc52d19534b57437c7bd6fc688b4e0fe",
+            "tokens": 62575,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "e690fc4f8789aba4c8e75d9506d320a01ff01b19725b3b77f197c525c784d431",
+            "tokens": 62599,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "83f405ccfd080a2f4c834354581bc427ab4a4dde99e50b6ef2e7becdb1bf07d3",
+            "tokens": 62593,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "b4a6e964692cf02966ba5b633848730dcbe6774b3e7ef21760e2acbf51995f01",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "bea6b14d64f00517396f31a0e13aa63a33ec92f969beb55661aa7f9580e311b2",
+            "tokens": 62596,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "c8901fc6be3f7dcd27c4ca1b95db4758b2b1f9c97470597136da2ffeb7604ad3",
+            "tokens": 62593,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "48bfba9ac1230784a4b8d262385d16d3d3bbdfe7e5b233eb4cf5dca289781c63",
+            "tokens": 62590,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "0a6297accdbdbe7deae2aceb48a4c00eb8e18259671538cb8e7894ea5ce64771",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "09b341ff4c000b8fb6827192ca046cca896012b5568f148ced5c3ad4f620714a",
+            "tokens": 62581,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "3d341b01030a16541b23c1866bb3012c6aad3decbc8f538ab015f62f6ac7cd0d",
+            "tokens": 62587,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "85213d9768252f2c952a1d2b1e279387c96f08cca4a03d93f1916fbf0262b45b",
+            "tokens": 12,
+            "bytes": 63,
+            "chars": 63
+          }
+        ]
+      },
+      "corpusCaptures": 16,
+      "canonicalProofs": 18,
+      "missingProofRejected": true,
+      "archiveUnchangedByContinuation": false,
+      "archiveSha256": "b7086164bc0dc969226c56338a2854c1ea12c03c7643802655f82fd781b1562c",
+      "stats": {
+        "records": 17,
+        "bytes": 6003135,
+        "encryptedBytes": 6003494,
+        "maxBytes": 33554432,
+        "maxRecords": 16384,
+        "maxReadChars": 12000,
+        "maxSnippetChars": 512
+      },
+      "markerHits": 49,
+      "pages": 513,
+      "pageChars": 12000,
+      "splitSurrogatePages": 16,
+      "recoveredChars": 6002959,
+      "recoveredBytes": 6003135,
+      "recoveredTokens": 1001380,
+      "brokerInvocations": 635,
+      "isolation": {
+        "foreignSearchesEmpty": 49,
+        "foreignReadsNull": 17,
+        "foreignRecords": 1,
+        "reverseDirectionBlocked": true,
+        "scopeArgumentsRejected": 3,
+        "invalidBindingRejected": true
+      },
+      "blockedCalls": [],
+      "diagnostics": {
+        "environmentRecovery": 1,
+        "brokerRegistered": 2,
+        "brokerClaim": 2,
+        "brokerRetired": 2
+      }
+    },
+    {
+      "phase": "reopen",
+      "live": false,
+      "corpus": {
+        "capacityRecords": 16,
+        "capacityTokens": 1001368,
+        "records": 17,
+        "tokens": 1001380,
+        "utf8Bytes": 6003135,
+        "utf16Chars": 6002959,
+        "sha256": "d2efd8828a14ea4209e56cb509dae51d71439160d2fbae7f71dd23edfd90fdd9",
+        "recordDigests": [
+          {
+            "id": "7c36ee3752534e6fa7cd6db45555a0aa2e9f30072bfecf1d05ea62c16274705c",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "cb560539a7501cef23d697d791ac066c750678d06b72e4e613cc35b0664639b8",
+            "tokens": 62590,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "b429c9a307ccd35a32dc24b49e4736b4248bdae19399d07861efb2c739c6510e",
+            "tokens": 62581,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "39f39d788566041581b0e9cb71184a71c3e10e4b701d79e72a8f2a16d8d420f4",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "ed656e8620ac0f7ed36ca02a93233df79888c64c377e869343207901560bae44",
+            "tokens": 62584,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "e86e54d048f6e13fa329c8a1856afcb6d5b8095006eca96bb6b83fa8ab896316",
+            "tokens": 62587,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "0ce60cb7461116f59c0d7e386082a2f3fc52d19534b57437c7bd6fc688b4e0fe",
+            "tokens": 62575,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "e690fc4f8789aba4c8e75d9506d320a01ff01b19725b3b77f197c525c784d431",
+            "tokens": 62599,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "83f405ccfd080a2f4c834354581bc427ab4a4dde99e50b6ef2e7becdb1bf07d3",
+            "tokens": 62593,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "b4a6e964692cf02966ba5b633848730dcbe6774b3e7ef21760e2acbf51995f01",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "bea6b14d64f00517396f31a0e13aa63a33ec92f969beb55661aa7f9580e311b2",
+            "tokens": 62596,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "c8901fc6be3f7dcd27c4ca1b95db4758b2b1f9c97470597136da2ffeb7604ad3",
+            "tokens": 62593,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "48bfba9ac1230784a4b8d262385d16d3d3bbdfe7e5b233eb4cf5dca289781c63",
+            "tokens": 62590,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "0a6297accdbdbe7deae2aceb48a4c00eb8e18259671538cb8e7894ea5ce64771",
+            "tokens": 62578,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "09b341ff4c000b8fb6827192ca046cca896012b5568f148ced5c3ad4f620714a",
+            "tokens": 62581,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "3d341b01030a16541b23c1866bb3012c6aad3decbc8f538ab015f62f6ac7cd0d",
+            "tokens": 62587,
+            "bytes": 375192,
+            "chars": 375181
+          },
+          {
+            "id": "85213d9768252f2c952a1d2b1e279387c96f08cca4a03d93f1916fbf0262b45b",
+            "tokens": 12,
+            "bytes": 63,
+            "chars": 63
+          }
+        ]
+      },
+      "corpusCaptures": 0,
+      "canonicalProofs": 2,
+      "missingProofRejected": false,
+      "archiveUnchangedByContinuation": true,
+      "archiveSha256": "b7086164bc0dc969226c56338a2854c1ea12c03c7643802655f82fd781b1562c",
+      "stats": {
+        "records": 17,
+        "bytes": 6003135,
+        "encryptedBytes": 6003494,
+        "maxBytes": 33554432,
+        "maxRecords": 16384,
+        "maxReadChars": 12000,
+        "maxSnippetChars": 512
+      },
+      "markerHits": 49,
+      "pages": 513,
+      "pageChars": 12000,
+      "splitSurrogatePages": 16,
+      "recoveredChars": 6002959,
+      "recoveredBytes": 6003135,
+      "recoveredTokens": 1001380,
+      "brokerInvocations": 635,
+      "isolation": {
+        "foreignSearchesEmpty": 49,
+        "foreignReadsNull": 17,
+        "foreignRecords": 1,
+        "reverseDirectionBlocked": true,
+        "scopeArgumentsRejected": 3,
+        "invalidBindingRejected": true
+      },
+      "blockedCalls": [],
+      "diagnostics": {
+        "brokerRegistered": 2,
+        "brokerClaim": 2,
+        "brokerRetired": 2
+      }
+    }
+  ],
+  "processRestart": {
+    "distinctProcesses": true,
+    "firstProcessExited": true,
+    "corpusRecaptured": false,
+    "archiveCiphertextUnchanged": true
+  },
+  "limitations": [
+    "Synthetic canonical rollout fixtures only; no real chat, account, browser, model request or live native harness proof.",
+    "Uses the actual pinned dn Broker claim/invoke and MCP conversion with the repository history preload. Broker socket startup is disabled; transport is direct in-process dispatch.",
+    "The million tokens are cumulative original text in a local archive. This does not prove a million-token Web context, server acceptance, model recall or live compaction.",
+    "This checks orderly process exit and reopening, not crash recovery or multiple concurrent writer processes."
+  ],
+  "generatedAt": "2026-11-17T21:58:04.267Z",
+  "sources": [
+    {
+      "path": "scripts/native-history-capacity-probe.mjs",
+      "sha256": "09b3815e62a73737ebf62bd62b5e300452c2ac5d931bece4df836d0cc41814e9"
+    },
+    {
+      "path": "test/fixtures/native-history-capacity-probe-fixture.mjs",
+      "sha256": "be37f75512244a99dd71f109fde3e06a8f82a54c399106334e29c315bda9b752"
+    },
+    {
+      "path": "src/native/history-store.mjs",
+      "sha256": "be2b280848d56c777cd15979226a5eb20756cf6f18d0983127635665efa084ec"
+    },
+    {
+      "path": "src/native/history.mjs",
+      "sha256": "abb4e6aad0f33b4aacb91e928361b5231809db3671205a409398fb81c36bbd6f"
+    },
+    {
+      "path": "src/native/runtime.mjs",
+      "sha256": "94437e25106d9544ed207efca6ea834debcdf01fd05ea1c5904f8f3302cf4af1"
+    },
+    {
+      "path": "src/native/pro-window.mjs",
+      "sha256": "e511555ef0f1828fc452b95470e7c2b4165662de28f8938b774cd49398817790"
+    },
+    {
+      "path": "src/native/account-continuity.mjs",
+      "sha256": "9c7237d6d9008ca1ec92a1d50c20bc54221e1385c799716fe1e4cfdaaf069bca"
+    },
+    {
+      "path": "src/native/model-controls.mjs",
+      "sha256": "af3a6f1de3810f8fee5aa4daa1f163123e309babb1a1415963e0a078e2018776"
+    }
+  ],
+  "sanitization": {
+    "removedFields": [
+      "runs[].pid",
+      "runs[].processNonce"
+    ],
+    "containsRealChatText": false,
+    "containsAccountIdentifiers": false,
+    "containsCredentials": false,
+    "containsAbsoluteLocalPaths": false
+  }
+}

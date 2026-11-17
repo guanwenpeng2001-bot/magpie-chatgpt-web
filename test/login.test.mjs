@@ -50,7 +50,7 @@ test('shared sign-in keeps its Chrome context resident for the following turn', 
     async run(account, operation, signal, options) {
       runs++;
       assert.equal(account, 'fixture');
-      assert.deepEqual(options, { visibleTurns: true });
+      assert.deepEqual(options, { visibleTurns: true, signingIn: true, settleOnAbort: true });
       return operation(fixture.context, signal);
     },
     async closeAccount() { closes++; },
@@ -63,6 +63,28 @@ test('shared sign-in keeps its Chrome context resident for the following turn', 
   assert.equal(runs, 1);
   assert.equal(launches, 0);
   assert.equal(closes, 0);
+});
+
+for (const cancel of [false, true]) test(`saved-account reauthentication preserves active tabs (${cancel ? 'cancel' : 'success'})`, async () => {
+  const fixture = loginFixture();
+  fixture.page.url = () => 'https://chatgpt.com/';
+  const controller = new AbortController();
+  const unrelated = { url: () => 'https://chatgpt.com/c/active-turn',
+    goto: () => assert.fail('reauthentication must not navigate an active turn'),
+    close: () => assert.fail('reauthentication must not close an active turn') };
+  let ownClosed = 0;
+  fixture.page.close = async () => { ownClosed++; };
+  fixture.context.pages = () => [unrelated];
+  fixture.context.newPage = async () => fixture.page;
+  const browser = { run: (_account, operation, signal) => operation(fixture.context, signal),
+    closeAccount: () => assert.fail('borrowed browser must stay alive') };
+  const flow = browserModule.createLoginFlow({ probeSignedIn: async () => {
+    if (cancel) { controller.abort(); return false; }
+    return true;
+  } });
+  const result = await flow('fixture', controller.signal, '.', { browser, preservePages: true });
+  assert.equal(result.state, cancel ? 'cancelled' : 'signed-in');
+  assert.equal(ownClosed, cancel ? 1 : 0);
 });
 
 test('the first default background chat moves visible sign-in Chrome off-screen without replacing its context', async () => {
@@ -119,7 +141,7 @@ test('login mints in the signed-in page and reads HttpOnly rotation after the se
   const page = {
     url: () => 'https://chatgpt.com/', goto: async () => {}, isClosed: () => false,
     getByRole: () => ({ count: async () => 1, first: () => ({ isVisible: async () => true }) }),
-    evaluate: async () => { rotated = true; return { status: 200, headers: {}, body: JSON.stringify({ accessToken, expires: new Date(Date.now() + 86400000).toISOString() }) }; },
+    evaluate: async () => { rotated = true; return { status: 200, headers: {}, body: JSON.stringify({ accessToken, expires: new Date(Date.now() + 86400000).toISOString(), user: { email: 'fixture@example.test' } }) }; },
   };
   context.pages = () => [page];
   context.cookies = async () => [{ name: '__Secure-next-auth.session-token', value: rotated ? after : before, httpOnly: true }];
@@ -186,7 +208,7 @@ function loginFixture() {
   Object.assign(page, {
     url: () => 'http://127.0.0.1/', goto: async () => {}, isClosed: () => closed,
     getByRole: () => ({ count: async () => 1, first: () => ({ isVisible: async () => true }) }),
-    evaluate: async () => ({ status: 200, headers: {}, body: JSON.stringify({ accessToken: 'fixture', expires: new Date(Date.now() + 60000).toISOString() }) }),
+    evaluate: async () => ({ status: 200, headers: {}, body: JSON.stringify({ accessToken: 'fixture', expires: new Date(Date.now() + 60000).toISOString(), user: { email: 'fixture@example.test' } }) }),
   });
   context.pages = () => closed ? [] : [page];
   context.cookies = async () => [{ name: '__Secure-next-auth.session-token', value: 'fixture' }];

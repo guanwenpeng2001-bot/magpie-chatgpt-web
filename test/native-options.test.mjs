@@ -32,7 +32,7 @@ test('provider boolean defaults and ordinary-chat retention are explicit', () =>
   assert.match(temporary.description, /Turn off to save ordinary chats in ChatGPT history/);
 });
 
-test('Bigger Context bounds Pro-capable Sol reasoning and Pro while preserving other tiers', () => {
+test('Bigger Context preserves default 400K Pro and guarded Sol while retaining other tiers', () => {
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
     const rows = nativeCatalog({ solAvailable: true, proAvailable, extraHighAvailable, experimentalBiggerContext: true });
     const expected = {
@@ -40,7 +40,7 @@ test('Bigger Context bounds Pro-capable Sol reasoning and Pro while preserving o
       'gpt-6-sol': proAvailable ? [111193, 95000] : [120000, 110000],
       'gpt-5.6-sol-instant': proAvailable ? [333579, 285000] : [123000, 96000],
       'gpt-5.6-sol': proAvailable ? [111193, 95000] : [270000, 240000],
-      ...(proAvailable ? { 'gpt-6-pro': [112193, 95000], 'gpt-5.6-pro': [112193, 95000] } : {}),
+      ...(proAvailable ? { 'gpt-6-pro': [400000, 230400], 'gpt-5.6-pro': [400000, 230400] } : {}),
     };
     assert.equal(rows.length, Object.keys(expected).length);
     for (const row of rows) {
@@ -73,8 +73,9 @@ test('both Pro-capable Sol reasoning routes keep baseline budgets and honest lab
       }
     }
   }
-  assert.match(authHook({}).options.find(row => row.key === 'native-bigger-context').description,
-    /GPT-6\/GPT-5.6 Sol on Pro-capable accounts retain baseline limits/);
+  const description = authHook({}).options.find(row => row.key === 'native-bigger-context').description;
+  assert.match(description, /Sol on Pro-capable accounts retains its guarded window/);
+  assert.match(description, /Pro automatically uses its own account window and does not need this switch/);
 });
 
 test('native client sends live settings on provision, runtime and site capabilities; effective catalogue wins', async t => {
@@ -205,7 +206,7 @@ test('daemon applies deferred config only on next launch, owns checkpoint home a
 
 
 
-test('Pro selectors keep guarded budgets and names across Bigger Context toggles while preserving 38/40 counts', () => {
+test('Pro selectors keep default 400K budgets and names across Bigger Context toggles while preserving 38/40 counts', () => {
   const source = Object.fromEntries(['gpt-6', 'gpt-5-6', ...Array.from({ length: 16 }, (_, i) => `fixture-${i}`)]
     .map(slug => [slug, { name: slug, limit: { context: 90000 }, variants: {} }]));
   for (const proAvailable of [false, true]) for (const extraHighAvailable of [false, true]) {
@@ -233,8 +234,10 @@ test('Pro selectors keep guarded budgets and names across Bigger Context toggles
     for (const family of ['gpt-6', 'gpt-5.6']) {
       const key = `native/counts/${family}-pro`;
       if (proAvailable) {
-        assert.equal(off[key].limit.context, 105556);
-        assert.equal(on[key].limit.context, 105556);
+        assert.equal(off[key].limit.context, 400000);
+        assert.equal(on[key].limit.context, 400000);
+        assert.equal(off[key].limit.input, 256000);
+        assert.equal(on[key].limit.input, 256000);
         assert.doesNotMatch(off[key].name, /Bigger Context/);
         assert.doesNotMatch(on[key].name, /Bigger Context/);
         assert.deepEqual(on[key], off[key]);
@@ -257,16 +260,17 @@ test('Pro selectors keep guarded budgets and names across Bigger Context toggles
 });
 
 for (const family of ['gpt-6', 'gpt-5.6']) {
-  test(`${family} Pro raw and published limits remain baseline with Bigger Context on or off`, () => {
+  test(`${family} Pro keeps 400K total and 256K prompt capacity with Bigger Context on or off`, () => {
     for (const experimentalBiggerContext of [undefined, false, true]) {
       const rows = nativeCatalog({ solAvailable: true, proAvailable: true, experimentalBiggerContext });
       const pro = rows.find(row => row.slug === `chatgpt-web/${family}-pro`);
-      assert.equal(pro.context_window, 112193);
-      assert.equal(pro.auto_compact_token_limit, 95000);
-      assert.equal(publishedWindow(pro), 105556, 'published context retains the 95K auto-compaction budget');
+      assert.equal(pro.context_window, 400000);
+      assert.equal(pro.auto_compact_token_limit, 230400);
+      assert.equal(publishedWindow(pro), 256000, 'published prompt capacity preserves the 230400 auto-compaction budget');
       assert.deepEqual(pro.supported_reasoning_levels, [{ effort: 'max' }]);
       const descriptor = describeNativeCatalogue(rows, 'guarded')[`native/guarded/${family}-pro`];
-      assert.equal(descriptor.limit.context, 105556, 'array catalogue also advertises the guarded budget');
+      assert.deepEqual(descriptor.limit, { context: 400000, input: 256000, output: 0 });
+      assert.equal(Math.floor(Math.min(descriptor.limit.context, descriptor.limit.input) * 0.95), 243200, 'Codex effective context is 243200');
       assert.doesNotMatch(descriptor.name, /Bigger Context/);
     }
   });

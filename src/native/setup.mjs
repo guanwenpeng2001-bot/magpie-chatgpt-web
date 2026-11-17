@@ -23,7 +23,7 @@ function homeFor(account, root) {
   return join(resolve(root), 'accounts', account.profile);
 }
 export function setupResult(state, stage) {
-  if (state === 'ready') return { state, message: 'Native setup complete. Select this account’s Native tools model.' };
+  if (state === 'ready') return { state, message: 'Native setup complete. Select a Native tools model; automatic selectors can use all eligible configured accounts.' };
   if (state === 'busy') return { state, message: 'Native setup is already running or account ownership is unavailable. Wait for the current setup to finish before retrying.' };
   const safe = Object.hasOwn(stages, stage) ? stage : 'verify';
   return { state: state === 'needed' ? 'needed' : 'failed', stage: safe,

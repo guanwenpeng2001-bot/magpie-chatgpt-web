@@ -108,6 +108,7 @@ async function proCompilerFixture() {
   assert.equal(JSON.stringify(parsed), before, 'selection leaves canonical history untouched');
   assert.equal(native.usage(parsed, { reasoning: [] }, caps, false).inputTokens, native.tokens(automatic, parsed.modelId));
   const completeMultipart = native.compile(parsed, caps, undefined, { experimentalMultipartParts: 6 });
+  assert.equal(completeMultipart.multipart.parts.length, 6, 'explicit six-part requests are preserved');
   assert.equal(completeMultipart.trimmedCompactionMessages, undefined, 'fitting multipart history stays complete');
   assert.deepEqual(completeMultipart, native.rawCompile(parsed, caps, undefined, { experimentalMultipartParts: 6 }));
   for (const compact of [false, true]) for (const parts of [undefined, 6]) {
@@ -117,29 +118,28 @@ async function proCompilerFixture() {
     const large = request(700, compact);
     const unchanged = JSON.stringify(large);
     const full = native.rawCompile({ ...large, _compactionRequest: false }, caps, undefined, options);
-    assert.ok(native.tokens(full, large.modelId) >= 112193, 'complete Pro input exceeds its own baseline');
-    assert.throws(() => native.compile(large, caps, undefined, options), e => contextError(e) && /112,193/.test(e.message));
+    assert.ok(native.tokens(full, large.modelId) >= 112193, 'acceptance control exceeds the former Pro baseline');
+    const accepted = native.compile(large, caps, undefined, options);
+    assert.ok(native.tokens(accepted, large.modelId) < 256000, 'complete transaction fits the production input allocation');
+    assert.equal(accepted.trimmedCompactionMessages, undefined);
+    assert.equal(accepted.multipart.parts.length, parts ?? 2);
+    assert.deepEqual(accepted.multipart.parts.flatMap(part => JSON.parse(part).records)
+      .filter(record => record.kind === 'message').map(record => record.message.content), large.context.messages.map(message => message.content));
     assert.equal(JSON.stringify(large), unchanged);
+    const oversized = request(1900, compact), oversizedBefore = JSON.stringify(oversized);
+    const oversizedFull = native.rawCompile({ ...oversized, _compactionRequest: false }, caps, undefined, options);
+    assert.ok(native.tokens(oversizedFull, oversized.modelId) >= 256000, 'rejection control really exceeds the production allocation');
+    assert.throws(() => native.compile(oversized, caps, undefined, options), e => contextError(e) && /256,000/.test(e.message));
+    assert.equal(JSON.stringify(oversized), oversizedBefore);
   }
   for (const bigger of [false, true]) {
-    assert.throws(() => native.usage(request(700, true), { reasoning: [] }, caps, bigger), contextError);
+    const fitting = request(700, true);
+    assert.equal(native.usage(fitting, { reasoning: [] }, caps, bigger).inputTokens,
+      native.tokens(native.compile(fitting, caps), fitting.modelId));
+    assert.throws(() => native.usage(request(1900, true), { reasoning: [] }, caps, bigger), contextError);
   }
-  // Find a real compiled input between the Sol and Pro ceilings. Pro must not
-  // inherit Sol's smaller boundary, even with the new shared compiler hooks.
-  let low = 2, high = 700;
-  while (low + 1 < high) {
-    const count = Math.floor((low + high) / 2);
-    const sample = request(count, false);
-    const tokens = native.tokens(native.rawCompile(sample, caps), sample.modelId);
-    if (tokens < 112193) low = count;
-    else high = count;
-  }
-  const below = request(low, false);
-  const belowCompiled = native.rawCompile(below, caps);
-  assert.ok(native.tokens(belowCompiled, below.modelId) >= 111193, 'Pro acceptance control crosses the Sol ceiling');
-  assert.deepEqual(native.compile(below, caps), belowCompiled);
-  const above = request(high, true);
-  assert.throws(() => native.compile(above, caps), e => contextError(e) && /112,193/.test(e.message));
+  // The 700-record acceptance controls above cross both former Pro and Sol
+  // ceilings. Exact 255999/256000 guard boundaries live in native-pro-window.
   console.log(`Pro ${family} compiler checks passed`);
 }
 
@@ -177,11 +177,18 @@ async function transportFixture() {
     const contents = Array.from({ length: 6 }, (_, i) => `SPARSE_${i} ${' '.repeat(600_000)} END_${i}`);
     const p = parse(family, effort, [...contents, 'Summarize all records.']);
     const before = JSON.stringify(p);
-    const two = native.compile(p, caps, undefined, { experimentalMultipartParts: 2 });
+    // Raw allocation can produce an over-wide physical stage. Production Pro
+    // now rejects it inside compile, before returning a submission candidate.
+    const two = native.rawCompile(p, caps, undefined, { experimentalMultipartParts: 2 });
     assert.ok(native.tokens(two, p.modelId) < 111193, 'two-part failure is per-message, not the baseline');
     assert.throws(() => validate(two, p), fitError);
+    if (effort === 'max') assert.throws(() => native.compile(p, caps, undefined, { experimentalMultipartParts: 2 }), fitError);
+    else assert.deepEqual(native.compile(p, caps, undefined, { experimentalMultipartParts: 2 }), two);
     const chosen = native.compile(p, caps);
     assert.equal(chosen.multipart.parts.length, 6);
+    const explicitSix = native.compile(p, caps, undefined, { experimentalMultipartParts: 6 });
+    assert.equal(explicitSix.multipart.parts.length, 6);
+    assert.deepEqual(explicitSix, chosen);
     assert.equal(validate(chosen, p).effort, 'max', 'wide atomic stage uses existing Pro staging');
     assert.deepEqual(records(chosen).filter(r => r.kind === 'message').map(r => r.message.content), [...contents, 'Summarize all records.']);
     assert.equal(JSON.stringify(p), before);
